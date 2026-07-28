@@ -303,13 +303,13 @@ export function createSystemDiagnosticsRoute({
       }
     }
     if (trusted && diagnosticAgent?.status?.().configured) {
-      enqueueAnalysis(opened.filter((item) => item.level === 'blad').map((item) => item.id), { deep: false, manual: false });
+      enqueueAnalysis(opened.map((item) => item.id), { deep: false, manual: false });
     }
     return { accepted: events.length, opened, record: recordValue };
   }
 
   async function route(req, url, action) {
-    if (!['diagnostics-ingest', 'diagnostics-central', 'diagnostics-central-update', 'diagnostics-central-analyze'].includes(action)) return null;
+    if (!['diagnostics-ingest', 'diagnostics-checks-sync', 'diagnostics-central', 'diagnostics-central-update', 'diagnostics-central-analyze'].includes(action)) return null;
     if (action === 'diagnostics-ingest') {
       if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const limited = rateLimit?.(req, 'diagnostics-ingest', 180, 60 * 60 * 1000);
@@ -319,9 +319,52 @@ export function createSystemDiagnosticsRoute({
       return respond({ ok: true, accepted: result.accepted, opened: result.opened.length, summary: summary(result.record.items) }, 202);
     }
     if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+    if (action === 'diagnostics-checks-sync') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const limited = rateLimit?.(req, 'diagnostics-checks-sync', 60, 60 * 60 * 1000);
+      if (limited) return limited;
+      const body = await req.json().catch(() => ({}));
+      const checks = (Array.isArray(body.checks) ? body.checks : [])
+        .slice(0, MAX_EVENTS_PER_REQUEST)
+        .map((event) => safeEvent({ ...event, kind: 'autotest' }, now()))
+        .filter(Boolean);
+      const result = await record(checks, { trusted: true });
+      const activeFingerprints = new Set(checks.map((event) => event.fingerprint));
+      const at = now().toISOString();
+      const synchronized = await change((recordValue) => ({
+        ...recordValue,
+        items: recordValue.items.map((item) => (
+          item.kind === 'autotest'
+          && String(item.source || '').startsWith('autotest:')
+          && OPEN_STATUSES.has(item.status)
+          && !activeFingerprints.has(item.fingerprint)
+        ) ? safeItem({
+          ...item,
+          status: 'resolved',
+          resolvedAt: at,
+          resolvedBy: clean(sessionOf(req)?.email || 'pełny autotest', 180),
+          resolution: 'Ponowny pełny autotest potwierdził usunięcie problemu.',
+        }) : item),
+        updatedAt: at,
+      }));
+      return respond({
+        ok: true,
+        accepted: result.accepted,
+        opened: result.opened.length,
+        summary: summary(synchronized.items),
+        agent: diagnosticAgent?.status?.() || { configured: false },
+      }, 202);
+    }
     if (action === 'diagnostics-central') {
       if (req.method !== 'GET') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const version = await readVersioned(RECORD_KEY, {}), recordValue = safeRecord(version.value);
+      if (diagnosticAgent?.status?.().configured) {
+        const idle = recordValue.items
+          .filter((item) => OPEN_STATUSES.has(item.status) && item.analysis.status === 'idle')
+          .slice(0, 10)
+          .map((item) => item.id);
+        if (idle.length) enqueueAnalysis(idle, { deep: false, manual: false });
+      }
       const status = clean(url.searchParams.get('status'), 30), level = clean(url.searchParams.get('level'), 30);
       const limit = Math.max(1, Math.min(500, Number(url.searchParams.get('limit')) || 200));
       const items = recordValue.items

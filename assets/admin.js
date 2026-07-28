@@ -13844,6 +13844,11 @@ let systemDiagTylkoProblemy=true;
 let systemWersjaStan={sprawdzono:false,ladowanie:false,wdrazanie:false,release:null,backendOnline:false,error:""};
 let systemDiagStan={ladowanie:false,sprawdzono:false,sprawdzonoAt:"",error:"",zwolniono:0};
 let systemCentralDiag={loaded:false,loading:false,items:[],summary:{total:0,open:0,errors:0,warnings:0,occurrences:0},agent:{configured:false},updatedAt:"",fetchedAt:"",error:""};
+function systemDokumentTymczasowyHTML(html=""){
+  const template=document.createElement("template");
+  template.innerHTML=String(html||"").trim();
+  return template.content;
+}
 async function systemPobierzCentralneBledy(force=false){
   if(systemCentralDiag.loading||(!force&&systemCentralDiag.loaded&&Date.now()-Date.parse(systemCentralDiag.fetchedAt||0)<60000))return systemCentralDiag;
   if(!maUprawnieniaZapisuChmury())return systemCentralDiag;
@@ -13857,7 +13862,7 @@ async function systemPobierzCentralneBledy(force=false){
 function systemOdswiezCentralnyWidok(){
   if(trasa()!=="/admin/system/logi")return;
   const current=document.querySelector("[data-system-central-workspace]");
-  const next=dokumentTymczasowyHTML(systemCentralnyRejestrHTML()).querySelector("[data-system-central-workspace]");
+  const next=systemDokumentTymczasowyHTML(systemCentralnyRejestrHTML()).querySelector("[data-system-central-workspace]");
   if(!current||!next)return;
   aktualizujWezelStabilnie(current,next,document.activeElement);
 }
@@ -14043,6 +14048,41 @@ function testyDiagnostyczne(){
   dodaj("Wygląd","Konfiguracja banerów",zleBannery.length?"warn":"ok",zleBannery.length?`${zleBannery.length} banerów wymaga sprawdzenia`:`${pobierzBannery().length} poprawnych banerów`);
   return [...t,...ostatniAutotest];
 }
+function diagnostykaProblemyDoAgenta(testy=testyDiagnostyczne()){
+  return testy
+    .filter(item=>["bad","warn"].includes(item.status)&&item.nazwa!=="Centralny rejestr błędów")
+    .map(item=>({
+      level:item.status==="bad"?"blad":"ostrzezenie",
+      message:`${item.nazwa}: ${item.szczegoly}`,
+      source:`autotest:${item.grupa}`,
+      route:`${location.pathname}${location.hash||""}`,
+      release:diagnostykaWersja(),
+      kind:"autotest",
+      at:new Date().toISOString()
+    }));
+}
+async function diagnostykaSynchronizujProblemy(testy=testyDiagnostyczne()){
+  if(!maUprawnieniaZapisuChmury())return false;
+  const checks=diagnostykaProblemyDoAgenta(testy);
+  try{
+    await chmura("diagnostics-checks-sync",{method:"POST",body:{checks},timeout:20000});
+    await systemPobierzCentralneBledy(true);
+    return true;
+  }catch(error){
+    loguj("ostrzezenie","Nie udało się zsynchronizować wyników autotestu z Agentem: "+error.message,"pełny autotest");
+    return false;
+  }
+}
+function diagnostykaStanAgentaDlaKontroli(item={}){
+  const source=`autotest:${item.grupa}`,message=`${item.nazwa}: ${item.szczegoly}`;
+  const problem=(systemCentralDiag.items||[]).find(entry=>entry.source===source&&entry.message===message&&["open","investigating"].includes(entry.status));
+  if(!problem)return"";
+  const status=problem.analysis?.status||"idle";
+  if(status==="completed")return`<span class="diagnostic-agent-state ready">🧠 Analiza gotowa</span>`;
+  if(status==="failed")return`<span class="diagnostic-agent-state failed">⚠️ Agent ponowi analizę</span>`;
+  if(status==="running")return`<span class="diagnostic-agent-state">🧠 Agent analizuje</span>`;
+  return`<span class="diagnostic-agent-state">🧠 W kolejce Agenta</span>`;
+}
 function wynikKondycji(testy=testyDiagnostyczne()){
   const bad=testy.filter(x=>x.status==="bad").length, warn=testy.filter(x=>x.status==="warn").length;
   return Math.max(0,Math.min(100,100-bad*12-warn*4));
@@ -14149,16 +14189,16 @@ function systemDiagnostykaHTML(){
   return `<section class="system-summary-grid info-grid"><article class="info-card"><small>Kondycja</small><b>${wynik}%</b><span>${wynik>=90?"bardzo dobra":wynik>=70?"dobra":"wymaga działania"}</span></article><article class="info-card"><small>Błędy</small><b>${bad}</b><span>wymagają naprawy</span></article><article class="info-card"><small>Ostrzeżenia</small><b>${warn}</b><span>do sprawdzenia</span></article><article class="info-card"><small>Kontrole</small><b>${wszystkie.length}</b><span>pełny zakres systemu</span></article></section>
   <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Integralność i integracje</span><h1>🩺 Diagnostyka systemu</h1><p>Najpierw pokazujemy tylko problemy, aby nie zasłaniać czynności wymagających uwagi.</p></div><div><button class="btn ghost" onclick="systemDiagTylkoProblemy=!systemDiagTylkoProblemy;renderuj()">${systemDiagTylkoProblemy?"Pokaż wszystkie kontrole":"Pokaż tylko problemy"}</button><button class="btn" onclick="uruchomAutotest()" ${systemDiagStan.ladowanie?"disabled":""}>${systemDiagStan.ladowanie?"⏳ Sprawdzam…":"🧪 Pełny autotest"}</button></div></div>
     ${systemDiagStan.ladowanie?`<div class="backend-note"><b>Trwa kontrola na żywo:</b> backend, PostgreSQL, InPost, Gmail, wydanie atomowe i pamięć przeglądarki.</div>`:""}
-    ${testy.length?`<div class="system-check-list test-list">${testy.map(x=>`<article class="test-row ${x.status}"><span>${x.status==="ok"?"✅":x.status==="warn"?"⚠️":x.status==="pending"?"⏳":"❌"}</span><div><small>${esc(x.grupa)}</small><b>${esc(x.nazwa)}</b><p>${esc(x.szczegoly)}</p></div><em class="test-status ${x.status}">${x.status==="ok"?"OK":x.status==="warn"?"UWAGA":x.status==="pending"?"SPRAWDZAM":"BŁĄD"}</em></article>`).join("")}</div>`:systemDiagStan.ladowanie?`<div class="system-empty order-empty"><span>⏳</span><b>Sprawdzam stan na serwerze</b><p>Wynik pojawi się po zakończeniu kontroli usług.</p></div>`:`<div class="system-empty order-empty"><span>✅</span><b>Brak problemów wymagających działania</b><p>Wszystkie kontrole zakończyły się poprawnie.</p></div>`}
+    ${testy.length?`<div class="system-check-list test-list">${testy.map(x=>`<article class="test-row ${x.status}"><span>${x.status==="ok"?"✅":x.status==="warn"?"⚠️":x.status==="pending"?"⏳":"❌"}</span><div><small>${esc(x.grupa)}</small><b>${esc(x.nazwa)}</b><p>${esc(x.szczegoly)}</p>${diagnostykaStanAgentaDlaKontroli(x)}</div><em class="test-status ${x.status}">${x.status==="ok"?"OK":x.status==="warn"?"UWAGA":x.status==="pending"?"SPRAWDZAM":"BŁĄD"}</em></article>`).join("")}</div>`:systemDiagStan.ladowanie?`<div class="system-empty order-empty"><span>⏳</span><b>Sprawdzam stan na serwerze</b><p>Wynik pojawi się po zakończeniu kontroli usług.</p></div>`:`<div class="system-empty order-empty"><span>✅</span><b>Brak problemów wymagających działania</b><p>Wszystkie kontrole zakończyły się poprawnie.</p></div>`}
   </section>
   <section class="panel system-repair sug"><span>🧹</span><div><b>Bezpieczna naprawa spójności</b><small>Usuwa wyłącznie osierocone odwołania i duplikaty techniczne. Nie usuwa prawidłowych produktów ani zamówień.</small></div><button class="btn ghost" onclick="naprawDaneSklepu()">Sprawdź i napraw dane</button></section>`;
 }
 function systemCentralnyRejestrHTML(){
   const poziom={blad:"BŁĄD",ostrzezenie:"UWAGA"},wszystkie=systemCentralDiag.items||[],statusPasuje=item=>filtrStatusuCentralnegoDiag==="wszystkie"||(filtrStatusuCentralnegoDiag==="otwarte"?["open","investigating"].includes(item.status):["resolved","ignored"].includes(item.status));
-  const centralne=wszystkie.filter(statusPasuje).filter(item=>filtrLogowDiag==="wszystkie"||item.level===filtrLogowDiag).filter(item=>!szukajLogowDiag||(`${item.message} ${item.source} ${item.route}`).toLowerCase().includes(szukajLogowDiag)),summary=systemCentralDiag.summary||{},agent=systemCentralDiag.agent||{},otwarteBledy=wszystkie.filter(item=>item.level==="blad"&&["open","investigating"].includes(item.status)).map(item=>item.id),archiwum=Math.max(0,Number(summary.total||wszystkie.length)-Number(summary.open||0));
+  const centralne=wszystkie.filter(statusPasuje).filter(item=>filtrLogowDiag==="wszystkie"||item.level===filtrLogowDiag).filter(item=>!szukajLogowDiag||(`${item.message} ${item.source} ${item.route}`).toLowerCase().includes(szukajLogowDiag)),summary=systemCentralDiag.summary||{},agent=systemCentralDiag.agent||{},otwarteProblemy=wszystkie.filter(item=>["open","investigating"].includes(item.status)).map(item=>item.id),archiwum=Math.max(0,Number(summary.total||wszystkie.length)-Number(summary.open||0));
   const analizaHTML=item=>{const a=item.analysis||{},status=a.status||"idle";if(status==="idle")return"";if(["queued","running"].includes(status))return`<div class="backend-note"><b>Najmocniejszy agent:</b> ${status==="queued"?"oczekuje w kolejce":"analizuje dowody"} • ${esc(a.model||agent.model||"OpenAI")}</div>`;if(status==="failed")return`<div class="backend-note warn"><b>Analiza nieudana:</b> ${esc(a.error||"brak wyniku")}</div>`;return`<details class="backend-note"><summary><b>Analiza AI:</b> ${esc(a.summary||a.classification||"gotowa")} • pewność ${Math.round(Number(a.confidence||0)*100)}%</summary><p><b>Przyczyna:</b> ${esc(a.rootCause||"—")}</p>${a.evidence?.length?`<p><b>Dowody:</b> ${a.evidence.map(esc).join(" • ")}</p>`:""}${a.recommendedActions?.length?`<p><b>Zalecane działania:</b> ${a.recommendedActions.map(x=>esc(x.action)).join(" • ")}</p>`:""}${a.validationPlan?.length?`<p><b>Weryfikacja:</b> ${a.validationPlan.map(esc).join(" • ")}</p>`:""}<small>${esc(a.model||"")} • reasoning ${esc(a.reasoning||"")} • ${esc(systemDataCzas(a.analyzedAt))}</small></details>`};
   return `<div class="system-central-workspace" data-system-central-workspace><section class="system-summary-grid info-grid"><article class="info-card"><small>Aktywne problemy</small><b>${summary.open||0}</b><span>${summary.open?"wymagają działania":"system nie zgłasza problemów"}</span></article><article class="info-card"><small>Błędy</small><b>${summary.errors||0}</b><span>otwarte ze wszystkich urządzeń</span></article><article class="info-card"><small>Ostrzeżenia</small><b>${summary.warnings||0}</b><span>otwarte i zgrupowane</span></article><article class="info-card"><small>Archiwum</small><b>${archiwum}</b><span>rozwiązanych lub pominiętych</span></article></section>
-  <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Monitoring VPS + OpenAI Agents SDK</span><h1>🛰️ Centralny rejestr problemów</h1><p>Błędy są grupowane według przyczyny. Aktywne sprawy są oddzielone od rozwiązanych, aby licznik pokazywał wyłącznie rzeczy wymagające działania.</p></div><div><button class="btn" onclick='systemAnalizujBledy(${JSON.stringify(otwarteBledy)})' ${!agent.configured||!otwarteBledy.length?"disabled":""}>🧠 Analizuj błędy</button><button class="btn ghost" onclick="systemOdswiezCentralneBledy(true)" ${systemCentralDiag.loading?"disabled":""}>${systemCentralDiag.loading?"⏳ Pobieram…":"↻ Odśwież"}</button></div></div>
+  <section class="panel"><div class="system-section-head order-section-head"><div><span class="order-pro-label">Monitoring VPS + OpenAI Agents SDK</span><h1>🛰️ Centralny rejestr problemów</h1><p>Błędy i ostrzeżenia z pełnego autotestu są grupowane według przyczyny, automatycznie analizowane i zamykane dopiero po poprawnym ponownym teście.</p></div><div><button class="btn" onclick='systemAnalizujBledy(${JSON.stringify(otwarteProblemy)})' ${!agent.configured||!otwarteProblemy.length?"disabled":""}>🧠 Ponów analizę problemów</button><button class="btn ghost" onclick="systemOdswiezCentralneBledy(true)" ${systemCentralDiag.loading?"disabled":""}>${systemCentralDiag.loading?"⏳ Pobieram…":"↻ Odśwież"}</button></div></div>
   <nav class="system-central-tabs" aria-label="Status problemów"><button class="${filtrStatusuCentralnegoDiag==="otwarte"?"active":""}" onclick="systemUstawFiltrCentralny('otwarte')">Aktywne <b>${summary.open||0}</b></button><button class="${filtrStatusuCentralnegoDiag==="zakonczone"?"active":""}" onclick="systemUstawFiltrCentralny('zakonczone')">Archiwum <b>${archiwum}</b></button><button class="${filtrStatusuCentralnegoDiag==="wszystkie"?"active":""}" onclick="systemUstawFiltrCentralny('wszystkie')">Wszystkie <b>${summary.total||wszystkie.length}</b></button><span>${systemCentralDiag.fetchedAt?`Sprawdzono ${esc(systemDataCzas(systemCentralDiag.fetchedAt))}`:"Jeszcze nie sprawdzono"}</span></nav>
   ${centralne.length?`<div class="system-log-table log-table-wrap"><table class="log-table"><thead><tr><th>Ostatnio</th><th>Poziom</th><th>Problem i analiza</th><th>Wystąpienia</th><th>Status</th><th>Działanie</th></tr></thead><tbody>${centralne.map(item=>`<tr><td>${esc(systemDataCzas(item.lastSeenAt))}<small>${esc(item.release||"wydanie nieznane")}</small></td><td><span class="lvl lvl-${item.level}">${poziom[item.level]||esc(item.level)}</span></td><td><b>${esc(item.message)}</b><small>${esc([item.source,item.route].filter(Boolean).join(" • "))}</small>${analizaHTML(item)}</td><td>${esc(item.count||1)}</td><td>${esc(item.status==="open"?"otwarty":item.status==="investigating"?"w analizie":item.status==="resolved"?"rozwiązany":"pominięty")}</td><td>${["resolved","ignored"].includes(item.status)?`<button class="btn ghost" onclick="systemUstawStatusBledu('${esc(item.id)}','open')">Otwórz ponownie</button>`:`<button class="btn ghost" onclick="systemAnalizujBledy('${esc(item.id)}')" ${!agent.configured?"disabled":""}>Analizuj</button><button class="btn" onclick="systemUstawStatusBledu('${esc(item.id)}','resolved')">Rozwiązane</button><button class="btn ghost" onclick="systemUstawStatusBledu('${esc(item.id)}','ignored')">Pomiń</button>`}</td></tr>`).join("")}</tbody></table></div>`:`<div class="system-empty order-empty"><span>${systemCentralDiag.loading?"⏳":"✅"}</span><b>${systemCentralDiag.loading?"Pobieram wspólny rejestr":filtrStatusuCentralnegoDiag==="otwarte"?"Brak aktywnych problemów":filtrStatusuCentralnegoDiag==="zakonczone"?"Archiwum jest puste":"Brak centralnie zarejestrowanych problemów"}</b><p>${systemCentralDiag.error?esc(systemCentralDiag.error):filtrStatusuCentralnegoDiag==="otwarte"?"Rozwiązane zdarzenia są dostępne w archiwum.":"Nowe błędy pojawią się tu automatycznie, niezależnie od urządzenia."}</p></div>`}</section></div>`;
 }
@@ -14219,7 +14259,7 @@ function importujKopieDanych(e){
   }catch(bl){toast("⚠️ Nie udało się wczytać kopii: "+bl.message);}};
   r.readAsText(plik);
 }
-function naprawDaneSklepu(){
+async function naprawDaneSklepu({cicho=false,renderujPo=true}={}){
   naprawKolizjeIdProduktow();
   zbudujProdukty();
   const widoczne=new Set(produkty.map(p=>p.id)), wszystkie=new Set(produktyDoAdministracji().map(p=>p.id));
@@ -14230,10 +14270,17 @@ function naprawDaneSklepu(){
   const menuKategorii=grupyMenuKategorii().map(g=>({...g,kategorie:g.kategorie.filter(k=>kat.has(k))})).filter(g=>g.nazwa);
   const uzytkownicy=pobierzUzytkownikow().filter((u,i,a)=>u.email&&a.findIndex(x=>x.email===u.email)===i);
   zapiszLS("artway_koszyk",koszyk);zapiszLS("artway_ulubione",ulubione);
-  zapiszLS("artway_uzytkownicy",uzytkownicy);ustawienia={...ustawienia,mapaProduktow:mapa,menuKategorii};zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});void chmuraDodajMutacjePolUstawien({mapaProduktow:mapa,menuKategorii});
-  zbudujProdukty();odswiezKoszyk();odswiezUlubioneLicznik();loguj("info","Wykonano naprawę spójności danych");toast("Dane zostały sprawdzone i naprawione ✅");renderuj();
+  zapiszLS("artway_uzytkownicy",uzytkownicy);ustawienia={...ustawienia,mapaProduktow:mapa,menuKategorii};zapiszLS("artway_ustawienia",ustawienia,{synchronizuj:false});
+  await chmuraDodajMutacjePolUstawien({mapaProduktow:mapa,menuKategorii}).catch(error=>loguj("ostrzezenie","Naprawiono dane lokalne, ale zapis serwerowy wymaga ponowienia: "+error.message,"naprawa spójności"));
+  zbudujProdukty();odswiezKoszyk();odswiezUlubioneLicznik();loguj("info","Wykonano naprawę spójności danych");
+  if(!cicho)toast("Dane zostały sprawdzone i naprawione ✅");
+  if(renderujPo)renderuj();
 }
 async function uruchomAutotest(){
+  if(systemDiagStan.ladowanie)return;
+  systemDiagStan={...systemDiagStan,ladowanie:true,error:""};
+  if(trasa().startsWith("/admin/system"))renderuj();
+  try{
   ostatniAutotest=[];const dodaj=(nazwa,status,szczegoly)=>ostatniAutotest.push({grupa:"Autotest techniczny",nazwa,status,szczegoly});
   try{localStorage.setItem("artway_test","1");const ok=localStorage.getItem("artway_test")==="1";localStorage.removeItem("artway_test");dodaj("Zapis i odczyt pamięci",ok?"ok":"bad",ok?"Pamięć działa":"Brak możliwości zapisu");}catch(e){dodaj("Zapis i odczyt pamięci","bad",e.message);}
   try{const h=await hashuj("test");dodaj("Szyfrowanie haseł",h.length===64?"ok":"warn",h.length===64?"SHA-256 dostępne":"Użyto mechanizmu zapasowego");}catch(e){dodaj("Szyfrowanie haseł","bad",e.message);}
@@ -14241,12 +14288,23 @@ async function uruchomAutotest(){
   const widoki=[["Sklep",()=>widokSklep()],["Kontakt",()=>widokKontakt()],["FAQ",()=>widokFAQ()],["Dostawa",()=>widokDostawa()],["Katalog administratora",()=>widokAdminProdukty()]],bledyWidokow=[];
   for(const [nazwa,fn] of widoki){try{const html=fn();if(typeof html!=="string"||html.length<=100)bledyWidokow.push(`${nazwa}: niepełny wynik`);}catch(error){bledyWidokow.push(`${nazwa}: ${error.message||error}`);}}
   dodaj("Renderowanie głównych widoków",bledyWidokow.length?"bad":"ok",bledyWidokow.length?bledyWidokow.join(" • "):"Sprawdzono 5 kluczowych ekranów");
+  const bezpieczneProblemy=testyDiagnostyczne().filter(item=>["Spójność koszyka","Spójność ulubionych","Spójność mapowania"].includes(item.nazwa)&&["bad","warn"].includes(item.status));
+  if(bezpieczneProblemy.length)await naprawDaneSklepu({cicho:true,renderujPo:false});
   const problemy=ostatniAutotest.filter(item=>["bad","warn"].includes(item.status));
   if(problemy.length)problemy.forEach(item=>loguj(item.status==="bad"?"blad":"ostrzezenie",`${item.nazwa}: ${item.szczegoly}`,"pełny autotest"));
   else loguj("info","Pełny autotest zakończony: wszystkie 4 obszary działają poprawnie","pełny autotest");
   await diagnostykaWyslijKolejke();
+  await diagnostykaSynchronizujProblemy(testyDiagnostyczne());
   await systemPobierzCentralneBledy(true);
-  renderuj();
+  systemDiagStan={...systemDiagStan,ladowanie:false,sprawdzono:true,sprawdzonoAt:new Date().toISOString(),error:""};
+  }catch(error){
+    systemDiagStan={...systemDiagStan,ladowanie:false,sprawdzono:true,sprawdzonoAt:new Date().toISOString(),error:error.message||String(error)};
+    loguj("blad","Pełny autotest nie został dokończony: "+systemDiagStan.error,"pełny autotest");
+    toast("Autotest wymaga ponowienia: "+systemDiagStan.error);
+  }finally{
+    systemDiagStan={...systemDiagStan,ladowanie:false};
+    renderuj();
+  }
 }
 
 let systemSerwerStan={loaded:false,loading:false,status:null,plan:null,error:"",cleaning:false};

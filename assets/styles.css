@@ -293,6 +293,9 @@ body.hide-home-contact .home-contact{display:none}
 .test-list{display:grid;gap:.45rem;margin-top:.7rem}
 .test-row{display:grid;grid-template-columns:28px 1fr auto;gap:.55rem;align-items:start;padding:.65rem .75rem;background:var(--bg);border-radius:10px;font-size:.84rem}
 .test-row small{color:var(--muted2);display:block;margin-top:.15rem}
+.diagnostic-agent-state{display:inline-flex;align-items:center;gap:.3rem;margin-top:.45rem;padding:.22rem .5rem;border:1px solid color-mix(in srgb,var(--accent) 28%,transparent);border-radius:999px;background:color-mix(in srgb,var(--accent) 8%,var(--card));color:var(--accent);font-size:.7rem;font-weight:800;line-height:1.2}
+.diagnostic-agent-state.ready{border-color:color-mix(in srgb,#168553 30%,transparent);background:color-mix(in srgb,#168553 8%,var(--card));color:#168553}
+.diagnostic-agent-state.failed{border-color:color-mix(in srgb,#c56a09 32%,transparent);background:color-mix(in srgb,#c56a09 8%,var(--card));color:#a95705}
 .test-status{font-weight:800;font-size:.75rem}
 .test-status.ok{color:var(--ok)}
 .test-status.warn{color:#b45309}

@@ -140,6 +140,53 @@ test('pełny rejestr centralny jest dostępny wyłącznie administratorowi', asy
   assert.equal(body.summary.errors, 1);
 });
 
+test('pełny autotest przekazuje Agentowi błędy i ostrzeżenia oraz zamyka ustąpione kontrole', async () => {
+  const analyzed = [];
+  const diagnosticAgent = {
+    status: () => ({ configured: true, model: 'gpt-5.4-mini' }),
+    analyze: async (item) => {
+      analyzed.push(item.id);
+      return {
+        classification: 'data_conflict',
+        rootCause: 'Osierocone odwołanie.',
+        confidence: 0.9,
+        evidence: [item.message],
+        recommendedActions: [{ action: 'Usunąć wyłącznie osierocone odwołanie.', risk: 'low', automatic: true }],
+        validationPlan: ['Ponowić pełny autotest.'],
+        safeAutomaticAction: 'retry_read_only_check',
+        requiresHumanApproval: false,
+        summary: 'Kontrola spójności wymaga naprawy.',
+      };
+    },
+  };
+  const { service, record } = fixture({ diagnosticAgent });
+  const first = new Request('https://artwaytm.pl/api/store?action=diagnostics-checks-sync', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin': '1' },
+    body: JSON.stringify({ checks: [
+      { level: 'blad', message: 'Renderowanie: błąd widoku', source: 'autotest:Widoki', kind: 'autotest' },
+      { level: 'ostrzezenie', message: 'Spójność koszyka: 2 odwołania', source: 'autotest:Dane', kind: 'autotest' },
+    ] }),
+  });
+  const firstResponse = await service.route(first, new URL(first.url), 'diagnostics-checks-sync');
+  assert.equal(firstResponse.status, 202);
+  assert.equal((await json(firstResponse)).summary.open, 2);
+  for (let attempt = 0; attempt < 30 && analyzed.length < 2; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(analyzed.length, 2);
+
+  const second = new Request('https://artwaytm.pl/api/store?action=diagnostics-checks-sync', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-admin': '1' },
+    body: JSON.stringify({ checks: [] }),
+  });
+  const secondResponse = await service.route(second, new URL(second.url), 'diagnostics-checks-sync');
+  assert.equal((await json(secondResponse)).summary.open, 0);
+  assert.ok(record().items.every((item) => item.status === 'resolved'));
+  assert.ok(record().items.every((item) => /autotest/i.test(item.resolution)));
+});
+
 test('frontend wysyła błędy do VPS i autotest zapisuje nazwę nieudanej kontroli', async () => {
   const runtime = await import('node:fs/promises').then((fs) => fs.readFile('src/frontend/02-runtime-state.js', 'utf8'));
   const diagnostics = await import('node:fs/promises').then((fs) => fs.readFile('src/frontend/16-diagnostics.js', 'utf8'));
@@ -150,6 +197,8 @@ test('frontend wysyła błędy do VPS i autotest zapisuje nazwę nieudanej kontr
   assert.match(runtime, /diagnostics-ingest/);
   assert.match(runtime, /DIAGNOSTYKA_KOLEJKA_KEY/);
   assert.match(diagnostics, /Centralny rejestr błędów/);
+  assert.match(diagnostics, /diagnostics-checks-sync/);
+  assert.match(diagnostics, /systemDokumentTymczasowyHTML/);
   assert.match(diagnostics, /fetchedAt/);
   assert.doesNotMatch(diagnostics, /systemPobierzCentralneBledy\(true\)\.then\(renderuj\)/);
   assert.match(diagnostics, /item\.nazwa.*item\.szczegoly/s);
