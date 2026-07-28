@@ -263,6 +263,31 @@ test('klient API wykonuje rzeczywisty OAuth i test endpointu bez ujawniania sekr
   assert.equal(JSON.stringify(result).includes('top-secret'), false);
 });
 
+test('klient API zachowuje prefiks ścieżki produkcyjnego adresu bazowego', async () => {
+  const calls = [];
+  const env = {
+    INPOST_VON_HALSKY_API_BASE_URL: 'https://api.inpost-group.com/inpsa/',
+    INPOST_VON_HALSKY_AUTH_URL: 'https://auth.example.test/token',
+    INPOST_VON_HALSKY_CLIENT_ID: 'client',
+    INPOST_VON_HALSKY_CLIENT_SECRET: 'secret',
+    INPOST_VON_HALSKY_MERCHANT_ID: 'merchant',
+    INPOST_VON_HALSKY_HEALTH_PATH: '/v1/offers',
+    INPOST_VON_HALSKY_CATALOG_PATH: '/v1/offers/batch',
+    INPOST_VON_HALSKY_ORDERS_PATH: '/v1/orders',
+    INPOST_VON_HALSKY_CONTRACT_VERSION: '1.5.8',
+  };
+  const client = createVonHalskyApiClient({
+    env,
+    fetchImpl: async (url) => {
+      calls.push(String(url));
+      if (String(url).includes('/token')) return new Response(JSON.stringify({ access_token: 'token', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ data: [], page: { limit: 30, offset: 0, total: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  await client.listOffers();
+  assert.equal(new URL(calls[1]).pathname, '/inpsa/v1/offers');
+});
+
 test('route zapisuje konfigurację i uczciwie zgłasza brak danych prywatnego API', async () => {
   let state;
   let revision = 0;
@@ -297,7 +322,7 @@ test('route zapisuje konfigurację i uczciwie zgłasza brak danych prywatnego AP
   assert.equal(scheduled.body.reason, 'not-configured');
 });
 
-test('harmonogram respektuje wyłączoną automatyzację ceny i stanu oraz zapisuje request ID', async () => {
+test('tryb testowy tworzy tylko dozwoloną ofertę w schemacie kontraktu i zapisuje request ID', async () => {
   let state;
   let revision = 0;
   let catalogPayload;
@@ -314,8 +339,9 @@ test('harmonogram respektuje wyłączoną automatyzację ceny i stanu oraz zapis
   };
   const fetchImpl = async (url, options = {}) => {
     if (String(url).includes('/token')) return new Response(JSON.stringify({ access_token: 'token', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if ((options.method || 'GET') === 'GET') return new Response(JSON.stringify({ data: [], page: { limit: 30, offset: 0, total: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } });
     catalogPayload = JSON.parse(options.body);
-    return new Response(JSON.stringify({ accepted: 1 }), { status: 202, headers: { 'content-type': 'application/json', 'x-request-id': 'catalog-req-7' } });
+    return new Response(JSON.stringify([{ commandId: '11111111-1111-4111-8111-111111111111', offerId: '22222222-2222-4222-8222-222222222222', externalId: 'P-7' }]), { status: 201, headers: { 'content-type': 'application/json', 'x-request-id': 'catalog-req-7' } });
   };
   const respond = (body, status = 200) => ({ body, status });
   const route = createVonHalskyRoute({
@@ -334,11 +360,13 @@ test('harmonogram respektuje wyłączoną automatyzację ceny i stanu oraz zapis
       zdjecie: '/one.webp',
       cena: 39.9,
       stan: 8,
+      vonHalskyCategoryId: '33333333-3333-4333-8333-333333333333',
     }],
+    saveProductFields: async () => ({ confirmed: true }),
   });
   const settingsRequest = new Request('https://artwaytm.pl/api?action=von-halsky-settings', {
     method: 'POST',
-    body: JSON.stringify({ automaticPriceSync: false, automaticStockSync: false }),
+    body: JSON.stringify({ automaticPriceSync: false, automaticStockSync: false, testOfferCode: 'P-7' }),
   });
   await route(settingsRequest, new URL(settingsRequest.url), 'von-halsky-settings');
   const syncRequest = new Request('https://artwaytm.pl/api?action=von-halsky-sync-catalog', {
@@ -348,8 +376,11 @@ test('harmonogram respektuje wyłączoną automatyzację ceny i stanu oraz zapis
   const result = await route(syncRequest, new URL(syncRequest.url), 'von-halsky-sync-catalog');
   assert.equal(result.status, 200);
   assert.equal(result.body.sent, 1);
-  assert.equal('price' in catalogPayload.items[0], false);
-  assert.equal('stock' in catalogPayload.items[0], false);
+  assert.equal(Array.isArray(catalogPayload), true);
+  assert.equal(catalogPayload[0].product.categoryId, '33333333-3333-4333-8333-333333333333');
+  assert.deepEqual(catalogPayload[0].stock, { quantity: 8, unit: 'UNIT' });
+  assert.equal(catalogPayload[0].price.grossPrice.amount, 39.9);
+  assert.equal(catalogPayload[0].price.taxRateInfo, '23%');
   assert.equal(result.body.sync.lastRequestId, 'catalog-req-7');
 });
 
@@ -370,6 +401,7 @@ test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny 
     id: 'P-17', externalId: 'EXT-17', nazwa: 'Alexander Gra edukacyjna',
     opis: 'Pełny i prawdziwy opis produktu zawierający cechy, przeznaczenie oraz zawartość potrzebną klientowi do świadomego wyboru produktu.',
     ean: '5906018000030', producent: 'Alexander', zdjecie: '/one.webp', cena: 39.9, stan: 8,
+    vonHalskyCategoryId: '33333333-3333-4333-8333-333333333333',
     vonHalskyEditorialSyncPending: true, vonHalskyEditorialSyncRunId: 'run-17',
     contentEditorial: { channelStates: { vonHalsky: { status: 'ready', publicationStatus: 'queued' } } },
   };
@@ -379,9 +411,11 @@ test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny 
     readVersioned: async (key, fallback) => ({ value: structuredClone(records.get(key) ?? fallback), revision: revisions.get(key) || 0 }),
     writeIfVersion: async (key, value) => { records.set(key, structuredClone(value)); revisions.set(key, (revisions.get(key) || 0) + 1); return { modified: true }; },
     env: () => env,
-    fetchImpl: async (url) => String(url).includes('/token')
+    fetchImpl: async (url, options = {}) => String(url).includes('/token')
       ? new Response(JSON.stringify({ access_token: 'token', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } })
-      : new Response(JSON.stringify({ accepted: 1 }), { status: 202, headers: { 'content-type': 'application/json', 'x-request-id': 'vh-receipt-17' } }),
+      : (options.method || 'GET') === 'GET'
+        ? new Response(JSON.stringify({ data: [], page: { limit: 30, offset: 0, total: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } })
+        : new Response(JSON.stringify([{ commandId: '11111111-1111-4111-8111-111111111111', offerId: '22222222-2222-4222-8222-222222222222', externalId: 'EXT-17' }]), { status: 201, headers: { 'content-type': 'application/json', 'x-request-id': 'vh-receipt-17' } }),
     loadCatalog: async () => [product],
     saveProductFields: async ({ productId, fields = {}, remove = [] }) => {
       const next = { ...(products.get(String(productId)) || { id: productId }), ...structuredClone(fields) };
@@ -391,6 +425,10 @@ test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny 
     },
     reportProgress: async (work) => progress.push(structuredClone(work)),
   });
+  const settingsRequest = new Request('https://artwaytm.pl/api?action=von-halsky-settings', {
+    method: 'POST', body: JSON.stringify({ testOfferCode: 'EXT-17' }),
+  });
+  await route(settingsRequest, new URL(settingsRequest.url), 'von-halsky-settings');
   const request = new Request('https://artwaytm.pl/api?action=von-halsky-sync-catalog', {
     method: 'POST', body: JSON.stringify({ publish: true, productIds: ['P-17'] }),
   });

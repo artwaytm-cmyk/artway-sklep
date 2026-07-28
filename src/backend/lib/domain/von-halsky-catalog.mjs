@@ -23,6 +23,8 @@ export function vonHalskyDefaultSettings() {
     automaticPriceSync: true,
     automaticStockSync: true,
     automaticResume: true,
+    catalogAutomationEnabled: false,
+    testOfferCode: '1410',
     customerZone: true,
     onboarding: {
       merchantAccount: false,
@@ -57,6 +59,8 @@ export function normalizeVonHalskySettings(raw = {}, previous = {}) {
     automaticPriceSync: typeof raw.automaticPriceSync === 'boolean' ? raw.automaticPriceSync : previous.automaticPriceSync !== false,
     automaticStockSync: typeof raw.automaticStockSync === 'boolean' ? raw.automaticStockSync : previous.automaticStockSync !== false,
     automaticResume: typeof raw.automaticResume === 'boolean' ? raw.automaticResume : previous.automaticResume !== false,
+    catalogAutomationEnabled: typeof raw.catalogAutomationEnabled === 'boolean' ? raw.catalogAutomationEnabled : previous.catalogAutomationEnabled === true,
+    testOfferCode: text(raw.testOfferCode ?? previous.testOfferCode ?? defaults.testOfferCode, 120),
     customerZone: typeof raw.customerZone === 'boolean' ? raw.customerZone : previous.customerZone !== false,
     onboarding,
     updatedAt: new Date().toISOString(),
@@ -131,6 +135,39 @@ function productImages(product = {}) {
   return [...new Set(values.map((item) => text(typeof item === 'object' ? item?.url : item, 2000)).filter(Boolean))];
 }
 
+function uuid(value) {
+  const normalized = text(value, 80).toLowerCase();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(normalized) ? normalized : '';
+}
+
+function absoluteImageUrl(value, origin = 'https://artwaytm.pl') {
+  try {
+    const url = new URL(text(value, 2000), origin);
+    return url.protocol === 'https:' ? url.href : '';
+  } catch { return ''; }
+}
+
+function fileNameFromUrl(value, index) {
+  try {
+    const raw = decodeURIComponent(new URL(value).pathname.split('/').filter(Boolean).at(-1) || '');
+    const cleaned = raw.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 480);
+    if (cleaned.length >= 5) return cleaned;
+  } catch { /* nazwa zastępcza poniżej */ }
+  return `artway-product-${index + 1}.jpg`;
+}
+
+function vonHalskyAttributeValues(product = {}) {
+  const source = product.vonHalskyAttributes && typeof product.vonHalskyAttributes === 'object'
+    ? product.vonHalskyAttributes
+    : {};
+  return Object.entries(source).flatMap(([id, raw]) => {
+    const attributeId = uuid(id);
+    if (!attributeId) return [];
+    const values = (Array.isArray(raw) ? raw : [raw]).map((value) => text(value, 1024)).filter(Boolean);
+    return values.length ? [{ id: attributeId, lang: 'pl', values }] : [];
+  });
+}
+
 export function vonHalskyEffectivePrice(product = {}) {
   for (const candidate of [product.cenaVonHalsky, product.vonHalskyPrice, product.cenaAllegro, product.allegroPrice, product.cena, product.price]) {
     const value = Number(candidate);
@@ -149,6 +186,7 @@ export function vonHalskyProductReadiness(product = {}) {
   const brand = text(product.marka || product.producent, 120);
   const images = productImages(product);
   const price = vonHalskyEffectivePrice(product);
+  const categoryId = uuid(product.vonHalskyCategoryId || product.inpostVonHalskyCategoryId);
   const issues = [];
   const warnings = [];
   if (name.length < 7 || name.length > 150) issues.push('Nazwa musi mieć 7–150 znaków');
@@ -158,7 +196,7 @@ export function vonHalskyProductReadiness(product = {}) {
   if (!ean && !(manufacturerCode && brand)) issues.push('Wymagany EAN albo kod producenta i marka');
   if (!images.length) issues.push('Brak zdjęcia produktu');
   if (!Number.isFinite(price) || price <= 0) issues.push('Brak poprawnej ceny');
-  if (!text(product.kategoria || product.category, 240)) warnings.push('Brak kategorii kanału');
+  if (!categoryId) warnings.push('Brak kategorii Von Halsky');
   if (!text(product.externalId || product.sku || product.id, 160)) warnings.push('Brak stabilnego EXTERNAL_ID');
   if (images.length === 1) warnings.push('Warto dodać więcej niż jedno zdjęcie');
   if (!Object.keys(product.parametry || product.parameters || {}).length) warnings.push('Brak parametrów kategorii');
@@ -168,7 +206,12 @@ export function vonHalskyProductReadiness(product = {}) {
     score,
     issues,
     warnings,
-    identifiers: { ean, manufacturerCode, brand },
+    identifiers: { ean, manufacturerCode, brand, categoryId },
+    publishable: issues.length === 0 && Boolean(categoryId) && Boolean(brand),
+    publicationIssues: [
+      ...(!categoryId ? ['Brak kategorii Von Halsky'] : []),
+      ...(!brand ? ['Brak marki wymaganej przez kontrakt Von Halsky'] : []),
+    ],
     nameLength: name.length,
     descriptionLength: description.length,
     presentationMode: presentation.mode,
@@ -194,6 +237,8 @@ export function vonHalskyOfferProjection(product = {}, settings = {}) {
     name: text(presentation.name, 150),
     description: presentation.description,
     category: text(product.kategoria || product.category, 240),
+    categoryId: readiness.identifiers.categoryId,
+    attributes: vonHalskyAttributeValues(product),
     parameters: product.parametry || product.parameters || {},
     images: productImages(product),
     price: readiness.price,
@@ -201,6 +246,48 @@ export function vonHalskyOfferProjection(product = {}, settings = {}) {
     available,
     stock: available ? Math.max(minimumStock, Math.min(maximumStock, physicalStock)) : 0,
     readiness,
+  };
+}
+
+export function vonHalskyOfferProposal(projection = {}, {
+  storefrontOrigin = 'https://artwaytm.pl',
+  taxRateInfo = '23%',
+  daysToShip = 1,
+} = {}) {
+  const categoryId = uuid(projection.categoryId);
+  if (!projection?.readiness?.ready || projection?.readiness?.publishable === false || !categoryId) {
+    const error = new Error(`Oferta ${text(projection.externalId, 160) || 'bez identyfikatora'} nie spełnia wymagań publikacji Von Halsky.`);
+    error.code = 'von_halsky_offer_not_ready';
+    error.status = 422;
+    error.details = { issues: [...(projection?.readiness?.issues || []), ...(projection?.readiness?.publicationIssues || [])] };
+    throw error;
+  }
+  const images = (Array.isArray(projection.images) ? projection.images : [])
+    .map((value) => absoluteImageUrl(value, storefrontOrigin))
+    .filter(Boolean)
+    .slice(0, 16)
+    .map((fileUrl, index) => ({ fileName: fileNameFromUrl(fileUrl, index), fileUrl, priority: index + 1 }));
+  const product = {
+    name: text(projection.name, 150),
+    description: String(projection.description || '').slice(0, 100_000),
+    brand: text(projection.brand, 100),
+    categoryId,
+    sku: text(projection.externalId, 100),
+  };
+  if (projection.attributes?.length) product.attributes = projection.attributes;
+  if (projection.manufacturerCode) product.manufacturerProductNumber = text(projection.manufacturerCode, 500);
+  if (projection.gtin) product.ean = text(projection.gtin, 100);
+  return {
+    externalId: text(projection.externalId, 500),
+    product,
+    stock: { quantity: Math.max(0, Math.min(999_999, Number(projection.stock) || 0)), unit: 'UNIT' },
+    price: {
+      grossPrice: { amount: Number(Number(projection.price).toFixed(2)), currency: text(projection.currency, 3) || 'PLN' },
+      taxRateInfo: text(projection.taxRateInfo || taxRateInfo, 100),
+    },
+    shippingTime: { daysToShip: Math.max(0, Math.min(365, Number(projection.daysToShip ?? daysToShip) || 0)) },
+    images,
+    features: { refundable: projection.refundable !== false },
   };
 }
 

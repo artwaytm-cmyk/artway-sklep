@@ -3,6 +3,7 @@ import {
   normalizeVonHalskySettings,
   summarizeVonHalskyCatalog,
   vonHalskyDefaultSettings,
+  vonHalskyOfferProposal,
   vonHalskyOfferProjection,
   vonHalskyPublicConfig,
 } from './domain/von-halsky-catalog.mjs';
@@ -24,6 +25,9 @@ function initialState() {
       lastRequestId: '',
     },
     diagnostics: [],
+    offers: [],
+    orders: [],
+    categories: [],
     updatedAt: null,
   };
 }
@@ -36,7 +40,42 @@ function cleanState(value = {}) {
     settings: normalizeVonHalskySettings(value?.settings || {}, { ...initial.settings, ...(value?.settings || {}) }),
     sync: { ...initial.sync, ...(value?.sync || {}) },
     diagnostics: Array.isArray(value?.diagnostics) ? value.diagnostics.slice(0, 30) : [],
+    offers: Array.isArray(value?.offers) ? value.offers.slice(0, 2000) : [],
+    orders: Array.isArray(value?.orders) ? value.orders.slice(0, 500) : [],
+    categories: Array.isArray(value?.categories) ? value.categories.slice(0, 10_000) : [],
   };
+}
+
+function productMatchesCode(product = {}, code = '') {
+  const expected = String(code || '').trim().toLowerCase();
+  if (!expected) return false;
+  return [product.id, product.externalId, product.sku, product.kodProducenta, product.mpn, product.ean, product.gtin]
+    .some((value) => String(value ?? '').trim().toLowerCase() === expected);
+}
+
+function remoteOfferSummary(details = {}) {
+  const offer = details?.offer || details || {};
+  return {
+    offerId: String(offer.id || offer.offerId || ''),
+    externalId: String(offer.externalId || ''),
+    status: String(offer.status || ''),
+    updatedAt: offer.updatedAt || null,
+    validationErrors: Array.isArray(details?.metadata?.validationErrors) ? details.metadata.validationErrors.slice(0, 30) : [],
+    rejectionReasons: Array.isArray(details?.metadata?.rejectionReasons) ? details.metadata.rejectionReasons.slice(0, 30) : [],
+  };
+}
+
+function flattenCategories(items = [], parents = []) {
+  return (Array.isArray(items) ? items : []).flatMap((item) => {
+    const current = {
+      id: String(item?.id || ''),
+      name: String(item?.name || ''),
+      leaf: item?.leaf === true,
+      doesNotRequireGpsrInfo: item?.doesNotRequireGpsrInfo === true,
+      path: [...parents, String(item?.name || '')].filter(Boolean).join(' › '),
+    };
+    return [current, ...flattenCategories(item?.children, [...parents, current.name])];
+  }).filter((item) => item.id);
 }
 
 function safeError(error) {
@@ -141,6 +180,9 @@ export function createVonHalskyRoute({
         settings: state.settings,
         sync: state.sync,
         diagnostics: state.diagnostics,
+        offers: state.offers,
+        orders: state.orders,
+        categoryCount: state.categories.length,
         updatedAt: state.updatedAt,
         channel: 'InPost Von Halsky',
       });
@@ -154,6 +196,121 @@ export function createVonHalskyRoute({
         return current;
       });
       return respond({ ok: true, settings: state.settings, config: vonHalskyPublicConfig(env()), updatedAt: state.updatedAt });
+    }
+
+    if (action === 'von-halsky-categories') {
+      if (!['GET', 'POST'].includes(req.method)) return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const current = cleanState((await readVersioned(STORE_KEY, initialState())).value);
+      const refresh = req.method === 'POST' || url.searchParams.get('refresh') === '1' || !current.categories.length;
+      if (!refresh) return respond({ ok: true, categories: current.categories, cached: true });
+      try {
+        const result = await api.fetchCategories({ depth: 4 });
+        const categories = flattenCategories(result.payload).filter((item) => item.leaf);
+        const state = await mutate((draft) => {
+          draft.categories = categories;
+          return draft;
+        });
+        await recordDiagnostic({ operation: 'categories-sync', status: 'ok', message: `Pobrano ${categories.length} końcowych kategorii Von Halsky.`, requestId: result.requestId });
+        return respond({ ok: true, categories: state.categories, cached: false });
+      } catch (error) {
+        const safe = safeError(error);
+        return respond({ ok: false, error: safe.message, code: safe.code, details: safe.details }, safe.status);
+      }
+    }
+
+    if (action === 'von-halsky-product-category') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (typeof saveProductFields !== 'function') return respond({ ok: false, error: 'Centralna kartoteka produktów nie jest dostępna.' }, 503);
+      const body = await req.json().catch(() => ({}));
+      const productId = String(body.productId || '').trim(), categoryId = String(body.categoryId || '').trim();
+      if (!productId || !/^[0-9a-f-]{36}$/i.test(categoryId)) return respond({ ok: false, error: 'Wybierz produkt i prawidłową kategorię Von Halsky.' }, 422);
+      const state = cleanState((await readVersioned(STORE_KEY, initialState())).value);
+      const category = state.categories.find((item) => item.id === categoryId);
+      if (category && category.leaf !== true) return respond({ ok: false, error: 'Oferta musi być przypisana do kategorii końcowej.' }, 422);
+      const fields = { vonHalskyCategoryId: categoryId };
+      if (body.attributes && typeof body.attributes === 'object' && !Array.isArray(body.attributes)) fields.vonHalskyAttributes = body.attributes;
+      await saveProductFields({
+        productId,
+        fields,
+        mutationId: `von-halsky-category:${productId}:${categoryId}`,
+        actor: 'von-halsky-api',
+        area: 'von-halsky-category',
+      });
+      return respond({ ok: true, productId, categoryId, category: category || null });
+    }
+
+    if (action === 'von-halsky-sync-orders') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      try {
+        const body = await req.json().catch(() => ({}));
+        const current = cleanState((await readVersioned(STORE_KEY, initialState())).value);
+        const previousSyncAt = Date.parse(String(current.sync.lastOrdersAt || ''));
+        const overlapSince = Number.isFinite(previousSyncAt)
+          ? new Date(previousSyncAt - 5 * 60_000).toISOString()
+          : '';
+        const result = await api.fetchOrders({
+          limit: body.limit || 30,
+          offset: body.offset || 0,
+          updatedSince: body.updatedSince || overlapSince,
+          orderStatus: body.orderStatus,
+          paymentStatus: body.paymentStatus,
+        });
+        const incoming = Array.isArray(result.payload?.data) ? result.payload.data : [];
+        const merged = new Map(current.orders.map((item) => [String(item?.id || ''), item]));
+        for (const order of incoming) if (order?.id) merged.set(String(order.id), order);
+        const at = new Date().toISOString();
+        const state = await mutate((draft) => {
+          draft.orders = [...merged.values()]
+            .sort((a, b) => Date.parse(b.updatedAt || b.createdAt || 0) - Date.parse(a.updatedAt || a.createdAt || 0))
+            .slice(0, 500);
+          draft.sync = { ...draft.sync, status: 'connected', lastOrdersAt: at, lastError: '', lastRequestId: result.requestId || '' };
+          return draft;
+        });
+        await recordDiagnostic({ operation: 'orders-sync', status: 'ok', message: `Pobrano ${incoming.length} zamówień; kolejka zawiera ${state.orders.length}.`, requestId: result.requestId });
+        return respond({ ok: true, fetched: incoming.length, orders: state.orders, page: result.payload?.page || null, sync: state.sync });
+      } catch (error) {
+        const safe = safeError(error);
+        await recordDiagnostic({ operation: 'orders-sync', status: 'error', message: safe.message });
+        return respond({ ok: false, error: safe.message, code: safe.code, details: safe.details }, safe.status);
+      }
+    }
+
+    if (action === 'von-halsky-offer-state') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const body = await req.json().catch(() => ({}));
+      const offerId = String(body.offerId || '').trim();
+      if (!/^[0-9a-f-]{36}$/i.test(offerId) || typeof body.open !== 'boolean') return respond({ ok: false, error: 'Brak prawidłowego ID oferty lub docelowego stanu.' }, 422);
+      try {
+        const result = await api.setOfferOpen(offerId, body.open);
+        const state = await mutate((draft) => {
+          draft.offers = draft.offers.map((item) => item.offerId === offerId ? { ...item, status: body.open ? 'PENDING' : 'CLOSED', updatedAt: new Date().toISOString() } : item);
+          return draft;
+        });
+        await recordDiagnostic({ operation: body.open ? 'offer-reopen' : 'offer-close', status: 'ok', message: `Przyjęto polecenie dla oferty ${offerId}.`, requestId: result.requestId });
+        return respond({ ok: true, offerId, open: body.open, command: result.payload, offers: state.offers });
+      } catch (error) {
+        const safe = safeError(error);
+        return respond({ ok: false, error: safe.message, code: safe.code, details: safe.details }, safe.status);
+      }
+    }
+
+    if (action === 'von-halsky-order-state') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const body = await req.json().catch(() => ({}));
+      const orderId = String(body.orderId || '').trim();
+      if (!orderId || typeof body.accepted !== 'boolean') return respond({ ok: false, error: 'Brak zamówienia lub decyzji.' }, 422);
+      try {
+        const result = await api.setOrderAccepted(orderId, body.accepted);
+        const state = await mutate((draft) => {
+          draft.orders = draft.orders.map((item) => String(item?.id || '') === orderId ? { ...item, status: body.accepted ? 'ACCEPTED' : 'REFUSED', updatedAt: new Date().toISOString() } : item);
+          return draft;
+        });
+        await recordDiagnostic({ operation: body.accepted ? 'order-accept' : 'order-refuse', status: 'ok', message: `Przyjęto decyzję dla zamówienia ${orderId}.`, requestId: result.requestId });
+        return respond({ ok: true, orderId, accepted: body.accepted, command: result.payload, orders: state.orders });
+      } catch (error) {
+        const safe = safeError(error);
+        return respond({ ok: false, error: safe.message, code: safe.code, details: safe.details }, safe.status);
+      }
     }
 
     if (action === 'von-halsky-connection-check') {
@@ -198,15 +355,16 @@ export function createVonHalskyRoute({
       return respond({
         ok: true,
         summary: summarizeVonHalskyCatalog(list),
-        eligible: deduplicated.items.filter((item) => item.readiness.ready && item.available).length,
-        blocked: deduplicated.items.filter((item) => !item.readiness.ready || !item.available).length,
+        eligible: deduplicated.items.filter((item) => item.readiness.publishable && item.available).length,
+        blocked: deduplicated.items.filter((item) => !item.readiness.publishable || !item.available).length,
         duplicates: deduplicated.conflicts.length,
         sample: projections.slice(0, 5).map((item) => ({
           externalId: item.externalId,
           gtin: item.gtin,
           name: item.name,
           ready: item.readiness.ready,
-          issues: item.readiness.issues,
+          publishable: item.readiness.publishable,
+          issues: [...item.readiness.issues, ...item.readiness.publicationIssues],
         })),
       });
     }
@@ -234,41 +392,118 @@ export function createVonHalskyRoute({
       const projections = selectedList.map((product) => vonHalskyOfferProjection(product, state.settings));
       const productByExternalId = new Map(selectedList.map((product) => [vonHalskyOfferProjection(product, state.settings).externalId, product]));
       const deduplicated = deduplicateVonHalskyOffers(projections);
-      const eligible = deduplicated.items.filter((item) => item.readiness.ready && item.available);
-      if (body.publish !== true) return respond({ ok: true, dryRun: true, eligible: eligible.length, blocked: deduplicated.items.length - eligible.length, duplicates: deduplicated.conflicts.length });
+      const eligible = deduplicated.items.filter((item) => item.readiness.publishable && item.available);
+      const testCode = String(state.settings.testOfferCode || '1410');
+      const allowNewOffer = (item) => state.settings.catalogAutomationEnabled === true
+        || productMatchesCode(productByExternalId.get(item.externalId), testCode);
+      if (body.publish !== true) return respond({
+        ok: true,
+        dryRun: true,
+        eligible: eligible.length,
+        allowedToCreate: eligible.filter(allowNewOffer).length,
+        publicationMode: state.settings.catalogAutomationEnabled ? 'automatic' : 'test_allowlist',
+        testOfferCode: testCode,
+        blocked: deduplicated.items.length - eligible.length,
+        duplicates: deduplicated.conflicts.length,
+      });
       const batchSize = Math.max(1, Math.min(100, Number(body.batchSize) || 50));
-      let sent = 0;
+      let sent = 0, created = 0, updatedCount = 0, closed = 0, reopened = 0, skippedNew = 0;
       let lastRequestId = '';
       let activeBatchProducts = [];
       try {
-        for (let offset = 0; offset < eligible.length; offset += batchSize) {
-          const batch = eligible.slice(offset, offset + batchSize);
+        const remoteResult = await api.listOffers();
+        const remoteOffers = remoteResult.data.map(remoteOfferSummary).filter((item) => item.offerId);
+        const remoteByExternalId = new Map(remoteOffers.filter((item) => item.externalId).map((item) => [item.externalId, item]));
+        lastRequestId = remoteResult.requestId || '';
+        const existing = deduplicated.items.filter((item) => remoteByExternalId.has(item.externalId));
+        const createCandidates = eligible.filter((item) => !remoteByExternalId.has(item.externalId) && allowNewOffer(item));
+        skippedNew = eligible.filter((item) => !remoteByExternalId.has(item.externalId) && !allowNewOffer(item)).length;
+
+        for (const item of existing) {
+          const product = productByExternalId.get(item.externalId), remote = remoteByExternalId.get(item.externalId);
+          activeBatchProducts = product ? [product] : [];
+          if (!item.available) {
+            if (!['CLOSED', 'SOLDOUT'].includes(remote.status)) {
+              const result = await api.setOfferOpen(remote.offerId, false);
+              lastRequestId = result.requestId || lastRequestId;
+              remote.status = 'CLOSED';
+              closed += 1;
+            }
+            continue;
+          }
+          if (['CLOSED', 'SOLDOUT'].includes(remote.status) && state.settings.automaticResume !== false) {
+            const result = await api.setOfferOpen(remote.offerId, true);
+            lastRequestId = result.requestId || lastRequestId;
+            remote.status = 'PENDING';
+            reopened += 1;
+          }
+          if (!item.readiness.publishable) continue;
+          const contentDue = body.forceContent === true || requestedProductIds.has(String(product?.id || '')) || product?.vonHalskyEditorialSyncPending === true;
+          if (contentDue) {
+            const proposal = vonHalskyOfferProposal(item);
+            const { externalId: _externalId, ...patch } = proposal;
+            const result = await api.updateOffer(remote.offerId, patch);
+            lastRequestId = result.requestId || lastRequestId;
+            updatedCount += 1;
+          }
+        }
+
+        if (state.settings.automaticPriceSync !== false) {
+          const prices = existing.filter((item) => item.available && item.readiness.publishable).map((item) => ({
+            offerId: remoteByExternalId.get(item.externalId).offerId,
+            price: { amount: Number(Number(item.price).toFixed(2)), currency: item.currency || 'PLN' },
+          }));
+          for (let offset = 0; offset < prices.length; offset += batchSize) {
+            const result = await api.updatePrices(prices.slice(offset, offset + batchSize));
+            lastRequestId = result.requestId || lastRequestId;
+            updatedCount += prices.slice(offset, offset + batchSize).length;
+          }
+        }
+        if (state.settings.automaticStockSync !== false) {
+          const stocks = existing.map((item) => ({
+            offerId: remoteByExternalId.get(item.externalId).offerId,
+            stock: { quantity: item.available ? item.stock : 0, unit: 'UNIT' },
+          }));
+          for (let offset = 0; offset < stocks.length; offset += batchSize) {
+            const result = await api.updateStocks(stocks.slice(offset, offset + batchSize));
+            lastRequestId = result.requestId || lastRequestId;
+            updatedCount += stocks.slice(offset, offset + batchSize).length;
+          }
+        }
+
+        for (let offset = 0; offset < createCandidates.length; offset += batchSize) {
+          const batch = createCandidates.slice(offset, offset + batchSize);
           activeBatchProducts = batch.map((item) => productByExternalId.get(item.externalId)).filter(Boolean);
-          const tracked = activeBatchProducts.filter((product) => product.vonHalskyEditorialSyncPending === true || requestedProductIds.has(String(product.id)));
-          await Promise.all(tracked.map((product) => progress({
+          await Promise.all(activeBatchProducts.map((product) => progress({
             id: `editorial:${product.id}:vonHalsky:${String(product.vonHalskyEditorialSyncRunId || product.vonHalskyEditorialSyncPendingAt || Date.now()).slice(0, 64)}`,
             runId: product.vonHalskyEditorialSyncRunId, productId: String(product.id), productName: String(product.nazwa || product.name || '').slice(0, 180),
             channel: 'vonHalsky', action: 'publikacja treści w kanale', phase: 'sending_to_von_halsky', status: 'running',
             target: 'katalog InPost Von Halsky', targetRef: product.externalId || product.sku || String(product.id),
-            message: 'Wysyłam zapisaną kartę produktu do API Von Halsky i czekam na potwierdzenie partii.',
+            message: 'Wysyłam dozwoloną kartę produktu do API Von Halsky i czekam na identyfikator polecenia.',
           })));
-          const items = batch.map(({ readiness, ...item }) => {
-            if (body.scheduled === true && state.settings.automaticPriceSync === false) {
-              delete item.price;
-              delete item.currency;
-            }
-            if (body.scheduled === true && state.settings.automaticStockSync === false) {
-              delete item.available;
-              delete item.stock;
-            }
-            return item;
-          });
-          const result = await api.pushCatalog({ contractVersion: config.contractVersion, items });
+          const proposals = batch.map((item) => vonHalskyOfferProposal(item));
+          const result = await api.createOffers(proposals);
           lastRequestId = result.requestId || lastRequestId;
-          sent += items.length;
+          const receipts = Array.isArray(result.payload) ? result.payload : [];
+          sent += proposals.length;
+          created += proposals.length;
           const at = new Date().toISOString();
-          await updateProductPublication(tracked, 'confirmed', { timestamp: at, receiptId: result.requestId || lastRequestId });
-          await Promise.all(tracked.map((product) => progress({
+          for (const product of activeBatchProducts) {
+            const externalId = vonHalskyOfferProjection(product, state.settings).externalId;
+            const receipt = receipts.find((item) => String(item?.externalId || '') === externalId) || receipts[activeBatchProducts.indexOf(product)] || {};
+            if (receipt.offerId && typeof saveProductFields === 'function') {
+              await saveProductFields({
+                productId: String(product.id),
+                fields: { vonHalskyOfferId: String(receipt.offerId), vonHalskyCommandId: String(receipt.commandId || '') },
+                mutationId: `von-halsky-offer-link:${product.id}:${receipt.offerId}`,
+                actor: 'von-halsky-api',
+                area: 'von-halsky-offer-link',
+              });
+              remoteOffers.push({ offerId: String(receipt.offerId), externalId, status: 'PENDING', updatedAt: at, validationErrors: [], rejectionReasons: [] });
+            }
+          }
+          await updateProductPublication(activeBatchProducts, 'confirmed', { timestamp: at, receiptId: result.requestId || lastRequestId });
+          await Promise.all(activeBatchProducts.map((product) => progress({
             id: `editorial:${product.id}:vonHalsky:${String(product.vonHalskyEditorialSyncRunId || product.vonHalskyEditorialSyncPendingAt || Date.now()).slice(0, 64)}`,
             runId: product.vonHalskyEditorialSyncRunId, productId: String(product.id), productName: String(product.nazwa || product.name || '').slice(0, 180),
             channel: 'vonHalsky', action: 'publikacja treści w kanale', phase: 'confirmed_by_von_halsky', status: 'confirmed',
@@ -280,11 +515,21 @@ export function createVonHalskyRoute({
         }
         const at = new Date().toISOString();
         const updated = await mutate((current) => {
-          current.sync = { ...current.sync, status: 'connected', lastCatalogAt: at, lastCatalogCount: sent, lastError: '', lastRequestId };
+          current.offers = remoteOffers;
+          current.sync = { ...current.sync, status: 'connected', lastCatalogAt: at, lastCatalogCount: created + updatedCount + closed + reopened, lastError: '', lastRequestId };
           return current;
         });
-        await recordDiagnostic({ operation: 'catalog-sync', status: 'ok', message: `Przekazano ${sent} ofert spełniających kontrolę.`, requestId: lastRequestId });
-        return respond({ ok: true, sent, blocked: deduplicated.items.length - eligible.length, duplicates: deduplicated.conflicts.length, sync: updated.sync });
+        const message = `Nowe ${created}, aktualizacje ${updatedCount}, zamknięte ${closed}, wznowione ${reopened}; pominięte nowe ${skippedNew}.`;
+        await recordDiagnostic({ operation: 'catalog-sync', status: 'ok', message, requestId: lastRequestId });
+        return respond({
+          ok: true, sent, created, updated: updatedCount, closed, reopened, skippedNew,
+          publicationMode: state.settings.catalogAutomationEnabled ? 'automatic' : 'test_allowlist',
+          testOfferCode: testCode,
+          blocked: deduplicated.items.length - eligible.length,
+          duplicates: deduplicated.conflicts.length,
+          offers: updated.offers,
+          sync: updated.sync,
+        });
       } catch (error) {
         const safe = safeError(error);
         const retryProducts = activeBatchProducts.filter((product) => product.vonHalskyEditorialSyncPending === true || requestedProductIds.has(String(product.id)));
@@ -302,7 +547,7 @@ export function createVonHalskyRoute({
           current.diagnostics = [{ id: `${Date.now()}-catalog`, at: new Date().toISOString(), operation: 'catalog-sync', status: 'error', message: safe.message, requestId: '' }, ...(current.diagnostics || [])].slice(0, 30);
           return current;
         });
-        return respond({ ok: false, sent, error: safe.message, code: safe.code, details: safe.details }, safe.status);
+        return respond({ ok: false, sent, created, updated: updatedCount, closed, reopened, skippedNew, error: safe.message, code: safe.code, details: safe.details }, safe.status);
       }
     }
 

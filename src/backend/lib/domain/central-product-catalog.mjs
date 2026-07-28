@@ -84,7 +84,12 @@ function centralCatalogListProduct(product = {}, catalogMeta = {}, { admin = fal
     'allegroAgentPreparationConfirmedRevision', 'allegroAgentPreparationRetryCount',
     'allegroAgentPreparationNextRetryAt',
   ];
-  if (admin) fields.push('cenaZakupu');
+  if (admin) fields.push(
+    'cenaZakupu',
+    'vonHalskyCategoryId', 'vonHalskyAttributes', 'vonHalskyOfferId', 'vonHalskyCommandId',
+    'vonHalskyContentMode', 'vonHalskyTitle', 'vonHalskyShortDescription', 'vonHalskyDescription',
+    'vonHalskyEditorialSyncState', 'vonHalskyEditorialSyncPending', 'vonHalskyEditorialSyncRunId',
+  );
   const result = {};
   for (const field of fields) if (Object.prototype.hasOwnProperty.call(product, field)) result[field] = product[field];
   result.id = text(product.id, 120);
