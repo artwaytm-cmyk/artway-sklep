@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   allegroAutomaticPreparationDisposition,
+  allegroPreparationAttemptDisposition,
   allegroPreparationRetryState,
   createAllegroPreparationQueue,
   selectAllegroPreparationCandidates,
@@ -32,7 +33,7 @@ async function waitUntil(predicate, timeout = 1000) {
   throw new Error('timeout');
 }
 
-test('kolejka przygotowania zapisuje i wykonuje produkty pojedynczo na serwerze', async () => {
+test('kolejka przygotowania kończy produkt albo po trzech próbach tworzy konkretną decyzję', async () => {
   const repository = memoryRepository(), calls = [];
   const queue = createAllegroPreparationQueue({
     ...repository,
@@ -49,9 +50,10 @@ test('kolejka przygotowania zapisuje i wykonuje produkty pojedynczo na serwerze'
     const status = await queue.status();
     return !status.running && status.recent.length === 2 ? status : null;
   });
-  assert.deepEqual(calls, ['1', '2']);
+  assert.deepEqual(calls, ['1', '2', '2', '2']);
   assert.equal(finished.batches[0].completed, 1);
-  assert.equal(finished.batches[0].attention, 1);
+  assert.equal(finished.batches[0].attention, 0);
+  assert.equal(finished.batches[0].decisionRequired, 1);
   assert.equal(finished.pending, 0);
 });
 
@@ -63,9 +65,10 @@ test('błąd quota zatrzymuje tylko redakcję AI, a kolejne produkty nadal zapis
       calls.push({ productId: task.productId, skipEditorial: task.skipEditorial });
       if (task.skipEditorial) return {
         ready: false,
-        status: 'attention',
+        status: 'waiting_provider',
         missing: ['redakcja AI oczekuje'],
         savedFields: ['ean', 'allegroCategoryId'],
+        providerUnavailable: true,
       };
       const error = new Error('You exceeded your current quota');
       error.code = 'insufficient_quota';
@@ -96,9 +99,10 @@ test('zapisany wynik z ostrzeżeniem quota przełącza pozostałe zadania w tryb
       calls.push({ productId: task.productId, skipEditorial: task.skipEditorial });
       if (task.skipEditorial) return {
         ready: false,
-        status: 'attention',
+        status: 'waiting_provider',
         missing: ['redakcja AI oczekuje'],
         savedFields: ['allegroCategoryId', 'allegroParameters'],
+        providerUnavailable: true,
       };
       return {
         ready: false,
@@ -121,7 +125,7 @@ test('zapisany wynik z ostrzeżeniem quota przełącza pozostałe zadania w tryb
     { productId: '2', skipEditorial: true },
     { productId: '3', skipEditorial: true },
   ]);
-  assert.equal(blocked.recent[0].status, 'attention');
+  assert.equal(blocked.recent[0].status, 'waiting_provider');
   assert.deepEqual(blocked.recent[0].savedFields, ['allegroCategoryId', 'allegroParameters']);
   assert.equal(blocked.pending, 0);
   assert.equal(blocked.blockedReason, 'OpenAI API quota');
@@ -299,12 +303,12 @@ test('rotacyjna konserwacja katalogu używa tej samej blokady aktywnych ofert', 
   assert.match(source, /report\.verified/);
 });
 
-test('nieudane uzupełnienia są ponawiane bez końcowego limitu, ale z bezpiecznym odstępem', () => {
+test('automatyczne uzupełnienia są ponawiane szybko i kończą się jawną decyzją zamiast odkładania bez końca', () => {
   const first = allegroPreparationRetryState({}, ['GPSR'], {
     now: new Date('2026-07-27T08:00:00.000Z'),
   });
   assert.equal(first.retryCount, 1);
-  assert.equal(first.nextRetryAt, '2026-07-27T08:15:00.000Z');
+  assert.equal(first.nextRetryAt, '2026-07-27T08:00:15.000Z');
   const later = allegroPreparationRetryState({
     allegroAgentPreparationMissing: ['GPSR'],
     allegroAgentPreparationRetryCount: 20,
@@ -312,7 +316,10 @@ test('nieudane uzupełnienia są ponawiane bez końcowego limitu, ale z bezpiecz
     now: new Date('2026-07-27T08:00:00.000Z'),
   });
   assert.equal(later.retryCount, 21);
-  assert.equal(later.nextRetryAt, '2026-07-28T08:00:00.000Z');
+  assert.equal(later.nextRetryAt, '2026-07-27T08:05:00.000Z');
+  assert.equal(allegroPreparationAttemptDisposition({ ready: false, attempt: 1 }), 'attention');
+  assert.equal(allegroPreparationAttemptDisposition({ ready: false, attempt: 3 }), 'decision_required');
+  assert.equal(allegroPreparationAttemptDisposition({ ready: false, providerUnavailable: true, attempt: 3 }), 'waiting_provider');
   assert.deepEqual(allegroPreparationRetryState({}, [], { ready: true }), {
     retryCount: 0,
     nextRetryAt: '',
@@ -370,6 +377,49 @@ test('wadliwy wynik jednego redaktora jest ponawiany przed oznaczeniem produktu 
   assert.equal(saved.fields.allegroPreparationManifest.version, 1);
   assert.equal(saved.fields.allegroPreparationManifest.operation, 'create');
   assert.equal(saved.fields.allegroPreparationManifest.descriptionSectionCount, 0);
+});
+
+test('brak dostępu do redaktora AI nie odkłada produktu, gdy potwierdzone źródło wystarcza do bezpiecznej redakcji lokalnej', async () => {
+  const product = {
+    id: '17b',
+    nazwa: 'Gra edukacyjna Litery',
+    opisKrotki: 'Gra edukacyjna do nauki liter dla dzieci i całej rodziny.',
+    opis: 'Gra edukacyjna Litery pomaga ćwiczyć rozpoznawanie znaków, koncentrację i spostrzegawczość. Zestaw umożliwia kilka wariantów spokojnej zabawy, dzięki czemu sprawdzi się podczas wspólnego czasu dzieci i dorosłych.',
+    sourceMaterial: {
+      longDescription: 'Gra edukacyjna Litery pomaga ćwiczyć rozpoznawanie znaków, koncentrację i spostrzegawczość. Zestaw umożliwia kilka wariantów spokojnej zabawy, dzięki czemu sprawdzi się podczas wspólnego czasu dzieci i dorosłych.\nDostawa kurierem w 24 godziny. Skontaktuj się z nami przed zakupem.',
+      shortDescription: 'Gra edukacyjna do nauki liter dla dzieci i całej rodziny.',
+    },
+  };
+  let preparedProduct = null, saved = null;
+  const worker = createAllegroPreparationWorker({
+    text: (value) => String(value ?? ''),
+    readSettings: async () => ({ data: {} }),
+    loadProducts: async () => new Map([['17b', product]]),
+    getCatalogProduct: async () => product,
+    sourceUrlOf: () => '',
+    inspectSource: async () => ({}),
+    sourceImages: () => ({ ok: false }),
+    editorialize: async () => { throw new Error('redaktor nie powinien zostać wywołany'); },
+    prepareDraft: async (_request, value) => {
+      preparedProduct = value;
+      return { missing: [], payload: { description: { sections: [] } }, autoFilled: {}, existingOffer: null };
+    },
+    enforceDraft: (draft) => ({ draft, compliance: { ok: true, policyId: 'test' } }),
+    verifyIdentity: async () => ({ ok: true }),
+    preparationCurrent: () => false,
+    preparationFingerprint: () => 'fingerprint',
+    saveProduct: async (input) => {
+      saved = input;
+      return { product: { ...product, ...input.fields } };
+    },
+    requestFactory: () => new Request('https://artwaytm.pl/api/store?action=allegro-preparation-worker'),
+  });
+  const result = await worker({ id: 'task-17b', productId: '17b', requestedBy: 'admin@example.test', skipEditorial: true, attempt: 1 });
+  assert.equal(result.status, 'completed');
+  assert.equal(result.ready, true);
+  assert.equal(result.providerUnavailable, false);
+  assert.equal(saved.fields.contentEditorialSource, 'deterministic-source-policy');
+  assert.doesNotMatch(preparedProduct.allegroDescription, /dostaw|kontakt/i);
 });
 
 test('worker wykorzystuje potwierdzone GPSR tego samego producenta i ostrzeżenie ze źródła', async () => {

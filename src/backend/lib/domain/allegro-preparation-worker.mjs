@@ -1,7 +1,13 @@
-import { providerQuotaUnavailable } from './agent-specialists-support.mjs';
+import {
+  PROMPT_VERSION,
+  productEditorialFingerprint,
+  productEditorialSourceFingerprint,
+  providerQuotaUnavailable,
+} from './agent-specialists-support.mjs';
 import { enrichAllegroProductEvidence } from './allegro-parameter-enrichment.mjs';
 import {
   allegroAutomaticPreparationDisposition,
+  allegroPreparationAttemptDisposition,
   allegroPreparationRetryState,
 } from './allegro-preparation-queue.mjs';
 
@@ -26,6 +32,83 @@ const SOURCE_PAGE_NOISE = /(?:dodaj produkty podając kody|wgraj pliki z kodami|
 function usefulProductText(value = '', minimum = 20) {
   const clean = String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   return clean.length >= minimum && !SOURCE_PAGE_NOISE.test(clean);
+}
+
+const FORBIDDEN_EDITORIAL_LINE = /(?:skontaktuj|kontakt(?:uj|owy| przed)|zadzwoń|napisz do nas|e-?mail|www\.|https?:\/\/|dostaw|wysył|kurier|paczkomat|przesyłk|odbiór osobisty|czas realizacji|koszt transportu|koszt wysyłki|płatno|przelew|stan magazynowy|dostępn(?:y|ość)|powiadom o dostępności|dodaj do koszyka|dodaj do porównania|lista zakupowa|rozmiar uniwersalny\s*\d+\s*szt)/i;
+
+function deterministicEditorialText(value = '', limit = 30_000) {
+  return String(value || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line.length >= 3 && !SOURCE_PAGE_NOISE.test(line) && !FORBIDDEN_EDITORIAL_LINE.test(line))
+    .join('\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+    .slice(0, limit);
+}
+
+function deterministicEditorialFallback(product = {}) {
+  const source = asObject(product.sourceMaterial);
+  const title = deterministicEditorialText(product.nazwa || product.name || source.title, 150).replace(/\n+/g, ' ').trim();
+  const longDescription = [
+    source.longDescription,
+    product.opis,
+    product.allegroDescription,
+  ].map((value) => deterministicEditorialText(value)).find((value) => value.length >= 150) || '';
+  if (!title || !longDescription) return null;
+  const sourceShort = [
+    source.shortDescription,
+    product.opisKrotki,
+  ].map((value) => deterministicEditorialText(value, 500)).find((value) => value.length >= 40) || '';
+  const shortDescription = (sourceShort || longDescription.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ') || longDescription)
+    .slice(0, 500)
+    .trim();
+  if (shortDescription.length < 40) return null;
+  const timestamp = new Date().toISOString();
+  const base = {
+    ...product,
+    nazwa: title,
+    opisKrotki: shortDescription,
+    opis: longDescription,
+    allegroTitle: deterministicEditorialText(product.allegroTitle || title, 75).replace(/\n+/g, ' ').trim(),
+    allegroDescription: longDescription,
+    seoTitle: deterministicEditorialText(product.seoTitle || title, 70).replace(/\n+/g, ' ').trim(),
+    seoDescription: deterministicEditorialText(product.seoDescription || shortDescription, 160).replace(/\n+/g, ' ').trim(),
+  };
+  const fingerprint = productEditorialFingerprint(base);
+  const sourceFingerprint = productEditorialSourceFingerprint(base);
+  const previous = asObject(product.contentEditorial), previousChannels = asObject(previous.channelStates);
+  const receipt = (channel) => ({
+    ...asObject(previousChannels[channel]),
+    status: 'ready',
+    promptVersion: PROMPT_VERSION,
+    inputFingerprint: fingerprint,
+    preparedAt: timestamp,
+    source: 'deterministic-source-policy',
+  });
+  return {
+    ...base,
+    contentEditorial: {
+      ...previous,
+      status: 'ready',
+      inputFingerprint: fingerprint,
+      sourceFingerprint,
+      channelStates: {
+        ...previousChannels,
+        store: receipt('store'),
+        allegro: receipt('allegro'),
+      },
+      preparedAt: timestamp,
+      source: 'deterministic-source-policy',
+    },
+    contentEditorialPreparedAt: timestamp,
+    contentEditorialSource: 'deterministic-source-policy',
+  };
 }
 
 export function createAllegroPreparationWorker({
@@ -63,7 +146,7 @@ export function createAllegroPreparationWorker({
           channel: 'allegro',
           action: 'przygotowanie produktu do Allegro',
           target: 'centralna kartoteka i szkic Allegro',
-          attempt: Number(task.attempt || 0) + 1,
+          attempt: Math.max(1, Number(task.attempt) || 1),
           ...work,
         });
       } catch {
@@ -233,6 +316,21 @@ export function createAllegroPreparationWorker({
       // poprawnego wyniku strukturalnego albo nie przeszedł bramki jakości.
       editorial = await editorialize(product, sourceUrl, actor);
     }
+    const unresolvedChannelStates = asObject(asObject(editorial.product?.contentEditorial).channelStates);
+    if (unresolvedChannelStates.store?.status !== 'ready' || unresolvedChannelStates.allegro?.status !== 'ready') {
+      const fallbackProduct = deterministicEditorialFallback(editorial.product || product);
+      if (fallbackProduct) {
+        editorial = {
+          ...editorial,
+          product: fallbackProduct,
+          editorialFallback: true,
+          warnings: [
+            ...asArray(editorial.warnings),
+            'Treść przygotowano lokalnie z potwierdzonego materiału źródłowego, ponieważ zewnętrzny redaktor nie zwrócił gotowego wyniku.',
+          ],
+        };
+      }
+    }
     product = editorial.product;
     await progress({
       productName,
@@ -321,13 +419,33 @@ export function createAllegroPreparationWorker({
     };
     for (const key of Object.keys(fields)) if (fields[key] === undefined) delete fields[key];
     const editorialWarnings = asArray(editorial.warnings).map((warning) => String(warning || '').trim()).filter(Boolean);
-    const providerUnavailable = task.skipEditorial !== true
-      && editorialWarnings.some((warning) => providerQuotaUnavailable(warning));
+    const finalEditorialStates = asObject(asObject(product.contentEditorial).channelStates);
+    const providerUnavailable = (
+      task.skipEditorial === true
+      || editorialWarnings.some((warning) => providerQuotaUnavailable(warning))
+    ) && (finalEditorialStates.store?.status !== 'ready' || finalEditorialStates.allegro?.status !== 'ready');
     const ready = missing.length === 0, completedAt = new Date().toISOString(), fingerprintProduct = { ...stored, ...fields };
-    const retry = allegroPreparationRetryState(stored, missing, { ready, now: new Date(completedAt) });
+    const automaticAttempt = Math.max(1, Number(task.attempt) || 1);
+    const disposition = allegroPreparationAttemptDisposition({
+      ready,
+      providerUnavailable,
+      attempt: automaticAttempt,
+    });
+    const retry = providerUnavailable
+      ? {
+          retryCount: Math.max(1, Number(stored?.allegroAgentPreparationRetryCount) || 0) + 1,
+          nextRetryAt: new Date(Date.parse(completedAt) + 6 * 60 * 60_000).toISOString(),
+        }
+      : allegroPreparationRetryState(stored, missing, { ready, now: new Date(completedAt) });
     const savedFields = changedFields(stored, fingerprintProduct, Object.keys(fields));
     Object.assign(fields, {
-      allegroAgentPreparationStatus: ready ? 'ready' : 'needs_attention',
+      allegroAgentPreparationStatus: disposition === 'completed'
+        ? 'ready'
+        : disposition === 'waiting_provider'
+          ? 'waiting_provider'
+          : disposition === 'decision_required'
+            ? 'decision_required'
+            : 'retrying',
       allegroAgentPreparationMissing: missing,
       allegroAgentSavedFields: savedFields,
       allegroAgentPreparedAt: completedAt,
@@ -338,11 +456,20 @@ export function createAllegroPreparationWorker({
       allegroAgentComplianceCheckedAt: compliance.compliance.checkedAt || completedAt,
       allegroAgentPreparationError: editorialWarnings.length ? editorialWarnings.join('; ').slice(0, 2000) : '',
       allegroAgentPreparationFingerprint: preparationFingerprint(fingerprintProduct),
-      allegroAgentPreparationVersion: 4,
+      allegroAgentPreparationVersion: 5,
       allegroAgentPreparationRunId: task.id,
-      allegroAgentPreparationConfirmedAt: completedAt,
+      allegroAgentPreparationConfirmedAt: ready ? completedAt : '',
       allegroAgentPreparationRetryCount: retry.retryCount,
-      allegroAgentPreparationNextRetryAt: retry.nextRetryAt,
+      allegroAgentPreparationNextRetryAt: disposition === 'decision_required' ? '' : retry.nextRetryAt,
+      allegroAgentPreparationDecision: disposition === 'decision_required'
+        ? {
+            required: true,
+            reason: 'automatic_remediation_exhausted',
+            attempts: automaticAttempt,
+            missing,
+            createdAt: completedAt,
+          }
+        : null,
     });
     const mutationId = `allegro-preparation:${productId}:${task.id}`;
     await progress({
@@ -363,22 +490,46 @@ export function createAllegroPreparationWorker({
     });
     await progress({
       productName: persisted.product?.nazwa || productName,
-      phase: ready ? 'zapis_potwierdzony' : 'uzupełnienie_zaplanowane',
-      status: ready ? 'confirmed' : 'attention',
+      phase: ready
+        ? 'zapis_potwierdzony'
+        : disposition === 'waiting_provider'
+          ? 'oczekiwanie_na_dostawce'
+          : disposition === 'decision_required'
+            ? 'decyzja_wymagana'
+            : 'automatyczna_korekta',
+      status: ready
+        ? 'confirmed'
+        : disposition === 'waiting_provider'
+          ? 'waiting_provider'
+          : disposition === 'decision_required'
+            ? 'decision_required'
+            : 'pending',
       fields: savedFields,
-      nextRetryAt: retry.nextRetryAt,
+      nextRetryAt: disposition === 'decision_required' ? '' : retry.nextRetryAt,
       message: ready
         ? `Zapis centralny potwierdzony. Produkt jest gotowy do wystawienia lub aktualizacji w Allegro.${savedFields.length ? ` Zmieniono: ${savedFields.join(', ')}.` : ''}`
-        : `Zapisano wszystkie pewne dane. Nadal brakuje: ${missing.join(', ')}. Agent ponowi pracę automatycznie.`,
+        : disposition === 'waiting_provider'
+          ? `Zapisano wszystkie dane niezależne od AI. Redakcja zostanie wznowiona automatycznie po odnowieniu dostępu dostawcy; brakujące pola: ${missing.join(', ')}.`
+          : disposition === 'decision_required'
+            ? `Automatyczne sposoby uzupełnienia zostały wyczerpane. Potrzebna jest konkretna decyzja wyłącznie dla: ${missing.join(', ')}.`
+            : `Zapisano wynik próby ${automaticAttempt}. Brakuje: ${missing.join(', ')}. Następna korekta jest już częścią tej samej kolejki.`,
     });
     return {
-      status: ready ? 'completed' : 'attention',
+      status: disposition,
       ready,
       name: persisted.product?.nazwa || product.nazwa || `Produkt ${productId}`,
       missing,
       savedFields,
       mutationId,
       providerUnavailable,
+      nextRetryAt: disposition === 'decision_required' ? '' : retry.nextRetryAt,
+      decision: disposition === 'decision_required'
+        ? {
+            reason: 'automatic_remediation_exhausted',
+            attempts: automaticAttempt,
+            missing,
+          }
+        : null,
       error: providerUnavailable ? editorialWarnings.join('; ').slice(0, 1000) : '',
     };
   };

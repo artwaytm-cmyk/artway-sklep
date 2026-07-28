@@ -31,15 +31,27 @@ export function createAllegroPreparationRoute(deps = {}) {
         channel: 'allegro',
         action: 'przygotowanie produktu do Allegro',
         phase: status,
-        status: status === 'failed' ? 'failed' : status === 'attention' ? 'attention' : status === 'completed' ? 'confirmed' : status,
+        status: status === 'completed'
+          ? 'confirmed'
+          : status === 'waiting_provider'
+            ? 'waiting_provider'
+            : status === 'decision_required'
+              ? 'decision_required'
+              : status === 'attention'
+                ? 'pending'
+                : status,
         fields: result.savedFields || [],
         error: result.error || '',
         message: status === 'running'
           ? 'Agent serwerowy przygotowuje i zapisuje jeden produkt.'
           : status === 'completed'
             ? `Produkt został zapisany i potwierdzony odczytem z centralnej kartoteki.${(result.savedFields || []).length ? ` Zmieniono: ${(result.savedFields || []).join(', ')}.` : ''}`
-            : status === 'attention'
-              ? `Produkt zapisano, ale wymaga uzupełnienia: ${(result.missing || []).join(', ')}`
+            : status === 'pending' || status === 'attention'
+              ? (result.message || `Automatyczna korekta trwa: ${(result.missing || []).join(', ')}`)
+              : status === 'waiting_provider'
+                ? `Pewne dane zapisano. Redakcja oczekuje na odnowienie dostępu AI do ${result.nextRetryAt || 'najbliższego automatycznego wznowienia'}.`
+                : status === 'decision_required'
+                  ? `Automatyczne metody zostały wyczerpane. Administrator musi rozstrzygnąć wyłącznie: ${(result.missing || []).join(', ')}`
               : 'Przygotowanie produktu nie zostało potwierdzone.',
       },
     }),
@@ -82,7 +94,7 @@ export function createAllegroPreparationRoute(deps = {}) {
   // i ręcznego nadawania priorytetu, więc zamknięcie panelu nie zatrzymuje pracy.
   const automaticTimer = setInterval(() => {
     runAutomaticPreparation({ batchSize: 50 }).catch((error) => console.error('allegro_preparation_auto', error));
-  }, 15 * 60_000);
+  }, 60_000);
   automaticTimer.unref?.();
   const automaticStartupTimer = setTimeout(() => {
     runAutomaticPreparation({ batchSize: 50 }).catch((error) => console.error('allegro_preparation_auto_startup', error));

@@ -45,13 +45,13 @@ function asortymentZastosujStanKolejkiSerwera(queue={},preferredBatchId=""){
   const queuedIds=[...(Array.isArray(batch.pendingProductIds)?batch.pendingProductIds:[]),...(batch.activeProductId?[batch.activeProductId]:[])].map(String);
   queuedIds.forEach(id=>podmienProduktAdminBezRenderu(id,{allegroAgentPreparationStatus:"queued",allegroAgentPreparationError:"",allegroAgentPreparationMissing:[]}));
   recent.forEach(item=>podmienProduktAdminBezRenderu(item.productId,{
-    allegroAgentPreparationStatus:item.status==="completed"?"ready":item.status==="attention"?"needs_attention":item.status==="failed"?"failed":"queued",
+    allegroAgentPreparationStatus:item.status==="completed"?"ready":item.status==="attention"?"retrying":item.status==="waiting_provider"?"waiting_provider":item.status==="decision_required"?"decision_required":item.status==="failed"?"failed":"queued",
     allegroAgentPreparationError:item.error||"",
     allegroAgentPreparationMissing:item.missing||[],
     allegroAgentPreparedAt:item.completedAt||"",
   }));
-  const done=Number(batch.completed||0)+Number(batch.attention||0)+Number(batch.failed||0),total=Math.max(Number(batch.total||0),done+Number(batch.pending||0)+Number(batch.running||0)),busy=Number(batch.pending||0)+Number(batch.running||0)>0;
-  asortymentAgentKolejka={...asortymentAgentKolejka,busy,operation:batch.operation||"allegro",ids:[],done,total,ok:Number(batch.completed||0)+Number(batch.attention||0),warnings:Number(batch.attention||0),failed:Number(batch.failed||0),current:queue.active&&String(queue.active.batchId)===asortymentSerwerowaKolejka.batchId?`Produkt ${queue.active.productId}`:"",results,startedAt:batch.requestedAt||"",finishedAt:busy?"":queue.updatedAt||new Date().toISOString(),cloudSaved:!busy&&Number(batch.failed||0)===0};
+  const unresolved=Number(batch.attention||0)+Number(batch.waitingProvider||0)+Number(batch.decisionRequired||0),done=Number(batch.completed||0)+unresolved+Number(batch.failed||0),total=Math.max(Number(batch.total||0),done+Number(batch.pending||0)+Number(batch.running||0)),busy=Number(batch.pending||0)+Number(batch.running||0)>0;
+  asortymentAgentKolejka={...asortymentAgentKolejka,busy,operation:batch.operation||"allegro",ids:[],done,total,ok:Number(batch.completed||0),warnings:unresolved,failed:Number(batch.failed||0),current:queue.active&&String(queue.active.batchId)===asortymentSerwerowaKolejka.batchId?`Produkt ${queue.active.productId}`:"",results,startedAt:batch.requestedAt||"",finishedAt:busy?"":queue.updatedAt||new Date().toISOString(),cloudSaved:!busy&&unresolved===0&&Number(batch.failed||0)===0};
   return true;
 }
 async function asortymentSprawdzKolejkeSerwera({render=true}={}){
@@ -129,7 +129,9 @@ function asortymentStatusPrzygotowania(p={}){
   const missing=Array.isArray(p.allegroAgentPreparationMissing)?p.allegroAgentPreparationMissing:[];
   if(status==="queued")return {code:"queued",label:"W kolejce Agenta",note:"oczekuje na przygotowanie i trwały zapis na serwerze"};
   if(status==="ready"||status==="published")return {code:"ready",label:status==="published"?"Oferta zapisana w Allegro":"Gotowy do Allegro",note:(status==="published"?p.allegroAgentPublishedAt:p.allegroAgentPreparedAt)?`zapis ${new Date(status==="published"?p.allegroAgentPublishedAt:p.allegroAgentPreparedAt).toLocaleString("pl-PL")}`:"komplet danych"};
-  if(status==="needs_attention"){const retry=Date.parse(p.allegroAgentPreparationNextRetryAt||"");return {code:"attention",label:"Wymaga uzupełnienia",note:`${missing.join(", ")||"sprawdź dane"}${Number.isFinite(retry)?` • Agent ponowi ${new Date(retry).toLocaleString("pl-PL")}`:" • Agent ponowi automatycznie"}`};}
+  if(status==="needs_attention"||status==="retrying"){return {code:"attention",label:"Automatyczna korekta",note:`${missing.join(", ")||"sprawdzanie danych"} • następna próba jest częścią tej samej pracy`};}
+  if(status==="waiting_provider"){const retry=Date.parse(p.allegroAgentPreparationNextRetryAt||"");return {code:"attention",label:"Oczekuje na dostępność AI",note:`${missing.join(", ")||"redakcja treści"}${Number.isFinite(retry)?` • automatyczne wznowienie ${new Date(retry).toLocaleString("pl-PL")}`:""}`};}
+  if(status==="decision_required")return {code:"failed",label:"Wymaga konkretnej decyzji",note:missing.join(", ")||"automatyczne metody zostały wyczerpane"};
   if(status==="failed")return {code:"failed",label:"Błąd przygotowania",note:p.allegroAgentPreparationError||"uruchom ponownie"};
   return {code:"new",label:"Nieprzygotowany",note:"Agent nie zapisał jeszcze kontroli"};
 }
@@ -176,7 +178,7 @@ async function asortymentPrzygotujProduktDoAllegro(base={},options={}){
     if(!batch)throw new Error("Serwer nie odnalazł utworzonej partii przygotowania.");
     const taskIds=new Set((batch.trackedTaskIds||[]).map(String));
     result=(queue.recent||[]).find(item=>taskIds.has(String(item.id)))||null;
-    const terminal=Number(batch.completed||0)+Number(batch.attention||0)+Number(batch.failed||0);
+    const terminal=Number(batch.completed||0)+Number(batch.attention||0)+Number(batch.waitingProvider||0)+Number(batch.decisionRequired||0)+Number(batch.failed||0);
     if(result&&terminal>=Number(batch.total||1)&&!Number(batch.pending||0)&&!Number(batch.running||0))break;
     await new Promise(resolve=>setTimeout(resolve,1000));
   }

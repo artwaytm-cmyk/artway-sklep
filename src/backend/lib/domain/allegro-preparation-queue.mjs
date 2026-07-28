@@ -5,11 +5,11 @@ const STATE_KEY = 'allegro_preparation_queue';
 const MAX_PENDING = 2000;
 const MAX_RESULTS = 1000;
 const MAX_ATTEMPTS = 10;
+const MAX_AUTOMATIC_REMEDIATION_ATTEMPTS = 3;
 const AUTO_RETRY_INTERVALS = Object.freeze([
-  15 * 60_000,
-  60 * 60_000,
-  6 * 60 * 60_000,
-  24 * 60 * 60_000,
+  15_000,
+  60_000,
+  5 * 60_000,
 ]);
 
 const clean = (value = '', limit = 500) => String(value ?? '').replace(/\u0000/g, '').trim().slice(0, limit);
@@ -60,7 +60,7 @@ function normalizeState(value = {}) {
 function publicState(value = {}) {
   const state = normalizeState(value);
   const batchById = new Map(state.batches.map((batch) => [batch.id, {
-    ...batch, pending: 0, running: 0, completed: 0, attention: 0, failed: 0,
+    ...batch, pending: 0, running: 0, completed: 0, attention: 0, waitingProvider: 0, decisionRequired: 0, failed: 0,
     pendingProductIds: [], activeProductId: '', unknown: 0,
   }]));
   const taskState = new Map();
@@ -86,6 +86,8 @@ function publicState(value = {}) {
     if (!batch) continue;
     if (item.status === 'completed') batch.completed += 1;
     else if (item.status === 'attention') batch.attention += 1;
+    else if (item.status === 'waiting_provider') batch.waitingProvider += 1;
+    else if (item.status === 'decision_required') batch.decisionRequired += 1;
     else if (item.status === 'failed') batch.failed += 1;
   }
   // Nowe partie zapamiętują dokładne identyfikatory zadań. Dzięki temu
@@ -95,7 +97,7 @@ function publicState(value = {}) {
     const trackedTaskIds = [...new Set(asArray(batch.trackedTaskIds).map((id) => clean(id, 120)).filter(Boolean))];
     if (!trackedTaskIds.length) continue;
     Object.assign(batch, {
-      pending: 0, running: 0, completed: 0, attention: 0, failed: 0,
+      pending: 0, running: 0, completed: 0, attention: 0, waitingProvider: 0, decisionRequired: 0, failed: 0,
       pendingProductIds: [], activeProductId: '', unknown: 0,
     });
     for (const taskId of trackedTaskIds) {
@@ -112,6 +114,8 @@ function publicState(value = {}) {
         batch.activeProductId = tracked.item.productId;
       } else if (tracked.status === 'completed') batch.completed += 1;
       else if (tracked.status === 'attention') batch.attention += 1;
+      else if (tracked.status === 'waiting_provider') batch.waitingProvider += 1;
+      else if (tracked.status === 'decision_required') batch.decisionRequired += 1;
       else if (tracked.status === 'failed') batch.failed += 1;
     }
   }
@@ -133,6 +137,8 @@ function publicState(value = {}) {
     running: current.filter((item) => item.status === 'running').length,
     completed: current.filter((item) => item.status === 'completed').length,
     attention: current.filter((item) => item.status === 'attention').length,
+    waitingProvider: current.filter((item) => item.status === 'waiting_provider').length,
+    decisionRequired: current.filter((item) => item.status === 'decision_required').length,
     failed: current.filter((item) => item.status === 'failed').length,
   };
   return {
@@ -237,20 +243,26 @@ export function selectAllegroPreparationCandidates(products = [], {
     // że pochodzą sprzed wprowadzenia technicznego pokwitowania Agenta.
     if (allegroAutomaticPreparationDisposition(product).verificationOnly) continue;
     const status = clean(product?.allegroAgentPreparationStatus, 40).toLowerCase();
+    const preparationVersion = Math.max(0, Number(product?.allegroAgentPreparationVersion) || 0);
     const preparedAt = parsedDate(product?.allegroAgentPreparedAt || product?.allegroAgentPreparationConfirmedAt);
     const sourceChangedAt = Math.max(
       parsedDate(product?.sourceRefreshedAt),
     );
     const nextRetryAt = parsedDate(product?.allegroAgentPreparationNextRetryAt);
-    const retryDue = !nextRetryAt || nextRetryAt <= timestamp || sourceChangedAt > preparedAt;
+    const retryDue = preparationVersion < 5 || !nextRetryAt || nextRetryAt <= timestamp || sourceChangedAt > preparedAt;
     const current = typeof preparationCurrent === 'function'
       ? preparationCurrent(product)
       : ['ready', 'published'].includes(status) && !asArray(product?.allegroAgentPreparationMissing).length;
 
     let priority = 0, reason = '';
-    if (['needs_attention', 'attention', 'failed'].includes(status) && retryDue) {
+    if (status === 'decision_required') {
+      if (sourceChangedAt > preparedAt) {
+        priority = 340 + salePriority(product);
+        reason = 'nowe_dane_po_decyzji';
+      }
+    } else if (['needs_attention', 'attention', 'retrying', 'failed', 'waiting_provider'].includes(status) && retryDue) {
       priority = 300 + salePriority(product);
-      reason = 'wymaga_uzupelnienia';
+      reason = status === 'waiting_provider' ? 'wznowienie_po_dostawcy' : 'wymaga_uzupelnienia';
     } else if (!status || status === 'new' || status === 'queued' || !preparedAt) {
       priority = 200 + salePriority(product);
       reason = 'nieprzygotowany';
@@ -294,6 +306,17 @@ export function allegroPreparationRetryState(previous = {}, missing = [], {
   const delay = AUTO_RETRY_INTERVALS[Math.min(AUTO_RETRY_INTERVALS.length - 1, retryCount - 1)];
   const timestamp = now instanceof Date ? now.getTime() : parsedDate(now) || Date.now();
   return { retryCount, nextRetryAt: new Date(timestamp + delay).toISOString() };
+}
+
+export function allegroPreparationAttemptDisposition({
+  ready = false,
+  providerUnavailable = false,
+  attempt = 1,
+} = {}) {
+  if (ready) return 'completed';
+  if (providerUnavailable) return 'waiting_provider';
+  if (Math.max(1, Number(attempt) || 1) >= MAX_AUTOMATIC_REMEDIATION_ATTEMPTS) return 'decision_required';
+  return 'attention';
 }
 
 function createPostgresAllegroPreparationQueue({
@@ -393,7 +416,7 @@ function createPostgresAllegroPreparationQueue({
           ...(legacy.active ? [{ task: legacy.active, status: 'pending', result: {} }] : []),
           ...legacy.results.map((result) => ({
             task: normalizeTask(result),
-            status: ['completed', 'attention', 'failed'].includes(result.status) ? result.status : 'failed',
+            status: ['completed', 'attention', 'waiting_provider', 'decision_required', 'failed'].includes(result.status) ? result.status : 'failed',
             result,
           })),
         ];
@@ -403,7 +426,7 @@ function createPostgresAllegroPreparationQueue({
               namespace,task_id,batch_id,product_id,operation,requested_by,requested_at,
               attempt,skip_editorial,status,result,completed_at,updated_at
             ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,
-              CASE WHEN $10 IN ('completed','attention','failed') THEN NOW() ELSE NULL END,NOW())
+              CASE WHEN $10 IN ('completed','attention','waiting_provider','decision_required','failed') THEN NOW() ELSE NULL END,NOW())
             ON CONFLICT(namespace,task_id) DO NOTHING
           `, [
             ns, task.id, task.batchId, task.productId, task.operation, task.requestedBy,
@@ -445,7 +468,7 @@ function createPostgresAllegroPreparationQueue({
     const [pendingRows, activeRows, resultRows, batchRows, stateRows] = await Promise.all([
       pool.query("SELECT * FROM artway_allegro_preparation_tasks WHERE namespace=$1 AND status='pending' ORDER BY requested_at,task_id LIMIT 2000", [ns]),
       pool.query("SELECT * FROM artway_allegro_preparation_tasks WHERE namespace=$1 AND status='running' ORDER BY started_at,task_id LIMIT 1", [ns]),
-      pool.query("SELECT * FROM artway_allegro_preparation_tasks WHERE namespace=$1 AND status IN ('completed','attention','failed') ORDER BY completed_at DESC NULLS LAST,updated_at DESC LIMIT 1000", [ns]),
+      pool.query("SELECT * FROM artway_allegro_preparation_tasks WHERE namespace=$1 AND status IN ('completed','attention','waiting_provider','decision_required','failed') ORDER BY completed_at DESC NULLS LAST,updated_at DESC LIMIT 1000", [ns]),
       pool.query('SELECT * FROM artway_allegro_preparation_batches WHERE namespace=$1 ORDER BY requested_at DESC LIMIT 100', [ns]),
       pool.query('SELECT * FROM artway_allegro_preparation_state WHERE namespace=$1', [ns]),
     ]);
@@ -598,12 +621,37 @@ function createPostgresAllegroPreparationQueue({
       savedFields: asArray(result?.savedFields).map((entry) => clean(entry, 120)).filter(Boolean).slice(0, 100),
       mutationId: clean(result?.mutationId, 160),
       error: clean(result?.error, 1000),
+      nextRetryAt: clean(result?.nextRetryAt, 50),
+      decision: asObject(result?.decision),
     };
     await pool.query(`
       UPDATE artway_allegro_preparation_tasks
       SET status=$3,result=$4::jsonb,completed_at=NOW(),updated_at=NOW()
       WHERE namespace=$1 AND task_id=$2
     `, [ns, task.id, item.status, JSON.stringify(item)]);
+  };
+
+  const requeue = async (task, result) => {
+    const item = {
+      id: task.id,
+      batchId: task.batchId,
+      productId: task.productId,
+      operation: task.operation,
+      requestedAt: task.requestedAt,
+      status: 'pending',
+      ready: false,
+      name: clean(result?.name, 300),
+      missing: asArray(result?.missing).map((entry) => clean(entry, 500)).filter(Boolean).slice(0, 50),
+      savedFields: asArray(result?.savedFields).map((entry) => clean(entry, 120)).filter(Boolean).slice(0, 100),
+      mutationId: clean(result?.mutationId, 160),
+      error: clean(result?.error, 1000),
+      nextRetryAt: clean(result?.nextRetryAt, 50),
+    };
+    await pool.query(`
+      UPDATE artway_allegro_preparation_tasks
+      SET status='pending',result=$3::jsonb,requested_at=NOW(),started_at=NULL,completed_at=NULL,updated_at=NOW()
+      WHERE namespace=$1 AND task_id=$2
+    `, [ns, task.id, JSON.stringify(item)]);
   };
 
   const pauseForQuota = async () => {
@@ -624,21 +672,72 @@ function createPostgresAllegroPreparationQueue({
       if (!task) break;
       if (typeof report === 'function') await report({ task, status: 'running' }).catch(() => {});
       try {
-        const result = await prepare(task);
+        let result = await prepare(task);
+        const continueAutomatically = result?.status === 'attention'
+          && result?.providerUnavailable !== true
+          && Number(task.attempt || 0) < MAX_AUTOMATIC_REMEDIATION_ATTEMPTS;
+        if (continueAutomatically) {
+          await requeue(task, result);
+          if (typeof report === 'function') {
+            await report({
+              task,
+              status: 'pending',
+              result: {
+                ...result,
+                message: `Automatyczna korekta trwa — próba ${Number(task.attempt || 0) + 1} z ${MAX_AUTOMATIC_REMEDIATION_ATTEMPTS} została już ustawiona w tej samej kolejce.`,
+              },
+            }).catch(() => {});
+          }
+          continue;
+        }
+        if (result?.status === 'attention') {
+          result = {
+            ...result,
+            status: 'decision_required',
+            decision: {
+              reason: 'automatic_remediation_exhausted',
+              missing: asArray(result?.missing),
+              attempts: Number(task.attempt || 0),
+            },
+          };
+        }
         await finish(task, result);
         if (typeof report === 'function') {
           await report({
             task,
-            status: result?.ready === false ? 'attention' : 'completed',
+            status: result?.status || (result?.ready === false ? 'decision_required' : 'completed'),
             result,
           }).catch(() => {});
         }
         if (result?.providerUnavailable === true || providerQuotaUnavailable(result?.error)) await pauseForQuota();
       } catch (error) {
-        const result = { status: 'failed', ready: false, error: clean(error?.message || error, 1000) };
+        const quotaUnavailable = providerQuotaUnavailable(error);
+        let result = {
+          status: quotaUnavailable
+            ? 'waiting_provider'
+            : Number(task.attempt || 0) < MAX_AUTOMATIC_REMEDIATION_ATTEMPTS
+              ? 'pending'
+              : 'decision_required',
+          ready: false,
+          providerUnavailable: quotaUnavailable,
+          error: clean(error?.message || error, 1000),
+          nextRetryAt: quotaUnavailable ? new Date(now().getTime() + 6 * 60 * 60_000).toISOString() : '',
+          decision: quotaUnavailable || Number(task.attempt || 0) < MAX_AUTOMATIC_REMEDIATION_ATTEMPTS
+            ? null
+            : {
+                reason: 'automatic_execution_failed',
+                attempts: Number(task.attempt || 0),
+                error: clean(error?.message || error, 1000),
+              },
+        };
+        if (!quotaUnavailable && Number(task.attempt || 0) < MAX_AUTOMATIC_REMEDIATION_ATTEMPTS) {
+          await requeue(task, result);
+          if (typeof report === 'function') await report({ task, status: 'pending', result }).catch(() => {});
+          continue;
+        }
         await finish(task, result);
-        if (typeof report === 'function') await report({ task, status: 'failed', result }).catch(() => {});
-        if (providerQuotaUnavailable(error)) await pauseForQuota();
+        if (typeof report === 'function') await report({ task, status: result.status, result }).catch(() => {});
+        if (quotaUnavailable) await pauseForQuota();
       }
     }
   };
@@ -780,9 +879,22 @@ export function createAllegroPreparationQueue({
         savedFields: asArray(result?.savedFields).map((entry) => clean(entry, 120)).filter(Boolean).slice(0, 100),
         mutationId: clean(result?.mutationId, 160),
         error: clean(result?.error, 1000),
+        nextRetryAt: clean(result?.nextRetryAt, 50),
+        decision: asObject(result?.decision),
       };
       return { ...state, active: state.active?.id === task.id ? null : state.active, results: [item, ...state.results].slice(0, MAX_RESULTS) };
     });
+  }
+
+  async function requeue(task) {
+    return mutate((state) => ({
+      ...state,
+      active: state.active?.id === task.id ? null : state.active,
+      pending: [...state.pending, normalizeTask({
+        ...task,
+        requestedAt: now().toISOString(),
+      })].slice(0, MAX_PENDING),
+    }));
   }
 
   async function run() {
@@ -798,9 +910,35 @@ export function createAllegroPreparationQueue({
       if (!task) break;
       if (typeof report === 'function') await report({ task, status: 'running' }).catch(() => {});
       try {
-        const result = await prepare(task);
+        let result = await prepare(task);
+        const continueAutomatically = result?.status === 'attention'
+          && result?.providerUnavailable !== true
+          && Number(task.attempt || 0) < MAX_AUTOMATIC_REMEDIATION_ATTEMPTS;
+        if (continueAutomatically) {
+          await requeue(task);
+          if (typeof report === 'function') await report({
+            task,
+            status: 'pending',
+            result: {
+              ...result,
+              message: `Automatyczna korekta trwa — próba ${Number(task.attempt || 0) + 1} z ${MAX_AUTOMATIC_REMEDIATION_ATTEMPTS} została już ustawiona w tej samej kolejce.`,
+            },
+          }).catch(() => {});
+          continue;
+        }
+        if (result?.status === 'attention') {
+          result = {
+            ...result,
+            status: 'decision_required',
+            decision: {
+              reason: 'automatic_remediation_exhausted',
+              missing: asArray(result?.missing),
+              attempts: Number(task.attempt || 0),
+            },
+          };
+        }
         await finish(task, result);
-        if (typeof report === 'function') await report({ task, status: result?.ready === false ? 'attention' : 'completed', result }).catch(() => {});
+        if (typeof report === 'function') await report({ task, status: result?.status || (result?.ready === false ? 'decision_required' : 'completed'), result }).catch(() => {});
         // Redaktorzy zapisują bezpieczne pola nawet wtedy, gdy dostawca AI zwróci
         // limit rozliczeniowy. Taki wynik nie jest wyjątkiem, dlatego kolejka musi
         // rozpoznać go jawnie i pozostawić następne produkty do późniejszego wznowienia.
@@ -811,10 +949,33 @@ export function createAllegroPreparationQueue({
           continue;
         }
       } catch (error) {
-        const result = { status: 'failed', ready: false, error: clean(error?.message || error, 1000) };
+        const quotaUnavailable = providerQuotaUnavailable(error);
+        const result = {
+          status: quotaUnavailable
+            ? 'waiting_provider'
+            : Number(task.attempt || 0) < MAX_AUTOMATIC_REMEDIATION_ATTEMPTS
+              ? 'pending'
+              : 'decision_required',
+          ready: false,
+          providerUnavailable: quotaUnavailable,
+          error: clean(error?.message || error, 1000),
+          nextRetryAt: quotaUnavailable ? new Date(now().getTime() + 6 * 60 * 60_000).toISOString() : '',
+          decision: quotaUnavailable || Number(task.attempt || 0) < MAX_AUTOMATIC_REMEDIATION_ATTEMPTS
+            ? null
+            : {
+                reason: 'automatic_execution_failed',
+                attempts: Number(task.attempt || 0),
+                error: clean(error?.message || error, 1000),
+              },
+        };
+        if (!quotaUnavailable && Number(task.attempt || 0) < MAX_AUTOMATIC_REMEDIATION_ATTEMPTS) {
+          await requeue(task);
+          if (typeof report === 'function') await report({ task, status: 'pending', result }).catch(() => {});
+          continue;
+        }
         await finish(task, result);
-        if (typeof report === 'function') await report({ task, status: 'failed', result }).catch(() => {});
-        if (providerQuotaUnavailable(error)) {
+        if (typeof report === 'function') await report({ task, status: result.status, result }).catch(() => {});
+        if (quotaUnavailable) {
           await pauseForQuota();
           continue;
         }

@@ -45,9 +45,10 @@ test("Praca Agenta pokazuje wyłącznie telemetrię runtime i odświeża ją co 
   assert.match(runtime,/chmura\("agent-runtime-status"/);
   assert.match(runtime,/setTimeout\(async\(\)=>\{await agentAIRuntimePobierz\(true\);agentAIRuntimePolling\(\);\},15000\)/);
   assert.match(runtime,/FIZYCZNIE WYKONYWANA CZYNNOŚĆ/);
-  assert.match(runtime,/Dowody publikacji zmian Agenta/);
+  assert.match(runtime,/Przygotowanie produktów do Allegro/);
+  assert.match(runtime,/allegro-preparation-queue-status/);
   assert.match(runtime,/currentWork/);
-  assert.match(runtime,/publicationCounts/);
+  assert.match(runtime,/preparationCounts/);
   assert.match(styles,/\.agent-live-truth/);
   assert.match(styles,/\.agent-runtime-exact-work/);
   assert.match(styles,/\.agent-publication-proof/);

@@ -102,7 +102,7 @@ function safeActivity(value = {}) {
 
 function safeWork(value = {}) {
   const channel = ['store', 'allegro', 'vonHalsky', 'system'].includes(value?.channel) ? value.channel : 'system';
-  const status = ['running', 'pending', 'confirmed', 'attention', 'failed', 'decision_required', 'skipped'].includes(value?.status)
+  const status = ['running', 'pending', 'confirmed', 'attention', 'waiting_provider', 'failed', 'decision_required', 'skipped'].includes(value?.status)
     ? value.status
     : 'pending';
   return {
@@ -315,7 +315,7 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
           ...input.work,
           updatedAt: input.work?.updatedAt || timestamp,
           startedAt: input.work?.startedAt || (input.work?.status === 'running' ? timestamp : ''),
-          completedAt: ['confirmed', 'decision_required', 'skipped'].includes(input.work?.status) ? (input.work?.completedAt || timestamp) : input.work?.completedAt,
+          completedAt: ['confirmed', 'waiting_provider', 'decision_required', 'skipped'].includes(input.work?.status) ? (input.work?.completedAt || timestamp) : input.work?.completedAt,
         });
         const previous = record.workItems.find((item) => item.id === work.id);
         const merged = safeWork({
@@ -328,7 +328,7 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
         const workItems = [merged, ...record.workItems.filter((item) => item.id !== merged.id)]
           .sort((left, right) => String(right.updatedAt || right.startedAt).localeCompare(String(left.updatedAt || left.startedAt)))
           .slice(0, MAX_WORK_ITEMS);
-        const finished = ['confirmed', 'decision_required', 'skipped'].includes(merged.status);
+        const finished = ['confirmed', 'waiting_provider', 'decision_required', 'skipped'].includes(merged.status);
         const workActivity = {
           id: `${merged.id}:${merged.phase || merged.status}:${merged.updatedAt || timestamp}`,
           at: merged.updatedAt || timestamp,
@@ -337,7 +337,7 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
             ? 'success'
             : merged.status === 'failed'
               ? 'error'
-              : ['attention', 'decision_required'].includes(merged.status)
+              : ['attention', 'waiting_provider', 'decision_required'].includes(merged.status)
                 ? 'warning'
                 : merged.status === 'running'
                   ? 'running'
@@ -377,7 +377,7 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
       kind: ['oferty-lekkie', 'oferty-pelne', 'zamowienia', 'komunikacja'].includes(step.id) ? 'allegro' : step.id === 'tresci-gpt-nano' ? 'ai' : 'system',
     }));
     const state = !workerOnline ? 'offline' : record.currentRun ? 'working' : !cycleFresh ? 'stale' : integrationWarnings.length ? 'degraded' : 'online';
-    const pendingPublication = record.workItems.filter((item) => ['pending', 'attention', 'failed'].includes(item.status));
+    const pendingPublication = record.workItems.filter((item) => ['pending', 'attention', 'waiting_provider', 'failed', 'decision_required'].includes(item.status));
     const confirmedPublication = record.workItems.filter((item) => item.status === 'confirmed');
     return {
       state,
@@ -397,6 +397,8 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
         counts: {
           pending: pendingPublication.filter((item) => item.status === 'pending').length,
           attention: pendingPublication.filter((item) => item.status === 'attention').length,
+          waitingProvider: pendingPublication.filter((item) => item.status === 'waiting_provider').length,
+          decisionRequired: pendingPublication.filter((item) => item.status === 'decision_required').length,
           failed: pendingPublication.filter((item) => item.status === 'failed').length,
           confirmed: confirmedPublication.length,
         },
