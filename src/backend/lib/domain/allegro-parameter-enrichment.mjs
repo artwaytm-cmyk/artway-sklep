@@ -287,6 +287,15 @@ function inferredMaterial(product = {}) {
 function inferredType(product = {}) {
   const explicit = firstAliasedValue(product, PARAMETER_ALIASES.type);
   if (explicit) return { ...explicit, confidence: 1 };
+  const value = normalizeAllegroParameterName(productText(product));
+  for (const [pattern, type] of [
+    [/\bgra karcian|\bkarcian(?:a|e|y)\b/, 'gra karciana'],
+    [/\bgra plansz|\bplanszow/, 'gra planszowa'],
+    [/\bgra edukacyjn|\bedukacyjn/, 'gra edukacyjna'],
+    [/\bgra zrecznosciow|\bzrecznosciow/, 'gra zręcznościowa'],
+    [/\bgra rodzinn|\brodzinn/, 'gra rodzinna'],
+    [/\bgra towarzysk|\btowarzysk/, 'gra towarzyska'],
+  ]) if (pattern.test(value)) return { value: type, source: 'rodzaj jednoznaczny z nazwy i opisu', confidence: 0.94 };
   const kind = productKind(product);
   return kind ? { value: kind, source: 'rodzaj jednoznaczny z nazwy i opisu', confidence: 0.9 } : null;
 }

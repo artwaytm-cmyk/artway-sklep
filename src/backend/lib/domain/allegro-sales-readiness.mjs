@@ -5,8 +5,10 @@ function list(raw = {}, keys = []) {
   return Array.isArray(raw) ? raw : [];
 }
 
-function firstId(items = []) {
-  const item = (Array.isArray(items) ? items : []).find((entry) => safeText(entry?.id || entry?.uuid, 120));
+function firstId(items = [], preferredId = '') {
+  const available = Array.isArray(items) ? items : [];
+  const preferred = available.find((entry) => safeText(entry?.id || entry?.uuid, 120) === safeText(preferredId, 120));
+  const item = preferred || available.find((entry) => safeText(entry?.id || entry?.uuid, 120));
   return safeText(item?.id || item?.uuid, 120);
 }
 
@@ -22,8 +24,9 @@ function normalize(raw = {}) {
 export function createAllegroSalesConditionsLoader({ call, cacheMs = 5 * 60_000 } = {}) {
   if (typeof call !== 'function') throw new TypeError('Brak klienta Allegro dla warunków sprzedaży.');
   let cache = { expiresAt: 0, value: null };
-  return async function load(req) {
-    if (cache.value && cache.expiresAt > Date.now()) return structuredClone(cache.value);
+  return async function load(req, options = {}) {
+    const cacheKey = safeText(options.shippingRateId, 120) || 'automatic';
+    if (cache.value?.cacheKey === cacheKey && cache.expiresAt > Date.now()) return structuredClone(cache.value.result);
     const errors = [];
     const safe = async (path, key) => {
       let lastError = null;
@@ -49,7 +52,7 @@ export function createAllegroSalesConditionsLoader({ call, cacheMs = 5 * 60_000 
     const result = {
       ...data,
       defaults: {
-        shippingRateId: firstId(data.shippingRates),
+        shippingRateId: firstId(data.shippingRates, options.shippingRateId),
         returnPolicyId: firstId(data.returnPolicies),
         impliedWarrantyId: firstId(data.impliedWarranties),
         warrantyId: firstId(data.warranties),
@@ -57,7 +60,7 @@ export function createAllegroSalesConditionsLoader({ call, cacheMs = 5 * 60_000 
       errors,
     };
     if (result.defaults.shippingRateId && result.defaults.returnPolicyId && result.defaults.impliedWarrantyId) {
-      cache = { expiresAt: Date.now() + Math.max(30_000, Number(cacheMs) || 5 * 60_000), value: structuredClone(result) };
+      cache = { expiresAt: Date.now() + Math.max(30_000, Number(cacheMs) || 5 * 60_000), value: { cacheKey, result: structuredClone(result) } };
     }
     return result;
   };

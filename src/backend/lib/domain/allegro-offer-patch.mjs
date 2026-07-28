@@ -27,10 +27,20 @@ export function allegroPatchZDraftu(draft = {}, options = {}) {
 
 export function allegroOfferVerification(offer = {}, checked = false) {
   const status = String(offer?.publication?.status || offer?.status || '').trim().toUpperCase();
+  const baseMarketplace = String(offer?.publication?.marketplaces?.base?.id || '').trim();
+  const additionalMarketplaces = (Array.isArray(offer?.publication?.marketplaces?.additional)
+    ? offer.publication.marketplaces.additional : [])
+    .map((item) => String(item?.id || '').trim()).filter(Boolean);
+  const foreignMarketplaces = additionalMarketplaces.filter((id) => !['allegro-pl', 'allegro-business-pl'].includes(id));
   return {
     checked: checked === true,
     status,
     active: status === 'ACTIVE',
     descriptionSections: Array.isArray(offer?.description?.sections) ? offer.description.sections.length : 0,
+    baseMarketplace,
+    additionalMarketplaces,
+    foreignMarketplaces,
+    polishBaseConfirmed: baseMarketplace === 'allegro-pl',
+    polandOnlyConfirmed: baseMarketplace === 'allegro-pl' && foreignMarketplaces.length === 0,
   };
 }

@@ -58,7 +58,7 @@ export const CATALOG_PRODUCT_PREPARATION_FIELDS = new Set([
   'allegroAgentPreparationFingerprint', 'allegroAgentPreparationVersion',
   'allegroAgentPreparationRunId', 'allegroAgentPreparationConfirmedAt',
   'allegroAgentPreparationConfirmedRevision', 'allegroAgentPreparationRetryCount',
-  'allegroAgentPreparationNextRetryAt',
+  'allegroAgentPreparationNextRetryAt', 'allegroPreparationManifest',
   'seoTitle', 'seoDescription', 'seoKeywords', 'seoScore', 'seoReviewedAt',
   'seoSource', 'seoMode',
   'allegroOfferId', 'allegroStock', 'allegroSyncedAt', 'allegroSyncSource',

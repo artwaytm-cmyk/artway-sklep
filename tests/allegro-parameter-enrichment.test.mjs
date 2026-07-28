@@ -151,3 +151,13 @@ test('wydawca parametru Allegro zawsze pochodzi z rzeczywistego producenta produ
     assert.equal(result.evidence.publisher.confidence, 1);
   }
 });
+
+test('rodzaj gry jest wyprowadzany precyzyjnie z nazwy zamiast ogólnej wartości gra', () => {
+  const result = enrichAllegroProductEvidence({
+    id: 'type-card-game',
+    nazwa: 'Język Ciała - karciana gra rodzinna Alexander',
+    producent: 'Alexander',
+  }, []);
+  assert.equal(result.evidence.type.value, 'gra karciana');
+  assert.equal(result.evidence.type.confidence, 0.94);
+});

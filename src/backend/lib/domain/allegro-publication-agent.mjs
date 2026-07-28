@@ -6,8 +6,10 @@ export const ALLEGRO_AGENT_OFFER_PROCEDURE = Object.freeze([
   'Nigdy nie wybieraj produktu katalogowego po samej nazwie ani samym MPN. UUID katalogu wolno zapisać tylko po dokładnej weryfikacji lub ręcznej decyzji administratora.',
   'Jeżeli produktu nie ma EAN, przygotuj nową kartotekę z kategorią i kompletem parametrów, bez podpinania istniejącego UUID katalogowego.',
   'Uzupełnij producenta, markę, wydawcę, EAN, MPN, kategorię, UUID i wszystkie wymagane parametry. Zdjęcia pobieraj wyłącznie z konkretnego linku źródłowego produktu; nigdy z podobnej oferty ani katalogu Allegro.',
+  'Każde zdjęcie zweryfikuj technicznie: właściwy produkt, dłuższy bok 500–2560 px, obsługiwany format i poprawny odczyt. Obraz 300–499 px albo większy niż 2560 px dopasuj z zachowaniem proporcji, orientacji i bez dodawania napisów; następnie wyślij przez /sale/images.',
+  'Nie ustawiaj rynków na siłę. Nie wysyłaj additionalMarketplaces ani osobnych cen dla allegro-cz, allegro-sk lub allegro-hu; odczytaj wynik i zaraportuj bazowy rynek. Nie zmieniaj samodzielnie cenników dostawy, a jako domyślny stosuj istniejący cennik artway2.',
   'Nową ofertę zapisz jako INACTIVE; brak stanu magazynowego oznacza 0.',
-  'Po sukcesie zapisz powiązanie produkt sklepu–produkt katalogowy–oferta i zamknij zadanie.',
+  'Po sukcesie odczytaj ofertę ponownie. Sukces wymaga offerId, potwierdzonego statusu, odczytanego rynku bazowego, zapisanego zdjęcia oraz powiązania produkt sklepu–produkt katalogowy–oferta; rynku nie ustawiaj na siłę.',
   'Jeżeli brakuje danych, nie zgaduj: zapisz dokładne braki i błąd API do jednej kolejki ponowienia.',
 ]);
 
@@ -24,6 +26,8 @@ export function buildAllegroPublicationSuccessFields({
       || details.offer?.status || details.offer?.publication?.status || details.expectedStatus || '',
     80,
   ).toUpperCase();
+  const marketplace = text(details.verifiedOffer?.publication?.marketplaces?.base?.id, 80);
+  const imagePublication = details.imagePublication && typeof details.imagePublication === 'object' ? details.imagePublication : {};
   return {
     ...autoPatch, allegroOfferId: text(details.offerId, 100),
     ...(Number.isFinite(Number(details.draft?.stock?.available)) ? { allegroStock: Math.max(0, Math.floor(Number(details.draft.stock.available))) } : {}),
@@ -35,6 +39,10 @@ export function buildAllegroPublicationSuccessFields({
     allegroAgentPreparationStatus: 'published', allegroAgentPreparationMissing: [],
     allegroAgentPreparationError: '', allegroAgentPublishedAt: now,
     allegroPublicationAgentStatus: 'completed', allegroPublicationLastSuccessAt: now,
+    allegroMarketplaceId: marketplace,
+    allegroImagePublishedCount: Array.isArray(imagePublication.published) ? imagePublication.published.length : 0,
+    allegroImageAdaptedCount: Array.isArray(imagePublication.published) ? imagePublication.published.filter((item) => item?.adapted).length : 0,
+    allegroImagePublishedAt: Array.isArray(imagePublication.published) && imagePublication.published.length ? now : text(product.allegroImagePublishedAt, 80),
     allegroPublicationLastErrorCode: '', allegroPublicationLastError: '',
     allegroPublicationAgentTaskId: '', allegroPublicationReportId: '', allegroPublicationSpecialistRunId: '',
   };

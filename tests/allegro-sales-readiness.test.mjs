@@ -29,6 +29,19 @@ test('warunki sprzedaży są pobierane raz i zachowywane dla finalnej publikacji
   assert.equal(calls, 4);
 });
 
+test('przygotowanie wybiera wskazany istniejący cennik artway2 zamiast pierwszego z listy', async () => {
+  const load = createAllegroSalesConditionsLoader({
+    call: async (_req, path) => {
+      if (path === '/sale/shipping-rates') return { shippingRates: [{ id: 'artway-1', name: 'artway 1' }, { id: 'artway-2', name: 'artway2' }] };
+      if (path.includes('return-policies')) return { returnPolicies: [{ id: 'return-1' }] };
+      if (path.includes('implied-warranties')) return { impliedWarranties: [{ id: 'claim-1' }] };
+      return { warranties: [] };
+    },
+  });
+  const result = await load({}, { shippingRateId: 'artway-2' });
+  assert.equal(result.defaults.shippingRateId, 'artway-2');
+});
+
 test('status oferty jest potwierdzany na rzeczywistej ofercie, nie tylko operacji pośredniej', async () => {
   let checks = 0;
   const wait = createAllegroOfferStatusWaiter({

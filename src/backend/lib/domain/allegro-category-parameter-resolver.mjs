@@ -279,6 +279,22 @@ function ageCandidates(age) {
   return [age.original, String(years), `${years} lat +`, `${years} lata +`, `${years} rok +`, `${years} lat`, `${years} lata`, `${years} rok`];
 }
 
+function typeCandidates(value = '') {
+  const source = String(value || '').trim();
+  const normalized = normalizeAllegroParameterName(source);
+  const variants = [source];
+  for (const [pattern, names] of [
+    [/\bkarcian/, ['gra karciana', 'karciana', 'karciane']],
+    [/\bplansz/, ['gra planszowa', 'planszowa', 'planszowe']],
+    [/\bedukacyjn/, ['gra edukacyjna', 'edukacyjna', 'edukacyjne']],
+    [/\brodzinn/, ['gra rodzinna', 'rodzinna', 'rodzinne']],
+    [/\bzrecznosciow/, ['gra zręcznościowa', 'zręcznościowa', 'zręcznościowe']],
+    [/\btowarzysk/, ['gra towarzyska', 'towarzyska', 'towarzyskie']],
+  ]) if (pattern.test(normalized)) variants.push(...names);
+  if (normalized === 'gra') variants.push('gra planszowa', 'planszowa');
+  return [...new Set(variants.filter(Boolean))];
+}
+
 function genericCatalogValue(catalog, parameterName) {
   const exact = catalog.get(parameterName);
   if (exact) return exact;
@@ -340,7 +356,7 @@ export function resolveAllegroCategoryParameter(product = {}, parameter = {}) {
     record = firstCatalogValue(catalog, ALIASES.age);
     const age = parseAge(record?.value);
     if (age) payload = parameterPayload(parameter, String(Math.max(0, Math.floor(age.years))), ageCandidates(age));
-  } else if (/wiek dziecka|wiek graczy|^wiek$/.test(name)) {
+  } else if (/wiek dziecka|wiek gracz(?:a|y)|^wiek$/.test(name)) {
     record = firstCatalogValue(catalog, ALIASES.age);
     const age = parseAge(record?.value);
     if (age) payload = parameterPayload(parameter, record.value, ageCandidates(age));
@@ -354,7 +370,10 @@ export function resolveAllegroCategoryParameter(product = {}, parameter = {}) {
   }
   else if (/^(seria|linia|kolekcja|model)$/.test(name)) record = firstCatalogValue(catalog, ALIASES.series);
   else if (/wersja jezykowa|jezyk(?: gry| instrukcji)?/.test(name)) record = firstCatalogValue(catalog, ALIASES.language);
-  else if (/^(?:typ|rodzaj)(?: produktu| gry)?$/.test(name)) record = firstCatalogValue(catalog, ALIASES.type);
+  else if (/^(?:typ|rodzaj)(?: produktu| gry)?$/.test(name)) {
+    record = firstCatalogValue(catalog, ALIASES.type);
+    if (record) payload = parameterPayload(parameter, record.value, typeCandidates(record.value));
+  }
   else if (/kolor|color/.test(name)) record = firstCatalogValue(catalog, ALIASES.color);
   else if (/rozmiar|wielkosc|size/.test(name)) record = firstCatalogValue(catalog, ALIASES.size);
   else if (/waga/.test(name)) record = firstCatalogValue(catalog, ALIASES.packageWeight);

@@ -161,7 +161,9 @@ test("ukryty produkt nie może być wystawiony, ale powiązana oferta trafia do 
   assert.match(backend,/code: 'product_sale_unavailable'/);
   assert.match(backend,/artway_dostepnosc\?\.\[saleProductId\]/);
   assert.match(backend,/authoritativeProducts\.get\(saleProductId\)/);
-  assert.match(backend,/\[body\.product \|\| \{\}, authoritativeProduct\]\.some/);
+  assert.match(backend,/publicationProduct = \{ \.\.\.\(body\.product \|\| \{\}\), \.\.\.authoritativeProduct, id: saleProductId \}/);
+  assert.match(backend,/allegroDraftZAutoKategoria\(req, publicationProduct,/);
+  assert.match(backend,/allegroZapiszPowiazanieProduktu\(publicationProduct,/);
 });
 
 test("szkic Allegro bierze zdjęcia ze strony źródłowej, a nie z podobnej oferty lub katalogu",async()=>{

@@ -16,16 +16,24 @@ test('kontrola obrazu rozpoznaje wymiar PNG bez dekodowania grafiki', () => {
 
 test('przygotowanie blokuje miniaturę poniżej minimum Allegro', async () => {
   const fetcher = async () => new Response(png(250, 250), { status: 200, headers: { 'content-type': 'image/png' } });
-  const result = await checkAllegroImageReadiness(['https://example.test/mini.png'], { fetcher, now: 1, minLongEdge: 400 });
+  const result = await checkAllegroImageReadiness(['https://example.test/mini.png'], { fetcher, now: 1 });
   assert.equal(result.ready, false);
-  assert.match(result.reason, /400px/);
+  assert.equal(result.adaptable.length, 0);
+  assert.match(result.reason, /500/);
   assert.equal(result.inspected[0].width, 250);
 });
 
 test('przygotowanie akceptuje obraz spełniający minimum Allegro', async () => {
   const fetcher = async () => new Response(png(800, 500), { status: 200, headers: { 'content-type': 'image/png' } });
-  const result = await checkAllegroImageReadiness(['https://example.test/large.png'], { fetcher, now: 2, minLongEdge: 400 });
+  const result = await checkAllegroImageReadiness(['https://example.test/large.png'], { fetcher, now: 2 });
   assert.equal(result.ready, true);
   assert.equal(result.valid.length, 1);
 });
 
+test('obraz 400 px jest kwalifikowany do bezpiecznego dopasowania przed wysłaniem', async () => {
+  const fetcher = async () => new Response(png(400, 300), { status: 200, headers: { 'content-type': 'image/png' } });
+  const result = await checkAllegroImageReadiness(['https://example.test/adapt.png'], { fetcher, now: 3 });
+  assert.equal(result.ready, false);
+  assert.equal(result.adaptable.length, 1);
+  assert.match(result.reason, /dopasowania/i);
+});

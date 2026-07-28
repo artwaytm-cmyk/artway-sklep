@@ -541,7 +541,7 @@ requireMarkers('backend aplikacji po podziale domenowym', storeRuntime, [
   'agentDecision:',
   'function allegroScalParametryBezDuplikatow',
   'Number(details.draft?.stock?.available)',
-  'const ALLEGRO_DEFAULT_OFFER_STOCK = 5',
+  'normalizeAllegroOfferSettings',
   'const stockRaw = Number(opt.offerStock',
   "action === 'allegro-offer-settings'",
   "action === 'allegro-apply-offer-defaults'",

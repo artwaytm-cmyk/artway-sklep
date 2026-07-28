@@ -64,6 +64,24 @@ test('zakres graczy 2-4 ustawia osobno minimum i maksimum', () => {
   ]);
 });
 
+test('wiek gracza i typ karciany są dopasowane do wariantów słownika Allegro', () => {
+  const product = {
+    nazwa: 'Język Ciała - karciana gra rodzinna',
+    parametryProducenta: { wiek: '8+' },
+    allegroParameterEvidence: {
+      type: { value: 'gra karciana', source: 'nazwa i opis', confidence: 0.94 },
+    },
+  };
+  const parameters = [
+    dictionary('age', 'Wiek gracza', [['age-8', '8 lat +'], ['age-10', '10 lat +']]),
+    dictionary('type', 'Typ', [['cards', 'Karciane'], ['board', 'Planszowe']]),
+  ];
+  assert.deepEqual(allegroAutomaticCategoryParameters(product, parameters), [
+    { id: 'age', valuesIds: ['age-8'] },
+    { id: 'type', valuesIds: ['cards'] },
+  ]);
+});
+
 test('liczbę elementów i materiał odczytuje z jednoznacznej nazwy puzzli', () => {
   const product = { nazwa: 'Drewniane puzzle Galaxies – Jednorożec, 150 elementów' };
   const parameters = [

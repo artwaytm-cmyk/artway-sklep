@@ -214,5 +214,5 @@ test('sukces wystawienia Allegro kończy się dopiero po publikacji w centralnej
   assert.match(finalization, /buildAllegroPublicationSuccessFields/);
   assert.match(finalization, /await zapiszIOpublikujPolaProduktuCentralnie/);
   assert.doesNotMatch(finalization, /await zapiszPolaProduktuCentralnie\(/);
-  assert.match(source, /verifiedOffer,\s*expectedStatus:/);
+  assert.match(source, /verifiedOffer,\s*imagePublication,\s*expectedStatus:/);
 });

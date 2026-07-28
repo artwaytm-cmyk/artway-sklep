@@ -367,6 +367,9 @@ test('wadliwy wynik jednego redaktora jest ponawiany przed oznaczeniem produktu 
   assert.equal(result.ready, true);
   assert.equal(result.status, 'completed');
   assert.equal(saved.fields.allegroAgentPreparationStatus, 'ready');
+  assert.equal(saved.fields.allegroPreparationManifest.version, 1);
+  assert.equal(saved.fields.allegroPreparationManifest.operation, 'create');
+  assert.equal(saved.fields.allegroPreparationManifest.descriptionSectionCount, 0);
 });
 
 test('worker wykorzystuje potwierdzone GPSR tego samego producenta i ostrzeżenie ze źródła', async () => {

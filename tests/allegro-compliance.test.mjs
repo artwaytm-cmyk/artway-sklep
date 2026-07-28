@@ -136,3 +136,17 @@ test('centralna bramka nie pozwala utworzyć oferty bez kontrolowanego opisu', (
   assert.equal(stockOnly.checked, false);
   assert.deepEqual(stockOnly.body, { stock: { available: 5 } });
 });
+
+test('centralna bramka nigdy nie wysyła ustawień dodatkowych rynków zagranicznych', () => {
+  const result = allegroSecureOfferWrite({
+    path: '/sale/product-offers/123',
+    method: 'PATCH',
+    body: {
+      stock: { available: 5 },
+      publication: { republish: true, marketplaces: { additional: [{ id: 'allegro-cz' }] } },
+      additionalMarketplaces: { 'allegro-cz': { sellingMode: { price: { amount: '100', currency: 'CZK' } } } },
+    },
+  });
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.body, { stock: { available: 5 }, publication: { republish: true } });
+});

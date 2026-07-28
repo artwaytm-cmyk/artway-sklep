@@ -376,9 +376,16 @@ export function allegroSecureOfferWrite({ path = '', method = 'GET', body = null
   if (!isOfferWrite || !body || typeof body !== 'object') {
     return { body, checked: false, changed: false, compliance: null };
   }
+  const securedMarketBody = { ...body };
+  delete securedMarketBody.additionalMarketplaces;
+  if (securedMarketBody.publication?.marketplaces) {
+    securedMarketBody.publication = { ...securedMarketBody.publication };
+    delete securedMarketBody.publication.marketplaces;
+  }
+  const marketChanged = JSON.stringify(body) !== JSON.stringify(securedMarketBody);
 
   const createsOffer = normalizedMethod === 'POST' && normalizedPath === '/sale/product-offers';
-  const hasDescription = Object.prototype.hasOwnProperty.call(body, 'description');
+  const hasDescription = Object.prototype.hasOwnProperty.call(securedMarketBody, 'description');
   if (!hasDescription) {
     if (createsOffer) {
       const error = new Error('Publikacja oferty została zablokowana: brak opisu podlegającego kontroli zgodności.');
@@ -386,16 +393,16 @@ export function allegroSecureOfferWrite({ path = '', method = 'GET', body = null
       error.status = 422;
       throw error;
     }
-    return { body, checked: false, changed: false, compliance: null };
+    return { body: securedMarketBody, checked: false, changed: marketChanged, compliance: null };
   }
-  if (!Array.isArray(body.description?.sections)) {
+  if (!Array.isArray(securedMarketBody.description?.sections)) {
     const error = new Error('Publikacja oferty została zablokowana: opis Allegro ma nieprawidłową strukturę.');
     error.code = 'allegro_compliance_invalid_description';
     error.status = 422;
     throw error;
   }
 
-  const enforced = allegroEnforceDraft({ name: body.name || 'Produkt', description: body.description });
+  const enforced = allegroEnforceDraft({ name: securedMarketBody.name || 'Produkt', description: securedMarketBody.description });
   if (!enforced.compliance.ok) {
     const error = new Error('Publikacja oferty została zablokowana: opis zawiera treść niezgodną z zasadami Allegro.');
     error.code = 'allegro_compliance_block';
@@ -403,8 +410,8 @@ export function allegroSecureOfferWrite({ path = '', method = 'GET', body = null
     error.compliance = enforced.compliance;
     throw error;
   }
-  const securedBody = { ...body, description: enforced.draft.description };
-  const changed = JSON.stringify(body.description) !== JSON.stringify(securedBody.description);
+  const securedBody = { ...securedMarketBody, description: enforced.draft.description };
+  const changed = marketChanged || JSON.stringify(securedMarketBody.description) !== JSON.stringify(securedBody.description);
   return {
     body: securedBody,
     checked: true,

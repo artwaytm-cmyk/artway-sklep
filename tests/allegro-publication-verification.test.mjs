@@ -60,7 +60,17 @@ test('backend po zapisie ponownie odczytuje ofertę i zwraca zweryfikowany statu
   const source = await readFile('src/backend/lib/store-app.mjs', 'utf8');
   assert.match(source, /verifiedOffer = await allegroWywolaj\(req, `\/sale\/product-offers\/\$\{encodeURIComponent\(offerId\)\}`\)/);
   assert.match(source, /verification: \{ \.\.\.allegroOfferVerification\(result, !!verifiedOffer\), publicationConfirmed:/);
-  assert.deepEqual(allegroOfferVerification({ publication: { status: 'ACTIVE' }, description: { sections: [{ items: [] }, { items: [] }] } }, true), { checked: true, status: 'ACTIVE', active: true, descriptionSections: 2 });
+  assert.deepEqual(allegroOfferVerification({ publication: { status: 'ACTIVE', marketplaces: { base: { id: 'allegro-pl' }, additional: [] } }, description: { sections: [{ items: [] }, { items: [] }] } }, true), {
+    checked: true,
+    status: 'ACTIVE',
+    active: true,
+    descriptionSections: 2,
+    baseMarketplace: 'allegro-pl',
+    additionalMarketplaces: [],
+    foreignMarketplaces: [],
+    polishBaseConfirmed: true,
+    polandOnlyConfirmed: true,
+  });
 });
 
 test('panel nie oznacza szkicu jako opublikowanej oferty', async () => {

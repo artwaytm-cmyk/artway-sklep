@@ -72,21 +72,34 @@ async function inspectImage(url, fetcher, now) {
 }
 
 export async function checkAllegroImageReadiness(urls = [], {
-  minLongEdge = 400,
+  minLongEdge = 500,
+  maxLongEdge = 2560,
+  minAdaptableLongEdge = 300,
   fetcher = fetch,
   now = Date.now(),
-  limit = 6,
+  limit = 16,
 } = {}) {
   const selected = [...new Set((Array.isArray(urls) ? urls : []).map((url) => text(url)).filter(Boolean))].slice(0, Math.max(1, limit));
-  if (!selected.length) return { ready: false, valid: [], inspected: [], minLongEdge, reason: 'brak zdjęć' };
+  if (!selected.length) return { ready: false, adaptable: [], valid: [], inspected: [], minLongEdge, maxLongEdge, reason: 'brak zdjęć' };
   const inspected = await Promise.all(selected.map((url) => inspectImage(url, fetcher, now)));
-  const valid = inspected.filter((item) => item.ok && Math.max(Number(item.width) || 0, Number(item.height) || 0) >= minLongEdge);
+  const allowedFormats = new Set(['jpeg', 'png', 'gif']);
+  const valid = inspected.filter((item) => {
+    const edge = Math.max(Number(item.width) || 0, Number(item.height) || 0);
+    return item.ok && edge >= minLongEdge && edge <= maxLongEdge && allowedFormats.has(item.format);
+  });
+  const adaptable = inspected.filter((item) => {
+    const edge = Math.max(Number(item.width) || 0, Number(item.height) || 0);
+    return item.ok && !valid.includes(item) && edge >= minAdaptableLongEdge;
+  });
   return {
     ready: valid.length > 0,
     valid,
+    adaptable,
     inspected,
     minLongEdge,
-    reason: valid.length ? '' : `żadne zdjęcie nie ma dłuższego boku co najmniej ${minLongEdge}px`,
+    maxLongEdge,
+    reason: valid.length ? '' : adaptable.length
+      ? 'zdjęcie wymaga technicznego dopasowania przed wysłaniem do Allegro'
+      : `żadne zdjęcie nie spełnia zakresu ${minLongEdge}–${maxLongEdge}px`,
   };
 }
-
