@@ -457,6 +457,12 @@ async function uruchomAutotest(){
   try{localStorage.setItem("artway_test","1");const ok=localStorage.getItem("artway_test")==="1";localStorage.removeItem("artway_test");dodaj("Zapis i odczyt pamięci",ok?"ok":"bad",ok?"Pamięć działa":"Brak możliwości zapisu");}catch(e){dodaj("Zapis i odczyt pamięci","bad",e.message);}
   try{const h=await hashuj("test");dodaj("Szyfrowanie haseł",h.length===64?"ok":"warn",h.length===64?"SHA-256 dostępne":"Użyto mechanizmu zapasowego");}catch(e){dodaj("Szyfrowanie haseł","bad",e.message);}
   try{const r=await fetch("/products.json",{cache:"no-store"}),j=r.ok?await r.json():null;dodaj("Dostęp do products.json",r.ok&&Array.isArray(j)?"ok":"bad",r.ok?`${j.length} rekordów`:`HTTP ${r.status}`);}catch(e){dodaj("Dostęp do products.json","bad",e.message);}
+  try{
+    const version=document.querySelector('meta[name="artway-version"]')?.content||"dev";
+    await zaladujSklepModul("content",version);
+  }catch(error){
+    dodaj("Moduł podstron sklepu","bad",error.message||String(error));
+  }
   const widoki=[["Sklep",()=>widokSklep()],["Kontakt",()=>widokKontakt()],["FAQ",()=>widokFAQ()],["Dostawa",()=>widokDostawa()],["Katalog administratora",()=>widokAdminProdukty()]],bledyWidokow=[];
   for(const [nazwa,fn] of widoki){try{const html=fn();if(typeof html!=="string"||html.length<=100)bledyWidokow.push(`${nazwa}: niepełny wynik`);}catch(error){bledyWidokow.push(`${nazwa}: ${error.message||error}`);}}
   dodaj("Renderowanie głównych widoków",bledyWidokow.length?"bad":"ok",bledyWidokow.length?bledyWidokow.join(" • "):"Sprawdzono 5 kluczowych ekranów");

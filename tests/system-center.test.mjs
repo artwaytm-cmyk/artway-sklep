@@ -33,3 +33,11 @@ test('przycisk przeglądarki pobiera pełne wydanie bez kasowania danych',async(
   assert.match(releaseManager,/stampBrowserRelease\(stagingDir, id\)/);
   assert.match(releaseManager,/artway-admin-\$\{releaseId\}/);
 });
+
+test('autotest ładuje moduł publicznych podstron przed sprawdzeniem ich widoków',async()=>{
+  const system=await source('src/frontend/16-diagnostics.js');
+  const moduleLoad=system.indexOf('await zaladujSklepModul("content",version)');
+  const viewChecks=system.indexOf('const widoki=[["Sklep",()=>widokSklep()]');
+  assert.ok(moduleLoad>0);
+  assert.ok(viewChecks>moduleLoad);
+});
