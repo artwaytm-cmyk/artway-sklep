@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'; import { buildEditorialPersistencePatch, buildEditorialRetryPatch, editorialChannelForSpecialist } from './agent-product-editorial-state.mjs';
 import { validManufacturerName } from './product-field-validation.mjs'; import { createPlatformPromptProfile, requestSpecialistResponse } from './agent-specialist-openai.mjs';
 import { enforceProductEditorialCompliance } from './agent-specialist-compliance.mjs'; import { specialistPlaybook, specialistPlaybookDetails } from './agent-specialist-playbooks.mjs';
+import { buildSpecialistInstructions } from './agent-specialist-instructions.mjs';
 import { STATE_KEY, MAX_HISTORY, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_WRITE_ATTEMPTS, DEFAULT_CONFIG, PROMPT_VERSION, AGENT_ACTION_POLICY, NEVER_AUTOMATIC, PRODUCT_OUTPUT_TO_FIELD, SPECIALISTS, RESULT_SCHEMA, clean, number, config, safeError, sanitizeText, sanitizeContext, normalizeFieldStats, normalizeLearning, learningAutonomy, learningPrompt, state, decisionSubjectKey, decisionFingerprint, normalizeDecisionReceipt, normalizeDecision, activeDecision, outputText, normalizeResult, normalizeProductContentEditorialResult, normalizeChannelEditorialResult, fingerprint, day, responseError, sourceEditorialFacts, productFacts, productPatch, editorialIdentityConflict, SOURCE_PAGE_NOISE, productEditorialTextQuality, productEditorialQuality, automaticEditorialAssessment, valuePresent, productFieldValue, missingOnlyPatch, catalogProducts, productEditorialTarget, productEditorialSourceFingerprint, productEditorialFingerprint, productEditorialState, productEditorialAutomaticEligibility, providerQuotaUnavailable, communicationNeedsReply, communicationFacts } from './agent-specialists-support.mjs';
 import { automaticBatchLimit, statusDecisionData } from './agent-specialists-status-support.mjs';
 import { estimateModelUsageCost, modelPolicySummary, OPENAI_MODEL_PRICE_SNAPSHOT, specialistModelPolicy } from './agent-model-policy.mjs';
@@ -12,6 +13,12 @@ export function createAgentSpecialists({
   reportProgress = async () => {},
   saveProductFields = null,
   loadProducts = null,
+  localFallback = {
+    enabled: process.env.OLLAMA_FALLBACK_ENABLED === 'true',
+    baseUrl: process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434',
+    model: process.env.OLLAMA_FALLBACK_MODEL || 'qwen3.5:4b',
+    keepAlive: process.env.OLLAMA_KEEP_ALIVE || '30s',
+  },
 } = {}) {
   if (typeof readVersioned !== 'function' || typeof writeIfVersion !== 'function') throw new Error('Specjaliści GPT wymagają wersjonowanego repozytorium.');
   if (typeof fetchImpl !== 'function') throw new Error('Specjaliści GPT wymagają klienta HTTP.');
@@ -326,20 +333,14 @@ export function createAgentSpecialists({
     if (cached) return { ...cached, cached: true };
     const runId = `gpt_${Date.now()}_${crypto.randomUUID().replaceAll('-', '').slice(0, 10)}`, createdAt = now().toISOString(), target = sanitizeContext(raw.target || {});
     const executionPolicy = specialistModelPolicy(specialist, { override: model });
+    const qualityFallbackPolicy = specialistModelPolicy(specialist, { override: model, escalation: true });
     const platformProfile = createPlatformPromptProfile(definition, { enabled: platformAgentsEnabled, apiKey, model: executionPolicy.model });
-    const instructions = [
-      'Jesteś wyspecjalizowanym pracownikiem polskiego sklepu Artway-TM. Odpowiadasz po polsku.',
-      'Korzystaj wyłącznie z przekazanych faktów. Nie zgaduj parametrów, cen, statusów, terminów, dostępności, rabatów ani warunków.',
-      'Brakujące dane wpisz do missingFacts. Każdą treść traktuj jako szkic; nie twierdź, że została wysłana lub opublikowana.',
-      `Rola: ${definition.label}. ${definition.description}`,
-      `Szczególne reguły: ${definition.rules}`,
-      specialistPlaybook(specialist),
-      `Zwróć pola tylko z tej listy: ${definition.fields.join(', ')}. Nie dodawaj innych kluczy fields.`,
-      ['product_content', 'store_compliance'].includes(specialist) ? 'Zwróć kompletny zestaw: title, short_description, long_description, seo_title, seo_description i seo_keywords. Popraw wartości istniejące, jeśli są chaotyczne lub słabe; nie pomijaj pola tylko dlatego, że nie jest puste. Brak opcjonalnych parametrów (wiek, liczba graczy, czas gry, zdjęcia, cena, stan, dostępność lub zawartość opakowania) nie jest missingFact i nie blokuje redakcji — po prostu ich nie dodawaj. Materiał ze strony źródłowej jest wyłącznie zbiorem faktów: usuń z niego menu, kontrolki sklepu, „Dodaj do porównania”, „Dodaj do listy zakupowej”, koszyk, dostępność, liczbę sztuk, ceny, informacje o dostawie i wysyłce, przewoźnikach, paczkomatach, nadaniu, odbiorze, kosztach i terminach realizacji, prośby o kontakt oraz powiadomienie o dostępności. Ciąg „Rozmiar uniwersalny” połączony z liczbą sztuk jest kontrolką stanu sklepu źródłowego, a nie rozmiarem lub zawartością produktu — zawsze go usuń. Nie umieszczaj w opisie ceny, stanu, dostępności, żadnej informacji logistycznej, danych kontaktowych, adresów stron, SKU, EAN, kodu producenta ani akapitu wskazującego źródło. Każdy punkt listy musi zawierać konkretną treść. Jeśli można bezpiecznie opisać produkt na podstawie nazwy, producenta i istniejącej treści, ustaw readyForApproval=true oraz complianceStatus=ready. missingFacts stosuj wyłącznie, gdy nie da się rozpoznać tożsamości produktu albo fakty są ze sobą sprzeczne.' : '',
-      platformProfile ? `Używasz opublikowanego profilu OpenAI Platform „${platformProfile.name}”, wersja ${platformProfile.version}. Bieżące reguły Artway ${PROMPT_VERSION}, lista pól i zakazy mają pierwszeństwo.` : '',
-      'Dla każdego pola podaj bieżącą wartość, proponowaną wartość, konkretną przyczynę oraz fakt będący podstawą. Nie używaj ogólników.',
-      'Treść ma być konkretna, naturalna, uporządkowana i gotowa do sprawdzenia przez administratora.',
-    ].filter(Boolean).join('\n');
+    const instructions = buildSpecialistInstructions({
+      specialist,
+      definition,
+      promptVersion: PROMPT_VERSION,
+      platformProfile,
+    });
     const dynamicInput = {
       zadanie: instruction,
       scenariusz: {
@@ -356,6 +357,8 @@ export function createAgentSpecialists({
       fetchImpl,
       apiKey,
       model: executionPolicy.model,
+      qualityFallbackModel: qualityFallbackPolicy.model,
+      localFallback,
       reasoning: executionPolicy.reasoning,
       maxOutputTokens: executionPolicy.maxOutputTokens,
       promptCacheKey: `artway:${specialist}:${PROMPT_VERSION}`,
@@ -380,13 +383,17 @@ export function createAgentSpecialists({
       cacheWriteTokens: number(payload?.usage?.input_tokens_details?.cache_write_tokens, 0, 0, 10_000_000),
     };
     const entry = {
-      id: runId, specialist, specialistLabel: definition.label, status: 'completed', source, createdAt, model: clean(payload.model || executionPolicy.model, 80), modelTier: executionPolicy.tier, reasoningEffort: executionPolicy.reasoning, maxOutputTokens: executionPolicy.maxOutputTokens,
+      id: runId, specialist, specialistLabel: definition.label, status: 'completed', source, createdAt, model: clean(payload.model || executionPolicy.model, 80), modelTier: request.localFallbackApplied ? 'local-emergency' : request.qualityFallback ? 'quality-fallback' : executionPolicy.tier, reasoningEffort: executionPolicy.reasoning, maxOutputTokens: executionPolicy.maxOutputTokens,
       instruction: clean(instruction, 500), target, fingerprint: hash, result, usage, approvalStatus: 'draft', promptVersion: PROMPT_VERSION, scenario,
       promptCache: {
         enabled: request.promptCacheEnabled === true,
         mode: request.promptCacheMode || 'disabled',
         fallback: request.promptCacheFallback === true,
         key: `artway:${specialist}:${PROMPT_VERSION}`,
+      },
+      providerFallback: {
+        qualityModel: request.qualityFallback === true,
+        localModel: request.localFallbackApplied === true,
       },
       platformAgent: platformProfile ? {
         id: platformProfile.id, name: platformProfile.name, version: platformProfile.version,

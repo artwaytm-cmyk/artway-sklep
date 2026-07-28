@@ -1,53 +1,35 @@
-# Ekonomiczny routing agentów — 2026-07-26
+# Ekonomiczny routing agentów — aktualizacja 2026-07-28
 
 ## Zasada
 
-- GPT-5.4 nano wykonuje proste zadania masowe, klasyfikację, SEO, kampanie i krótkie dokumenty.
-- GPT-5.4 mini obsługuje pełne redakcje ofert, zgodność kanałów, odpowiedzi klientom i koordynację operacyjną.
-- Pełny GPT-5.4 nie pracuje w zwykłym cyklu. Uruchamia się tylko przy jawnej eskalacji diagnostycznej lub powtarzającym się trudnym błędzie.
-- GPT-5.5 jest dostępny na koncie, ale nie jest używany automatycznie: kosztuje więcej niż GPT-5.4, a precyzyjne playbooki nie wymagają go w codziennym cyklu.
-- Każda rola ma limit wyniku, dzienny limit wejścia i wyniku automatyki oraz wersjonowany playbook.
-- Stała część instrukcji jest buforowana przez Prompt Caching, a dane bieżącego produktu lub sprawy trafiają na koniec zapytania.
+- `gpt-5-nano` wykonuje wszystkie codzienne zadania, w tym treści produktowe,
+  zgodność, SEO, kampanie, bannery i szkice wiadomości.
+- `gpt-5.4-nano` uruchamia się najwyżej raz, tylko gdy podstawowy model nie zwróci
+  poprawnego kontraktu strukturalnego albo pogłębiona diagnostyka ma
+  potwierdzony powód.
+- `gpt-5.4-mini` nie jest używany automatycznie.
+- Pełny `gpt-5.4` oraz droższa rodzina `gpt-5.6` nie są używane automatycznie.
+- Lokalny `qwen3.5:4b` przez Ollama jest bezpłatnym trybem awaryjnym po
+  wyczerpaniu środków lub awarii płatnego API.
+- Ograniczenia usługi lokalnej są wersjonowane w
+  `ops/systemd/ollama-artway.conf`; endpoint słucha wyłącznie na
+  `127.0.0.1:11434`.
+- Stała część instrukcji korzysta z Prompt Caching. Fingerprint wejścia zapobiega
+  ponawianiu tej samej pracy, a wynik musi przejść walidację i trwały zapis.
 
-## Routing 14 ról
+Pełna tabela 14 ról, dokładne prompty, modele, linki OpenAI Platform i miejsca
+zapisu są generowane do `docs/agents/openai-prompts-and-connections.md`.
 
-| Rola | Model codzienny | Rozumowanie | Maks. wynik | Długość playbooka |
-|---|---|---:|---:|---:|
-| Redaktor sklepu | GPT-5.4 mini | medium | 2600 | 5022 znaki |
-| Strażnik treści sklepu | GPT-5.4 mini | low | 2400 | 4204 znaki |
-| Redaktor oferty Allegro | GPT-5.4 mini | low | 2400 | 4542 znaki |
-| Strażnik zgodności Allegro | GPT-5.4 mini | medium | 2200 | 4334 znaki |
-| Operator publikacji Allegro | GPT-5.4 mini | low | 1500 | 5633 znaki |
-| Redaktor Von Halsky | GPT-5.4 mini | low | 2400 | 4632 znaki |
-| Strażnik treści Von Halsky | GPT-5.4 mini | low | 2200 | 4205 znaki |
-| Opiekun klienta | GPT-5.4 mini | low | 1200 | 4376 znaki |
-| Specjalista SEO | GPT-5.4 nano | low | 1400 | 4260 znaki |
-| Strateg promocji | GPT-5.4 nano | low | 1400 | 4021 znaki |
-| Dyrektor bannera | GPT-5.4 nano | low | 1200 | 4214 znaki |
-| Koordynator producenta | GPT-5.4 nano | low | 1000 | 4334 znaki |
-| Kontroler jakości | GPT-5.4 nano | medium | 1500 | 4188 znaki |
-| Koordynator operacyjny | GPT-5.4 mini | low | 1300 | 4475 znaki |
+## Dlaczego nie GPT-5.6 Luna
 
-Każdy playbook zawiera: dokładne wyzwalacze, kontrakt wejścia, procedurę, kryteria ukończenia, zakazy, format wyniku, obsługę błędów i ponowień, zasady dowodów, reguły wydajności, typowe pomyłki oraz przykłady poprawnej reakcji.
+Luna jest modelem efektywnym w rodzinie 5.6, ale według bieżącego cennika nadal
+jest wyraźnie droższa od `gpt-5-nano`. W tym systemie jakość utrzymują
+wersjonowane playbooki, ścisły JSON Schema, walidatory kanałów, przykłady
+historycznych awarii i kontrolowany fallback do mini.
 
-## Funkcje OpenAI ze wskazanego ekranu
+## Funkcje Platformy
 
-- Interfejs aplikacji i Responses API: aktywne w panelu administratora.
-- Agents SDK: aktywny dla diagnostyki, śladów wykonania, narzędzi i bramek zatwierdzeń.
-- Audio czasu rzeczywistego: dostępne, ale celowo niewłączone, ponieważ panel administracyjny korzysta z tańszej komunikacji tekstowej.
-- Transkrypcja audio: wyłączona do czasu dodania kontrolowanego wejścia audio bezpośrednio w panelu administratora.
-- Obrazy: aktywne dla bannerów i ikon.
-- Dzienniki i trace: aktywne bez zapisywania sekretów.
-- Batch: aktywny dla dobowej ewaluacji asynchronicznej.
-- Evals: aktywne dla testów regresji i jakości.
-- Fine-tuning: pozostaje dostępny, ale jest dopuszczony dopiero po zebraniu zatwierdzonych przykładów i przejściu ewaluacji.
-- Aktualizacja modeli: aktywna ekonomiczna rodzina GPT-5.4 z routingiem nano/mini/pełny.
-- Optymalizacja API: Prompt Caching, limity wyniku, cache wyników, fingerprinty i dzienne budżety tokenów.
-- Migracja: hybrydowa i celowa — Responses API dla deterministycznych ról, Agents SDK dla pętli narzędziowych i diagnostyki.
-- Codex i wtyczka OpenAI Developers: służą do rozwijania projektu; nie są procesem wykonawczym sklepu produkcyjnego.
-
-## Widoczność i ograniczenie Platformy
-
-Panel pokazuje dla każdej roli pełny prompt serwerowy, jego wersję, model, poziom rozumowania, limit odpowiedzi i liczbę znaków. Istniejące zapisane prompty OpenAI Platform mają bezpośrednie odnośniki.
-
-OpenAI Platform nie udostępnia publicznego endpointu API do automatycznego tworzenia lub edycji zapisanych promptów z poziomu serwera. Dlatego kanoniczne playbooki wszystkich ról są wersjonowane w kodzie i widoczne w panelu; profile istniejące w Platformie pozostają podłączone jako dodatkowa, zarządzana referencja.
+Responses API, Agents SDK, trace, Batch, Evals, obrazy i monitoring użycia
+pozostają podłączone. Realtime audio nie działa stale, ponieważ transkrypcja
+plików na żądanie jest tańsza. Fine-tuning pozostaje wyłączony do czasu zebrania
+zatwierdzonego zbioru i przejścia ewaluacji.

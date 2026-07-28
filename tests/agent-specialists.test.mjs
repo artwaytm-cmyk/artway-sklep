@@ -259,20 +259,20 @@ test('produkcyjny specjalista wywołuje opublikowaną wersję promptu OpenAI Pla
   assert.equal(run.platformAgent.fallback, false);
 });
 
-test('GPT-5.4 mini cacheuje długi stały playbook, ogranicza wynik i zapisuje odczyt cache', async () => {
+test('GPT-5 nano cacheuje długi stały playbook, ogranicza wynik i zapisuje odczyt cache', async () => {
   const repo = memoryRepository(); let requestBody;
   const service = createAgentSpecialists({
     ...repo, apiKey: 'real-key', now: () => new Date('2026-07-26T08:00:00.000Z'),
     fetchImpl: async (_url, options) => {
       requestBody = JSON.parse(options.body);
       const payload = openAiPayload([{ key: 'subject', label: 'Temat', value: 'Odpowiedź Artway' }, { key: 'reply', label: 'Odpowiedź', value: 'Dziękujemy za wiadomość.' }]);
-      payload.model = 'gpt-5.4-mini';
+      payload.model = 'gpt-5-nano';
       payload.usage = { input_tokens: 2400, output_tokens: 300, total_tokens: 2700, input_tokens_details: { cached_tokens: 1800, cache_write_tokens: 0 } };
       return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } });
     },
   });
   const run = await service.run({ specialist: 'customer_reply', instruction: 'Przygotuj odpowiedź', context: { thread: 'Pytanie o przesyłkę.' } });
-  assert.equal(requestBody.model, 'gpt-5.4-mini');
+  assert.equal(requestBody.model, 'gpt-5-nano');
   assert.equal(requestBody.max_output_tokens, 1200);
   assert.equal(requestBody.prompt_cache_key, undefined);
   assert.equal(requestBody.prompt_cache_options, undefined);

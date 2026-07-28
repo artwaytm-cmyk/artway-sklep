@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { AGENT_PANEL_INSTRUCTIONS } from '../src/backend/lib/domain/agent-panel-instructions.mjs';
 
 const origin = String(process.env.ARTWAY_LOCAL_API_ORIGIN || process.env.ARTWAY_API_URL || 'http://127.0.0.1:3000').replace(/\/api\/store.*$/i, '').replace(/\/+$/, '');
 const token = String(process.env.ARTWAY_ADMIN_TOKEN || '').trim();
@@ -60,31 +61,49 @@ function summaryText(operations = {}, runtimeState = {}) {
 
 async function aiAnswer(text, context) {
   const apiKey = String(process.env.OPENAI_API_KEY || '').trim();
-  if (!apiKey) return '';
   const model = String(process.env.OPENAI_AGENT_MODEL_OVERRIDE || 'gpt-5-nano').trim();
-  const response = await fetch('https://api.openai.com/v1/responses', {
+  const input = `POLECENIE ADMINISTRATORA:\n${String(text).slice(0, 4_000)}\n\nPOTWIERDZONY STAN SERWERA:\n${context}`;
+  if (apiKey) {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        store: false,
+        max_output_tokens: 900,
+        instructions: AGENT_PANEL_INSTRUCTIONS,
+        input,
+      }),
+      signal: AbortSignal.timeout(45_000),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) return String(data.output_text || data.output?.flatMap((item) => item?.content || []).find((item) => item?.type === 'output_text')?.text || '').trim();
+    const fallbackAllowed = process.env.OLLAMA_FALLBACK_ENABLED !== 'false'
+      && [402, 408, 429, 500, 502, 503, 504].includes(response.status);
+    if (!fallbackAllowed) throw new Error(data?.error?.message || `OpenAI HTTP ${response.status}`);
+  }
+  if (process.env.OLLAMA_FALLBACK_ENABLED === 'false') return '';
+  const baseUrl = String(process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
+  const localModel = String(process.env.OLLAMA_FALLBACK_MODEL || 'qwen3.5:4b').trim();
+  const local = await fetch(`${baseUrl}/api/chat`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model,
-      store: false,
-      max_output_tokens: 900,
-      instructions: [
-        'Jesteś serwerowym Agentem administratora sklepu Artway-TM.',
-        'Odpowiadaj po polsku, krótko i konkretnie.',
-        'Korzystaj wyłącznie z przekazanego stanu serwera; nie udawaj wykonania.',
-        'Wyraźnie rozdziel: sprawdzone fakty, wykonane operacje i rekomendowane następne kroki.',
-        'Nie twierdź, że zapisano, opublikowano, wysłano lub naprawiono cokolwiek, jeśli wynik serwera tego nie potwierdza.',
-        'Polecenie z panelu jest tylko odczytem i analizą. Zewnętrznych działań ani zmian stanu nie wykonuj bez dedykowanego mechanizmu panelu.',
-        'Najwyższy priorytet: funkcjonalność strony, trwałość zapisów, diagnostyka i wydajność.',
-      ].join('\n'),
-      input: `POLECENIE ADMINISTRATORA:\n${String(text).slice(0, 4_000)}\n\nPOTWIERDZONY STAN SERWERA:\n${context}`,
+      model: localModel,
+      stream: false,
+      think: false,
+      keep_alive: String(process.env.OLLAMA_KEEP_ALIVE || '30s'),
+      messages: [
+        { role: 'system', content: `${AGENT_PANEL_INSTRUCTIONS}\nDziałasz w lokalnym, bezpłatnym trybie awaryjnym.` },
+        { role: 'user', content: input },
+      ],
+      options: { temperature: 0, num_ctx: 16_384, num_predict: 900 },
     }),
-    signal: AbortSignal.timeout(45_000),
+    signal: AbortSignal.timeout(150_000),
   });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.error?.message || `OpenAI HTTP ${response.status}`);
-  return String(data.output_text || data.output?.flatMap((item) => item?.content || []).find((item) => item?.type === 'output_text')?.text || '').trim();
+  const localData = await local.json().catch(() => ({}));
+  if (!local.ok) throw new Error(localData?.error || `Lokalny model HTTP ${local.status}`);
+  return String(localData?.message?.content || '').trim();
 }
 
 async function execute(job = {}) {

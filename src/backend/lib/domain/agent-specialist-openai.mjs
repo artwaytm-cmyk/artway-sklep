@@ -59,10 +59,89 @@ function structuredOutputReady(payload = {}) {
   try { return !!JSON.parse(String(value)); } catch { return false; }
 }
 
+function openAiUnavailable(response, payload = {}) {
+  const status = Number(response?.status || 0);
+  const code = clean(payload?.error?.code, 120).toLowerCase();
+  const type = clean(payload?.error?.type, 120).toLowerCase();
+  const message = clean(payload?.error?.message, 500).toLowerCase();
+  if ([402, 408, 429, 500, 502, 503, 504].includes(status)) return true;
+  return /insufficient_quota|billing|credit|rate_limit|server_error|temporarily_unavailable/.test(`${code} ${type} ${message}`);
+}
+
+function localEndpoint(value = '') {
+  const input = clean(value, 300).replace(/\/+$/, '');
+  try {
+    const parsed = new URL(input || 'http://127.0.0.1:11434');
+    if (!['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname)) return '';
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    return parsed.origin;
+  } catch {
+    return '';
+  }
+}
+
+async function requestLocalResponse({
+  fetchImpl,
+  config = {},
+  instructions = '',
+  input = '',
+  resultSchema = {},
+  maxOutputTokens = 1600,
+}) {
+  const endpoint = localEndpoint(config.baseUrl), model = clean(config.model, 100);
+  if (config.enabled !== true || !endpoint || !model) return null;
+  try {
+    const response = await fetchImpl(`${endpoint}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        think: false,
+        keep_alive: clean(config.keepAlive || '30s', 30),
+        format: resultSchema,
+        messages: [
+          { role: 'system', content: `${instructions}\nZwróć wyłącznie JSON zgodny z przekazanym schematem. Nie dodawaj komentarza przed ani po JSON.` },
+          { role: 'user', content: input },
+        ],
+        options: {
+          temperature: 0,
+          num_ctx: Math.max(8_192, Math.min(32_768, Number(config.contextTokens) || 16_384)),
+          num_predict: Math.max(700, Math.min(3_600, Number(maxOutputTokens) || 1_600)),
+        },
+      }),
+      signal: AbortSignal.timeout(Math.max(30_000, Math.min(180_000, Number(config.timeoutMs) || 150_000))),
+    });
+    const local = await response.json().catch(() => ({}));
+    const content = String(local?.message?.content || '').trim();
+    let parsed;
+    try { parsed = JSON.parse(content); } catch { parsed = null; }
+    if (!response.ok || !parsed) return null;
+    const payload = {
+      model: `local:${model}`,
+      output_text: JSON.stringify(parsed),
+      output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(parsed) }] }],
+      usage: {
+        input_tokens: Math.max(0, Number(local?.prompt_eval_count) || 0),
+        output_tokens: Math.max(0, Number(local?.eval_count) || 0),
+        total_tokens: Math.max(0, Number(local?.prompt_eval_count) || 0) + Math.max(0, Number(local?.eval_count) || 0),
+      },
+    };
+    return {
+      response: new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } }),
+      payload,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function requestSpecialistResponse({
   fetchImpl,
   apiKey,
   model,
+  qualityFallbackModel = '',
+  localFallback = null,
   reasoning = 'low',
   maxOutputTokens = 1600,
   promptCacheKey = '',
@@ -112,6 +191,7 @@ export async function requestSpecialistResponse({
     cacheFallback = true;
   }
   let selected = primary, promptApplied = !!promptProfile, promptFallback = false, promptError = '', outputRetry = false;
+  let qualityFallback = false, localFallbackApplied = false;
   if (!primary.response.ok && promptProfile && promptReferenceFailure(primary.response, primary.payload)) {
     selected = await call(false, !cacheFallback);
     promptApplied = false;
@@ -129,8 +209,39 @@ export async function requestSpecialistResponse({
     outputRetry = true;
     promptError ||= 'Pierwsza odpowiedź nie zawierała kompletnego wyniku strukturalnego; użyto bezpiecznej ponownej próby.';
   }
+  if (selected.response.ok && !structuredOutputReady(selected.payload) && clean(qualityFallbackModel, 100) && clean(qualityFallbackModel, 100) !== clean(model, 100)) {
+    selected = await call(false, false, {
+      model: clean(qualityFallbackModel, 100),
+      reasoning: { effort: 'low' },
+      max_output_tokens: 3600,
+    });
+    promptApplied = false;
+    promptFallback = !!promptProfile;
+    qualityFallback = true;
+    promptError ||= 'Ekonomiczny model nie zwrócił kompletnego kontraktu; wykonano jedną kontrolowaną próbę modelu jakościowego.';
+  }
+  const localReason = !selected.response.ok
+    ? openAiUnavailable(selected.response, selected.payload)
+    : !structuredOutputReady(selected.payload);
+  if (localReason && localFallback?.enabled === true) {
+    const local = await requestLocalResponse({
+      fetchImpl,
+      config: localFallback,
+      instructions,
+      input,
+      resultSchema,
+      maxOutputTokens,
+    });
+    if (local) {
+      selected = local;
+      promptApplied = false;
+      promptFallback = !!promptProfile;
+      localFallbackApplied = true;
+      promptError ||= 'Płatne API było niedostępne albo nie zwróciło poprawnego kontraktu; użyto lokalnego modelu awaryjnego.';
+    }
+  }
   return {
-    ...selected, promptApplied, promptFallback, outputRetry,
+    ...selected, promptApplied, promptFallback, outputRetry, qualityFallback, localFallbackApplied,
     promptCacheEnabled: useAutomaticCache,
     promptCacheMode: useExplicitCache && !cacheFallback ? 'explicit' : 'automatic',
     promptCacheFallback: cacheFallback,

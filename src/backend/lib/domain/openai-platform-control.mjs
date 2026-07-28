@@ -106,11 +106,14 @@ export function createOpenAiPlatformControl({
   fetchImpl = globalThis.fetch,
   apiKey = process.env.OPENAI_API_KEY,
   now = () => new Date(),
-  diagnosticModel = process.env.OPENAI_DIAGNOSTICS_ESCALATION_MODEL || process.env.OPENAI_MODEL_ESCALATION || 'gpt-5.4',
-  balancedModel = process.env.OPENAI_MODEL_STANDARD || 'gpt-5.4-mini',
-  efficientModel = process.env.OPENAI_MODEL_ECONOMY || 'gpt-5.4-nano',
+  diagnosticModel = process.env.OPENAI_DIAGNOSTICS_ESCALATION_MODEL || process.env.OPENAI_MODEL_ESCALATION || 'gpt-5.4-nano',
+  balancedModel = process.env.OPENAI_MODEL_STANDARD || 'gpt-5-nano',
+  efficientModel = process.env.OPENAI_MODEL_ECONOMY || 'gpt-5-nano',
   imageModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
   audioModel = process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe',
+  localFallbackEnabled = process.env.OLLAMA_FALLBACK_ENABLED !== 'false',
+  localFallbackModel = process.env.OLLAMA_FALLBACK_MODEL || 'qwen3.5:4b',
+  localBaseUrl = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434',
 } = {}) {
   if (typeof read !== 'function' || typeof write !== 'function') throw new Error('Kontrola OpenAI Platform wymaga repozytorium.');
   if (typeof fetchImpl !== 'function') throw new Error('Kontrola OpenAI Platform wymaga klienta HTTP.');
@@ -153,7 +156,18 @@ export function createOpenAiPlatformControl({
       try { await api(path); return [name, { available: true, status: 200 }]; }
       catch (error) { return [name, { available: false, status: Number(error.status || 0), error: safeError(error.message) }]; }
     }));
-    const value = { configured: !!clean(apiKey, 500), connected: results.some(([, item]) => item.available), checkedAt: now().toISOString(), endpoints: Object.fromEntries(results) };
+    let local = { enabled: localFallbackEnabled === true, available: false, model: clean(localFallbackModel, 100), status: 0 };
+    if (local.enabled) {
+      try {
+        const response = await fetchImpl(`${String(localBaseUrl).replace(/\/+$/, '')}/api/tags`, { signal: AbortSignal.timeout(5_000) });
+        const payload = await response.json().catch(() => ({}));
+        const models = Array.isArray(payload?.models) ? payload.models.map((item) => clean(item?.name || item?.model, 120)) : [];
+        local = { ...local, available: response.ok && models.some((name) => name === local.model || name.startsWith(`${local.model}:`)), status: response.status, installedModels: models.slice(0, 20) };
+      } catch (error) {
+        local = { ...local, error: safeError(error?.message || error) };
+      }
+    }
+    const value = { configured: !!clean(apiKey, 500), connected: results.some(([, item]) => item.available), checkedAt: now().toISOString(), endpoints: Object.fromEntries(results), local };
     await save((current) => ({ ...current, connection: value }));
     return value;
   }
@@ -171,11 +185,12 @@ export function createOpenAiPlatformControl({
       { id: 'batches', label: 'Partie', state: endpoint('batches') ? 'active' : 'error', detail: 'dobowa ewaluacja asynchroniczna' },
       { id: 'evals', label: 'Ewaluacje', state: endpoint('evals') ? 'active' : 'error', detail: 'zestaw regresji + trace grading' },
       { id: 'fineTuning', label: 'Dostrajanie', state: endpoint('fineTuning') ? 'available' : 'unavailable', detail: 'tylko po ewaluacji i z zatwierdzonych przykładów' },
-      { id: 'modelUpgrade', label: 'Ekonomiczna rodzina modeli', state: 'active', detail: 'GPT-5.4 nano / mini • pełny GPT-5.4 tylko przy eskalacji' },
+      { id: 'modelUpgrade', label: 'Ekonomiczna rodzina modeli', state: 'active', detail: 'GPT-5 nano na co dzień • GPT-5.4 nano tylko po niepoprawnym wyniku • lokalny fallback bez opłat' },
       { id: 'optimization', label: 'Optymalizacja API', state: 'active', detail: 'cache promptów, limity wyniku, fingerprinty i Batch -50%' },
       { id: 'migration', label: 'Responses + Agents SDK', state: 'active', detail: 'Responses dla deterministycznych ról; SDK dla pętli narzędziowej i trace' },
       { id: 'usage', label: 'Stosowanie', state: 'active', detail: 'lokalne tokeny, limity dzienne i historia uruchomień' },
       { id: 'apiKey', label: 'Klucz API', state: clean(apiKey, 500) ? 'active' : 'error', detail: clean(apiKey, 500) ? 'jeden obecny klucz serwerowy' : 'brak konfiguracji' },
+      { id: 'localFallback', label: 'Bezpłatny tryb awaryjny', state: conn.local?.available ? 'active' : conn.local?.enabled ? 'error' : 'unavailable', detail: `${localFallbackModel} • lokalny Ollama • bez opłat za tokeny` },
     ];
   }
 
@@ -192,6 +207,7 @@ export function createOpenAiPlatformControl({
         efficient: efficientModel,
         image: imageModel,
         audio: audioModel,
+        localFallback: localFallbackModel,
       },
       capabilities: capabilities(conn),
       connection: conn,
@@ -204,6 +220,7 @@ export function createOpenAiPlatformControl({
         traceSensitiveData: false,
         fineTuning: 'evals-first-approved-dataset-only',
         deprecatedEvalsDependency: false,
+        localFallback: conn.local || { enabled: false, available: false },
       },
       updatedAt: state.updatedAt || conn.checkedAt || null,
     };

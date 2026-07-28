@@ -30,8 +30,9 @@ test('status pokazuje pełne możliwości Platformy i nigdy nie ujawnia obecnego
   assert.deepEqual(status.capabilities.map((item) => item.id), [
     'responses', 'ui', 'agents', 'realtime', 'audio', 'images', 'logs', 'batches',
     'evals', 'fineTuning', 'modelUpgrade', 'optimization', 'migration', 'usage', 'apiKey',
+    'localFallback',
   ]);
-  assert.equal(status.policy.batchModel, 'gpt-5.4-nano');
+  assert.equal(status.policy.batchModel, 'gpt-5-nano');
   assert.doesNotMatch(JSON.stringify(status), /bardzo-tajny/);
 });
 

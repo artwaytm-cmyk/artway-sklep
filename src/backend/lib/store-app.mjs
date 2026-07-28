@@ -357,6 +357,12 @@ const agentSpecialists = createAgentSpecialists({
   saveProductFields: zapiszIOpublikujPolaProduktuCentralnie, platformStatus: () => openAiPlatform.status(),
   loadProducts: () => allegroAgentProduktyKompletne(),
   reportProgress: (work) => agentRuntime.report({ event: 'work_progress', source: 'openai-specialist', work }),
+  localFallback: {
+    enabled: process.env.OLLAMA_FALLBACK_ENABLED !== 'false',
+    baseUrl: process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434',
+    model: process.env.OLLAMA_FALLBACK_MODEL || 'qwen3.5:4b',
+    keepAlive: process.env.OLLAMA_KEEP_ALIVE || '30s',
+  },
 });
 const diagnosticAgent = createDiagnosticAgentWorkflow();
 const allegroPublicationAgent = createAllegroPublicationAgent({ text: tekst, canonicalGtin, linkFromPreparation: allegroDanePowiazaniaZPrzygotowania, runSpecialist: agentSpecialists.run, mutateSettings: mutateSettingsSafely, saveProductFields: zapiszIOpublikujPolaProduktuCentralnie });

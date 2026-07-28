@@ -58,7 +58,7 @@ function inputFor(item = {}, context = {}) {
   };
 }
 
-const INSTRUCTIONS = `
+export const DIAGNOSTIC_AGENT_INSTRUCTIONS = `
 Jesteś głównym agentem diagnostycznym dużego sklepu Artway-TM działającego na VPS.
 Analizujesz wyłącznie przekazane, zanonimizowane dowody. Nie zgadujesz i nie twierdzisz,
 że błąd został naprawiony, jeśli nie ma wyniku ponownego testu.
@@ -130,7 +130,7 @@ export function createDiagnosticAgentWorkflow({
       routine: routinePolicy,
       escalation: escalationPolicy,
       escalationRule: 'manual-or-repeated-critical-only',
-      instructionCharacters: INSTRUCTIONS.length,
+      instructionCharacters: DIAGNOSTIC_AGENT_INSTRUCTIONS.length,
       tracing: true,
     };
   }
@@ -141,7 +141,7 @@ export function createDiagnosticAgentWorkflow({
     const policy = escalated ? escalationPolicy : routinePolicy;
     const agent = new Agent({
       name: 'Artway — główny diagnosta',
-      instructions: INSTRUCTIONS,
+      instructions: DIAGNOSTIC_AGENT_INSTRUCTIONS,
       model: policy.model,
       modelSettings: {
         reasoning: { effort: policy.reasoning, mode: policy.mode, summary: 'detailed' },

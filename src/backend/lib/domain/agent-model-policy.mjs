@@ -1,10 +1,11 @@
 const MODEL_DEFAULTS = Object.freeze({
-  professionalEscalation: 'gpt-5.4',
-  standard: 'gpt-5.4-mini',
-  economical: 'gpt-5.4-nano',
+  professionalEscalation: 'gpt-5.4-nano',
+  standard: 'gpt-5-nano',
+  economical: 'gpt-5-nano',
+  localFallback: 'qwen3.5:4b',
 });
 
-const BALANCED_SPECIALISTS = new Set([
+const QUALITY_SENSITIVE_SPECIALISTS = new Set([
   'product_content',
   'store_compliance',
   'allegro_offer',
@@ -13,6 +14,7 @@ const BALANCED_SPECIALISTS = new Set([
   'von_halsky_offer',
   'von_halsky_compliance',
   'customer_reply',
+  'catalog_quality',
   'operations_supervisor',
 ]);
 
@@ -36,10 +38,11 @@ const OUTPUT_TOKEN_BUDGETS = Object.freeze({
 });
 
 export const OPENAI_MODEL_PRICE_SNAPSHOT = Object.freeze({
-  date: '2026-07-26',
+  date: '2026-07-28',
   currency: 'USD',
   unit: '1M tokens',
   models: Object.freeze({
+    'gpt-5-nano': Object.freeze({ input: 0.05, cachedInput: 0.005, cacheWrite: 0.05, output: 0.4 }),
     'gpt-5.4': Object.freeze({ input: 2.5, cachedInput: 0.25, cacheWrite: 2.5, output: 15 }),
     'gpt-5.4-mini': Object.freeze({ input: 0.75, cachedInput: 0.075, cacheWrite: 0.75, output: 4.5 }),
     'gpt-5.4-nano': Object.freeze({ input: 0.2, cachedInput: 0.02, cacheWrite: 0.2, output: 1.25 }),
@@ -65,26 +68,18 @@ export function specialistModelPolicy(specialist = '', { override = '', env = pr
   const strongest = clean(env.OPENAI_MODEL_ESCALATION) || MODEL_DEFAULTS.professionalEscalation;
   const balanced = clean(env.OPENAI_MODEL_STANDARD) || MODEL_DEFAULTS.standard;
   const efficient = clean(env.OPENAI_MODEL_ECONOMY) || MODEL_DEFAULTS.economical;
+  const qualitySensitive = QUALITY_SENSITIVE_SPECIALISTS.has(specialist);
   if (escalation === true) {
     return {
       model: strongest,
-      tier: 'professional-escalation',
-      reasoning: 'high',
+      tier: 'quality-fallback',
+      reasoning: MEDIUM_REASONING_SPECIALISTS.has(specialist) ? 'medium' : 'low',
       maxOutputTokens: Math.max(1600, OUTPUT_TOKEN_BUDGETS[specialist] || 1600),
       escalation: true,
     };
   }
-  if (BALANCED_SPECIALISTS.has(specialist)) {
-    return {
-      model: balanced,
-      tier: 'standard',
-      reasoning: MEDIUM_REASONING_SPECIALISTS.has(specialist) ? 'medium' : 'low',
-      maxOutputTokens: OUTPUT_TOKEN_BUDGETS[specialist] || 1400,
-      escalation: false,
-    };
-  }
   return {
-    model: efficient,
+    model: qualitySensitive ? balanced : efficient,
     tier: 'economical',
     reasoning: MEDIUM_REASONING_SPECIALISTS.has(specialist) ? 'medium' : 'low',
     maxOutputTokens: OUTPUT_TOKEN_BUDGETS[specialist] || 1400,
@@ -96,8 +91,8 @@ export function diagnosticsModelPolicy(env = process.env, { escalation = false }
   if (escalation) {
     return {
       model: clean(env.OPENAI_DIAGNOSTICS_ESCALATION_MODEL) || clean(env.OPENAI_MODEL_ESCALATION) || MODEL_DEFAULTS.professionalEscalation,
-      tier: 'professional-escalation',
-      reasoning: 'high',
+      tier: 'quality-fallback',
+      reasoning: 'medium',
       mode: clean(env.OPENAI_DIAGNOSTICS_MODE) === 'pro' ? 'pro' : 'standard',
       maxOutputTokens: 3200,
       escalation: true,
@@ -105,7 +100,7 @@ export function diagnosticsModelPolicy(env = process.env, { escalation = false }
   }
   return {
     model: clean(env.OPENAI_DIAGNOSTICS_ROUTINE_MODEL) || clean(env.OPENAI_MODEL_STANDARD) || MODEL_DEFAULTS.standard,
-    tier: 'standard-routine',
+    tier: 'economical-routine',
     reasoning: 'low',
     mode: 'standard',
     maxOutputTokens: 2200,
@@ -120,7 +115,13 @@ export function modelPolicySummary({ override = '', env = process.env } = {}) {
     strongestEscalation: specialistModelPolicy('allegro_publication', { override, env, escalation: true }),
     balanced: specialistModelPolicy('allegro_publication', { override, env }),
     efficient: specialistModelPolicy('seo_promotion', { override, env }),
-    policy: 'gpt-5.4-nano-routine-mini-complex-gpt-5.4-escalation',
+    localFallback: {
+      model: clean(env.OLLAMA_FALLBACK_MODEL) || MODEL_DEFAULTS.localFallback,
+      enabled: clean(env.OLLAMA_FALLBACK_ENABLED).toLowerCase() !== 'false',
+      endpoint: clean(env.OLLAMA_BASE_URL) || 'http://127.0.0.1:11434',
+      activation: 'openai-unavailable-or-quota-exhausted',
+    },
+    policy: 'gpt-5-nano-daily-gpt-5.4-nano-quality-fallback-local-qwen-emergency',
     pricing: OPENAI_MODEL_PRICE_SNAPSHOT,
   };
 }

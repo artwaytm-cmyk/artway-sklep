@@ -7,6 +7,7 @@
     "build": "node scripts/build-assets.mjs",
     "build:check": "node scripts/build-assets.mjs --check",
     "snapshot:products": "node scripts/generate-canonical-products-snapshot.mjs",
+    "docs:agents": "node scripts/generate-agent-prompt-catalog.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
