@@ -604,6 +604,82 @@ export function createAgentSpecialists({
     return { run: draft, decision: null, automatic: true, retryScheduled: true, policyReason: assessment.reason };
   }
 
+  async function prepareVonHalskyProposal(productId = '', actor = {}, raw = {}) {
+    const safeId = clean(productId, 120), settingsVersion = await readVersioned('settings', { data: {}, rev: 0 });
+    const product = await canonicalProduct(safeId, settingsVersion.value?.data || {});
+    if (!product) throw Object.assign(new Error('Nie znaleziono produktu do przygotowania dla Von Halsky.'), { code: 'agent_product_not_found', status: 404 });
+    const editorial = productEditorialState(product), note = clean(raw.note, 500);
+    const target = {
+      type: 'product', productId: safeId, name: clean(product.nazwa, 180), channel: 'vonHalsky',
+      channels: editorial.target.channels, editorialFingerprint: editorial.fingerprint,
+    };
+    const draft = await run({
+      specialist: 'von_halsky_offer',
+      source: raw.source === 'automatic' ? 'automatic' : 'manual',
+      instruction: [
+        'Przygotuj kompletną kartę produktu InPost Von Halsky według oficjalnych zasad kanału.',
+        'Najważniejsze fakty umieść na początku nazwy mającej 7–150 znaków.',
+        'Zwróć krótki opis i czytelny opis pełny mający co najmniej 100 znaków.',
+        'Usuń linki, osadzone obrazy, kontakt, płatności, dostawę, logistykę i hasła promocyjne.',
+        'Nie wymyślaj EAN, kodu producenta, marki, kategorii, parametrów ani cech. Braki nazwij dokładnie.',
+        note ? `Uwzględnij wskazówkę administratora: ${note}` : '',
+      ].filter(Boolean).join(' '),
+      context: {
+        product: productFacts(product),
+        administratorInstruction: note,
+        officialRequirements: {
+          identity: 'EAN/GTIN albo kod producenta i marka',
+          title: '7–150 znaków; najważniejsze informacje na początku',
+          description: 'minimum 100 znaków; bez linków i osadzonych obrazów',
+          images: 'co najmniej jedno; zalecane białe tło, bez znaku wodnego, minimum 800×800 px',
+          categoryParameters: 'uzupełniaj wyłącznie na podstawie potwierdzonych faktów i słownika API',
+        },
+        editorialTarget: editorial.target,
+        editorialFingerprint: editorial.fingerprint,
+      },
+      target,
+    }, actor);
+    const current = await readState();
+    const reviewed = await enforceProductEditorialCompliance({
+      draft,
+      assess: (entry) => automaticEditorialAssessment(entry, current.config),
+      run,
+      productFacts,
+      product,
+      editorial,
+      target,
+    });
+    const safeDraft = reviewed.draft, assessment = reviewed.assessment;
+    if (!assessment.eligible) {
+      await markProductEditorialRetry(product, safeDraft, editorial, assessment.reason, 'vonHalsky');
+      return {
+        run: safeDraft,
+        applied: null,
+        automatic: true,
+        retryScheduled: true,
+        policyReason: assessment.reason,
+        violations: assessment.violations || [],
+      };
+    }
+    const applied = await applyProductDraft(safeDraft.id, {
+      source: actor?.email || actor?.name || 'admin-von-halsky',
+    }, {
+      missingOnly: false,
+      editorialAutomatic: true,
+      editorialPolicyValidated: true,
+      editorialTarget: editorial.target,
+      editorialFingerprint: editorial.fingerprint,
+    });
+    return {
+      run: { ...safeDraft, approvalStatus: applied.applied ? 'auto_applied' : safeDraft.approvalStatus },
+      applied,
+      automatic: true,
+      retryScheduled: false,
+      policyReason: assessment.reason,
+      violations: [],
+    };
+  }
+
   async function automaticCycleUnlocked(options = {}) {
     const current = await readState();
     if (!current.config.enabled || !current.config.automaticEnabled || (current.config.limitsEnabled === true && current.config.automaticDailyLimit < 1)) return { skipped: true, reason: 'disabled', prepared: [], applied: [], decisions: [] };
@@ -836,7 +912,7 @@ export function createAgentSpecialists({
     }
   }
 
-  return Object.freeze({ status, configure, run, applyProductDraft, updateDecision, prepareProductProposal, automaticCycle, specialists: SPECIALISTS });
+  return Object.freeze({ status, configure, run, applyProductDraft, updateDecision, prepareProductProposal, prepareVonHalskyProposal, automaticCycle, specialists: SPECIALISTS });
 }
 
 export { AGENT_ACTION_POLICY, DEFAULT_CONFIG, NEVER_AUTOMATIC, PROMPT_VERSION, RESULT_SCHEMA, SPECIALISTS, activeDecision, automaticEditorialAssessment, communicationNeedsReply, learningAutonomy, normalizeDecision, normalizeLearning, normalizeProductContentEditorialResult, normalizeChannelEditorialResult, normalizeResult, productEditorialAutomaticEligibility, productEditorialSourceFingerprint, productEditorialFingerprint, productEditorialQuality, productEditorialState, productEditorialTarget, productEditorialTextQuality, productFacts, productPatch, providerQuotaUnavailable, sanitizeContext };

@@ -91,7 +91,7 @@ function safePassedCheck(value = {}, now = new Date()) {
 
 const LEGACY_BROWSER_CHECK_PATTERNS = Object.freeze({
   'Dostęp do products.json': /\bproducts\.json\b/i,
-  'Renderowanie głównych widoków': /(?:renderowanie głównych widoków|kontakt.{0,80}faq.{0,80}dostawa|blokPrzydatneLinkiHTML|widok(?:Kontakt|FAQ|Dostawa)|filtrZamowien|\/admin\/zamowienia)/i,
+  'Renderowanie głównych widoków': /(?:renderowanie głównych widoków|kontakt.{0,80}faq.{0,80}dostawa|blokPrzydatneLinkiHTML|widok(?:Kontakt|FAQ|Dostawa|AdminVonHalsky)|filtrZamowien|invalid qualified name|\/admin\/(?:zamowienia|von-halsky))/i,
 });
 
 function passedCheckResolvesLegacyBrowserItem(item = {}, passedChecks = [], checkedAt = '') {

@@ -54,11 +54,15 @@ test('lekka kartoteka zachowuje serwerowe potwierdzenie przygotowania po odświe
     opis: 'Opis pełny', allegroDescription: 'Opis Allegro',
     allegroCategoryId: '123', allegroAgentPreparationStatus: 'ready',
     allegroAgentPreparationMissing: [], allegroAgentPreparationVersion: 4,
+    vonHalskyAgentStatus: 'ready', vonHalskyAgentPreparedAt: '2026-07-29T10:00:00.000Z',
+    vonHalskyAgentScore: 94, vonHalskyAgentIssues: [],
   };
   prepared.allegroAgentPreparationFingerprint = centralAllegroPreparationFingerprint(prepared);
   const [record] = centralCatalogBuildRecords({ artway_produkty_katalog: [prepared] });
   assert.equal(record.adminListData.allegroCategoryId, '123');
   assert.equal(record.adminListData.allegroAgentPreparationCurrent, true);
+  assert.equal(record.adminListData.vonHalskyAgentStatus, 'ready');
+  assert.equal(record.adminListData.vonHalskyAgentScore, 94);
   assert.equal(record.adminListData._catalog.detailLevel, 'list');
   const reordered = { ...prepared, sourceEvidence: { z: 1, a: 2 } };
   const reorderedAgain = { ...prepared, sourceEvidence: { a: 2, z: 1 } };

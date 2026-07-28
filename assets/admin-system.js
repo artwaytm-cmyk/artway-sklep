@@ -472,9 +472,9 @@ async function uruchomAutotest(){
   }catch(error){
     dodaj("Moduł podstron sklepu","bad",error.message||String(error));
   }
-  const widoki=[["Sklep",()=>widokSklep()],["Kontakt",()=>widokKontakt()],["FAQ",()=>widokFAQ()],["Dostawa",()=>widokDostawa()],["Katalog administratora",()=>widokAdminProdukty()],["Zamówienia administratora",()=>widokAdminZamowienia()]],bledyWidokow=[];
-  for(const [nazwa,fn] of widoki){try{const html=fn();if(typeof html!=="string"||html.length<=100)bledyWidokow.push(`${nazwa}: niepełny wynik`);}catch(error){bledyWidokow.push(`${nazwa}: ${error.message||error}`);}}
-  dodaj("Renderowanie głównych widoków",bledyWidokow.length?"bad":"ok",bledyWidokow.length?bledyWidokow.join(" • "):"Sprawdzono 6 kluczowych ekranów");
+  const widoki=[["Sklep",()=>widokSklep()],["Kontakt",()=>widokKontakt()],["FAQ",()=>widokFAQ()],["Dostawa",()=>widokDostawa()],["Katalog administratora",()=>widokAdminProdukty()],["Zamówienia administratora",()=>widokAdminZamowienia()],["Von Halsky",()=>widokAdminVonHalsky("wystawianie")]],bledyWidokow=[];
+  for(const [nazwa,fn] of widoki){try{const html=fn();if(typeof html!=="string"||html.length<=100){bledyWidokow.push(`${nazwa}: niepełny wynik`);continue;}const fragment=systemDokumentTymczasowyHTML(html);fragment.querySelectorAll("*").forEach(node=>[...node.attributes].forEach(attr=>{const probe=document.createElement("div");probe.setAttribute(attr.name,attr.value);}));}catch(error){bledyWidokow.push(`${nazwa}: ${error.message||error}`);}}
+  dodaj("Renderowanie głównych widoków",bledyWidokow.length?"bad":"ok",bledyWidokow.length?bledyWidokow.join(" • "):"Sprawdzono 7 kluczowych ekranów, w tym pełny widok Von Halsky");
   const bezpieczneProblemy=testyDiagnostyczne().filter(item=>["Spójność koszyka","Spójność ulubionych","Spójność mapowania"].includes(item.nazwa)&&["bad","warn"].includes(item.status));
   if(bezpieczneProblemy.length)await naprawDaneSklepu({cicho:true,renderujPo:false});
   const problemy=ostatniAutotest.filter(item=>["bad","warn"].includes(item.status));

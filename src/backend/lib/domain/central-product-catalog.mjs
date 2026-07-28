@@ -15,7 +15,7 @@ const normalize = (value) => text(value, 5000).toLocaleLowerCase('pl-PL').normal
 const own = (object, key) => Object.prototype.hasOwnProperty.call(asObject(object), String(key)) || Object.prototype.hasOwnProperty.call(asObject(object), key);
 const searchTsQuery = (value) => normalize(value).split(/\s+/).filter(Boolean).slice(0, 12).map((token) => `${token}:*`).join(' & ');
 
-export const CENTRAL_PRODUCT_SCHEMA_VERSION = 6;
+export const CENTRAL_PRODUCT_SCHEMA_VERSION = 7;
 const CENTRAL_PRODUCT_DERIVED_FIELDS = new Set(['_catalog', 'stan', 'dostepny']);
 
 export const CENTRAL_ALLEGRO_PREPARATION_FIELDS = Object.freeze([
@@ -87,8 +87,13 @@ function centralCatalogListProduct(product = {}, catalogMeta = {}, { admin = fal
   if (admin) fields.push(
     'cenaZakupu',
     'vonHalskyCategoryId', 'vonHalskyAttributes', 'vonHalskyOfferId', 'vonHalskyCommandId',
+    'vonHalskyMatchingMethod', 'vonHalskyMatchingVerifiedAt', 'vonHalskyCategoryMatchedBy', 'vonHalskyCategoryMatchedAt',
     'vonHalskyContentMode', 'vonHalskyTitle', 'vonHalskyShortDescription', 'vonHalskyDescription',
     'vonHalskyEditorialSyncState', 'vonHalskyEditorialSyncPending', 'vonHalskyEditorialSyncRunId',
+    'vonHalskyAgentStatus', 'vonHalskyAgentPreparedAt', 'vonHalskyAgentRulesVersion', 'vonHalskyAgentDocumentation',
+    'vonHalskyAgentScore', 'vonHalskyAgentIssues', 'vonHalskyAgentWarnings', 'vonHalskyAgentError',
+    'vonHalskyAgentCategorySuggestion', 'vonHalskyAgentAttributeCoverage', 'vonHalskyAgentMissingAttributes',
+    'vonHalskyAgentEvidence',
   );
   const result = {};
   for (const field of fields) if (Object.prototype.hasOwnProperty.call(product, field)) result[field] = product[field];

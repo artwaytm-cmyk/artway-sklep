@@ -311,6 +311,8 @@ const vonHalskyRoute = createVonHalskyRoute({
   respond: odpowiedz, isAdmin: czyAdmin, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja,
   saveProductFields: (input) => zapiszIOpublikujPolaProduktuCentralnie(input),
   reportProgress: (work) => agentRuntime.report({ event: 'work_progress', source: 'von-halsky-api', work }),
+  prepareProductWithAgent: (productId, actor, options) => agentSpecialists.prepareVonHalskyProposal(productId, actor, options),
+  sessionOf: requestSession,
   loadCatalog: async () => {
     const settings = await czytaj('settings', { data: {}, rev: 0, updated_at: null });
     const data = settings?.data || {}, availability = data.artway_dostepnosc && typeof data.artway_dostepnosc === 'object' ? data.artway_dostepnosc : {};

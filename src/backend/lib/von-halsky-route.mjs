@@ -5,10 +5,16 @@ import {
   vonHalskyDefaultSettings,
   vonHalskyOfferProposal,
   vonHalskyOfferProjection,
+  vonHalskyProductReadiness,
   vonHalskyPublicConfig,
 } from './domain/von-halsky-catalog.mjs';
 import { createVonHalskyApiClient } from './domain/von-halsky-api-client.mjs';
 import { buildEditorialPublicationPatch } from './domain/agent-product-editorial-state.mjs';
+import {
+  matchVonHalskyAttributes,
+  suggestVonHalskyCategory,
+  vonHalskyAgentPreparationPatch,
+} from './domain/von-halsky-agent-preparation.mjs';
 
 const STORE_KEY = 'inpost_von_halsky_channel';
 
@@ -103,6 +109,8 @@ export function createVonHalskyRoute({
   loadCatalog = async () => [],
   saveProductFields = null,
   reportProgress = async () => {},
+  prepareProductWithAgent = null,
+  sessionOf = () => null,
 } = {}) {
   const api = createVonHalskyApiClient({ env: new Proxy({}, { get: (_target, key) => env()?.[key] }), fetchImpl });
 
@@ -292,6 +300,198 @@ export function createVonHalskyRoute({
         area: 'von-halsky-matching',
       });
       return respond({ ok: true, productId, matching: { method, label, ean: ean || '', producerCode, producer, brand, verifiedAt: at } });
+    }
+
+    if (action === 'von-halsky-agent-prepare') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (typeof saveProductFields !== 'function' || typeof prepareProductWithAgent !== 'function') {
+        return respond({ ok: false, error: 'Serwerowy Agent albo centralna kartoteka produktów nie są dostępne.' }, 503);
+      }
+      const body = await req.json().catch(() => ({}));
+      const productIds = [...new Set((Array.isArray(body.productIds) ? body.productIds : [body.productId])
+        .map((value) => matchingText(value, 200))
+        .filter(Boolean))].slice(0, 50);
+      if (!productIds.length) return respond({ ok: false, error: 'Wybierz co najmniej jeden produkt do przygotowania.' }, 422);
+      const actor = sessionOf(req) || { source: 'admin-von-halsky' };
+      let state = cleanState((await readVersioned(STORE_KEY, initialState())).value);
+      const config = vonHalskyPublicConfig(env());
+      if (!state.settings.agentPreparationEnabled) {
+        return respond({ ok: false, error: 'Przygotowanie przez Agenta jest wyłączone w ustawieniach Von Halsky.' }, 409);
+      }
+      if (!state.categories.length && config.configured) {
+        try {
+          const result = await api.fetchCategories({ depth: 4 });
+          const categories = flattenCategories(result.payload).filter((item) => item.leaf);
+          state = await mutate((draft) => {
+            draft.categories = categories;
+            return draft;
+          });
+        } catch { /* treść i pozostałe kontrole mogą działać bez połączenia kategorii */ }
+      }
+      const loaded = await loadCatalog();
+      const products = Array.isArray(loaded) ? loaded : [...(loaded?.values?.() || [])];
+      const productById = new Map(products.map((product) => [String(product?.id), product]));
+      const results = [];
+      for (const productId of productIds) {
+        const product = productById.get(productId);
+        if (!product) {
+          results.push({ productId, status: 'error', error: 'Produkt nie istnieje w centralnej kartotece.' });
+          continue;
+        }
+        const timestamp = new Date().toISOString();
+        const workId = `von-halsky-agent:${productId}:${Date.now().toString(36)}`;
+        let categoryMatch = null, attributeMatch = null, deterministicFields = {};
+        try {
+          await progress({
+            id: workId, productId, productName: matchingText(product.nazwa || product.name, 180),
+            channel: 'vonHalsky', action: 'przygotowanie produktu', phase: 'matching', status: 'running',
+            target: 'katalog InPost Von Halsky',
+            message: 'Sprawdzam tożsamość, kategorię i fakty produktu według dokumentacji InPost.',
+          });
+          const existingCategoryId = matchingText(product.vonHalskyCategoryId || product.inpostVonHalskyCategoryId, 100);
+          categoryMatch = suggestVonHalskyCategory(product, state.categories, {
+            minimumConfidence: state.settings.agentMinimumConfidence,
+          });
+          let categoryId = existingCategoryId;
+          if (!categoryId && categoryMatch.autoApplicable && state.settings.agentCategoryAutoMatchEnabled !== false) {
+            categoryId = categoryMatch.selected.id;
+            deterministicFields.vonHalskyCategoryId = categoryId;
+            deterministicFields.vonHalskyCategoryMatchedBy = 'agent-evidence';
+            deterministicFields.vonHalskyCategoryMatchedAt = timestamp;
+          }
+          if (categoryId && config.configured && state.settings.agentAttributeAutoMatchEnabled !== false) {
+            try {
+              const attributesResult = await api.fetchCategoryAttributes(categoryId);
+              attributeMatch = matchVonHalskyAttributes(product, attributesResult.payload);
+              if (Object.keys(attributeMatch.mapped).length) {
+                deterministicFields.vonHalskyAttributes = {
+                  ...(product.vonHalskyAttributes || {}),
+                  ...attributeMatch.mapped,
+                };
+              }
+            } catch (error) {
+              attributeMatch = {
+                mapped: {},
+                evidence: [],
+                required: 0,
+                mappedRequired: 0,
+                coverage: 0,
+                missingRequired: [],
+                error: safeError(error).message,
+              };
+            }
+          }
+          if (Object.keys(deterministicFields).length) {
+            await saveProductFields({
+              productId,
+              fields: deterministicFields,
+              mutationId: `von-halsky-agent-evidence:${productId}:${Date.now()}`,
+              actor: matchingText(actor?.email || actor?.name || actor?.source || 'von-halsky-agent', 200),
+              area: 'von-halsky-agent-evidence',
+            });
+          }
+          await progress({
+            id: workId, productId, productName: matchingText(product.nazwa || product.name, 180),
+            channel: 'vonHalsky', action: 'przygotowanie produktu', phase: 'editorial', status: 'running',
+            target: 'katalog InPost Von Halsky',
+            fields: ['vonHalskyTitle', 'vonHalskyShortDescription', 'vonHalskyDescription'],
+            message: 'Agent redaguje kartę kanału i przekazuje ją do deterministycznej kontroli zgodności.',
+          });
+          const agent = await prepareProductWithAgent(productId, actor, { source: body.source === 'automatic' ? 'automatic' : 'manual' });
+          const merged = {
+            ...product,
+            ...deterministicFields,
+            ...(agent?.applied?.persistedPatch || {}),
+            ...(agent?.applied?.patch || {}),
+          };
+          const readiness = vonHalskyProductReadiness(merged);
+          const finalPatch = vonHalskyAgentPreparationPatch({
+            product: merged,
+            readiness,
+            categoryMatch,
+            attributeMatch,
+            timestamp: new Date().toISOString(),
+            status: agent?.retryScheduled ? 'retry' : readiness.publishable ? 'ready' : 'requires_data',
+          });
+          await saveProductFields({
+            productId,
+            fields: finalPatch,
+            mutationId: `von-halsky-agent-result:${productId}:${Date.now()}`,
+            actor: matchingText(actor?.email || actor?.name || actor?.source || 'von-halsky-agent', 200),
+            area: 'von-halsky-agent-preparation',
+          });
+          await progress({
+            id: workId, runId: agent?.run?.id, productId, productName: matchingText(product.nazwa || product.name, 180),
+            channel: 'vonHalsky', action: 'przygotowanie produktu', phase: readiness.publishable ? 'ready' : 'requires_data',
+            status: readiness.publishable ? 'confirmed' : 'attention', target: 'katalog InPost Von Halsky',
+            fields: Object.keys(agent?.applied?.patch || {}),
+            completedAt: new Date().toISOString(),
+            message: readiness.publishable
+              ? 'Kartoteka została zapisana i po odczycie kontrolnym spełnia wymagania publikacji.'
+              : `Zapisano bezpieczne poprawki. Pozostało: ${[...readiness.issues, ...readiness.publicationIssues].join(', ') || 'kontrola operatora'}.`,
+          });
+          results.push({
+            productId,
+            name: matchingText(product.nazwa || product.name, 180),
+            status: finalPatch.vonHalskyAgentStatus,
+            score: readiness.score,
+            issues: finalPatch.vonHalskyAgentIssues,
+            warnings: finalPatch.vonHalskyAgentWarnings,
+            category: deterministicFields.vonHalskyCategoryId ? categoryMatch?.selected : null,
+            categorySuggestion: !deterministicFields.vonHalskyCategoryId ? categoryMatch?.selected : null,
+            attributeCoverage: attributeMatch?.coverage ?? null,
+            saved: true,
+            runId: agent?.run?.id || '',
+          });
+        } catch (error) {
+          const safe = safeError(error);
+          const readiness = vonHalskyProductReadiness({ ...product, ...deterministicFields });
+          const failurePatch = vonHalskyAgentPreparationPatch({
+            product: { ...product, ...deterministicFields },
+            readiness,
+            categoryMatch,
+            attributeMatch,
+            timestamp: new Date().toISOString(),
+            status: 'error',
+            error: safe.message,
+          });
+          await saveProductFields({
+            productId,
+            fields: failurePatch,
+            mutationId: `von-halsky-agent-error:${productId}:${Date.now()}`,
+            actor: 'von-halsky-agent',
+            area: 'von-halsky-agent-preparation',
+          }).catch(() => {});
+          await progress({
+            id: workId, productId, productName: matchingText(product.nazwa || product.name, 180),
+            channel: 'vonHalsky', action: 'przygotowanie produktu', phase: 'failed', status: 'failed',
+            target: 'katalog InPost Von Halsky', error: safe.message,
+            message: 'Agent nie potwierdził pełnego przygotowania. Zapisano dokładny błąd, a produktu nie przekazano do publikacji.',
+          });
+          results.push({ productId, name: matchingText(product.nazwa || product.name, 180), status: 'error', error: safe.message, saved: false });
+        }
+      }
+      const ready = results.filter((item) => item.status === 'ready').length;
+      const requiresData = results.filter((item) => ['requires_data', 'retry'].includes(item.status)).length;
+      const failed = results.filter((item) => item.status === 'error').length;
+      await recordDiagnostic({
+        operation: 'agent-prepare',
+        status: failed ? 'warning' : 'ok',
+        message: `Agent przygotował ${results.length} produktów: gotowe ${ready}, wymagają danych ${requiresData}, błędy ${failed}.`,
+      });
+      // Błąd pojedynczej kartoteki nie unieważnia poprawnie zapisanych wyników
+      // całej partii. Frontend musi dostać pełny raport, aby pokazać operatorowi
+      // dokładne produkty wymagające poprawy zamiast zgubić wyniki w wyjątku HTTP.
+      return respond({
+        ok: true,
+        partial: failed > 0,
+        processed: results.length,
+        ready,
+        requiresData,
+        failed,
+        results,
+        published: false,
+      });
     }
 
     if (action === 'von-halsky-sync-orders') {

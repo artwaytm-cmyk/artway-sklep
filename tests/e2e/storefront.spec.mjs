@@ -623,11 +623,13 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.locator('.von-halsky-table')).toBeVisible();
   await expect(page.getByLabel('Etap sprzedaży')).toBeVisible();
   await expect(page.getByLabel('Jakość danych')).toBeVisible();
+  await expect(page.getByLabel('Praca Agenta')).toBeVisible();
   await expect(page.getByLabel('Status kanału')).toBeVisible();
   await expect(page.getByLabel('Dostępność')).toBeVisible();
-  await expect(page.locator('.von-halsky-publication-bar')).toContainText('Publikacja wyłącznie zaznaczonych produktów');
+  await expect(page.locator('.von-halsky-publication-bar')).toContainText('Agent przygotowuje • administrator publikuje');
   await page.locator('.von-halsky-table tbody input[type="checkbox"]').first().check();
   await expect(page.locator('.von-halsky-publication-count strong')).toHaveText('1');
+  await expect(page.getByRole('button', { name: /Przygotuj Agentem/ })).toBeVisible();
   const matchingButton = page.getByRole('button', { name: 'Popraw dopasowanie' }).first();
   await matchingButton.click();
   await expect(page.getByRole('heading', { name: 'Popraw dopasowanie produktu' })).toBeVisible();
@@ -646,6 +648,8 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.locator('.von-halsky-api-readiness article')).toHaveCount(4);
   await expect(page.locator('.von-halsky-settings-layout')).toBeVisible();
   await expect(page.locator('.von-halsky-settings-index')).toContainText('Polityka danych');
+  await expect(page.getByRole('heading', { name: 'Agent przygotowania ofert' })).toBeVisible();
+  await expect(page.getByLabel('Minimalna pewność kategorii')).toHaveValue('82');
   await expect(page.getByRole('heading', { name: 'Źródła i priorytety danych' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Ostatnie operacje API' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Decyzja ręczna' })).toBeVisible();

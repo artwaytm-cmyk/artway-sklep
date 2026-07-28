@@ -44,10 +44,10 @@ export const SPECIALISTS = Object.freeze({
   },
   von_halsky_offer: {
     assistantId: '', icon: '🐕', label: 'Redaktor Von Halsky', area: 'InPost Von Halsky',
-    description: 'Tworzy niezależną nazwę, krótki i pełny opis karty Von Halsky według oficjalnych wymagań InPost.',
+    description: 'Tworzy i kontroluje niezależną kartę Von Halsky według oficjalnych wymagań InPost oraz faktów kanonicznego produktu.',
     fields: ['von_halsky_title', 'von_halsky_short_description', 'von_halsky_description'], scenario: scenario('von-halsky-offer-editorial'),
     persistence: 'Po bramce kanału backend zapisuje pola von_halsky_* w tym samym rekordzie artway_products; wysłanie do kanału jest osobną operacją.',
-    rules: 'Nazwa 7–150 znaków, opis minimum 100 znaków. Bez linków, obrazów w opisie, kontaktu, płatności, logistyki i haseł promocyjnych.',
+    rules: 'Nazwa 7–150 znaków z najważniejszymi faktami na początku, opis minimum 100 znaków. Tożsamość wymaga EAN albo kodu producenta i marki. Bez linków, obrazów w opisie, kontaktu, płatności, logistyki i haseł promocyjnych. Zdjęcia powinny mieć białe tło, nie mieć znaku wodnego i osiągać minimum 800×800 px. Parametry kategorii wolno mapować tylko z faktów oraz słownika API.',
   },
   von_halsky_compliance: {
     assistantId: '', icon: '🐕', label: 'Strażnik treści Von Halsky', area: 'InPost Von Halsky • kontrola końcowa',

@@ -13,6 +13,11 @@ import {
 import { createVonHalskyApiClient } from '../src/backend/lib/domain/von-halsky-api-client.mjs';
 import { createVonHalskyRoute } from '../src/backend/lib/von-halsky-route.mjs';
 import { vonHalskyCheckEditorial, VON_HALSKY_CONTENT_POLICY } from '../src/backend/lib/domain/von-halsky-compliance.mjs';
+import {
+  matchVonHalskyAttributes,
+  suggestVonHalskyCategory,
+  vonHalskyAgentPreparationPatch,
+} from '../src/backend/lib/domain/von-halsky-agent-preparation.mjs';
 
 test('osobna bramka Von Halsky blokuje logistykę, linki i nieobsługiwany HTML', () => {
   const safe = vonHalskyCheckEditorial({
@@ -94,6 +99,60 @@ test('ustawienia wymuszają wybraną bezpośrednią integrację API i ograniczaj
   assert.equal(settings.automaticPriceSync, false);
   assert.equal(settings.newOfferPublicationMode, 'manual_selection');
   assert.equal(settings.catalogAutomationEnabled, false);
+  assert.equal(settings.agentPreparationEnabled, true);
+  assert.equal(settings.agentMinimumConfidence, 0.82);
+});
+
+test('Agent Von Halsky automatycznie wybiera tylko jednoznaczną kategorię końcową', () => {
+  const clear = suggestVonHalskyCategory(
+    { nazwa: 'Balony foliowe serca czerwone', kategoria: 'Balony foliowe', podkategoria: 'Serca' },
+    [
+      { id: 'leaf-hearts', name: 'Balony foliowe serca', path: 'Impreza › Balony › Balony foliowe serca', leaf: true },
+      { id: 'leaf-animals', name: 'Balony foliowe zwierzęta', path: 'Impreza › Balony › Balony foliowe zwierzęta', leaf: true },
+      { id: 'parent', name: 'Balony', path: 'Impreza › Balony', leaf: false },
+    ],
+  );
+  assert.equal(clear.selected.id, 'leaf-hearts');
+  assert.equal(clear.autoApplicable, true);
+  const ambiguous = suggestVonHalskyCategory(
+    { nazwa: 'Zestaw kreatywny dla dzieci', kategoria: 'Zabawki' },
+    [
+      { id: 'one', name: 'Zestawy kreatywne', path: 'Zabawki › Zestawy kreatywne', leaf: true },
+      { id: 'two', name: 'Zabawki kreatywne', path: 'Zabawki › Zabawki kreatywne', leaf: true },
+    ],
+  );
+  assert.equal(ambiguous.autoApplicable, false);
+});
+
+test('Agent Von Halsky mapuje parametry wyłącznie po dokładnej nazwie i wartości słownika', () => {
+  const result = matchVonHalskyAttributes({
+    parametry: { Kolor: 'Czerwony', Materiał: 'Folia', Motyw: 'Serce' },
+  }, {
+    attributes: [
+      { id: 'color', name: 'Kolor', required: true, values: [{ id: 'red', name: 'Czerwony' }, { id: 'blue', name: 'Niebieski' }] },
+      { id: 'material', name: 'Materiał', required: true, values: [{ id: 'paper', name: 'Papier' }] },
+      { id: 'theme', name: 'Motyw', required: false },
+    ],
+  });
+  assert.deepEqual(result.mapped, { color: 'red', theme: 'Serce' });
+  assert.deepEqual(result.missingRequired, ['Materiał']);
+  assert.equal(result.coverage, 0.5);
+  assert.equal(result.exactOnly, true);
+});
+
+test('wynik Agenta Von Halsky zapisuje dowody, braki i wersję reguł', () => {
+  const patch = vonHalskyAgentPreparationPatch({
+    product: { ean: '5906018000030' },
+    readiness: { publishable: false, score: 76, issues: ['Brak kategorii'], publicationIssues: [], warnings: ['Jedno zdjęcie'], identifiers: { ean: '5906018000030' } },
+    categoryMatch: { selected: { id: 'games', name: 'Gry', path: 'Zabawki › Gry', evidence: ['zgodność 100%'] }, confidence: 0.91, autoApplicable: true },
+    attributeMatch: { coverage: 0.5, missingRequired: ['Wiek'], evidence: [{ attributeId: 'players' }] },
+    timestamp: '2026-07-29T10:00:00.000Z',
+  });
+  assert.equal(patch.vonHalskyAgentStatus, 'requires_data');
+  assert.equal(patch.vonHalskyAgentEvidence.identity, 'gtin');
+  assert.equal(patch.vonHalskyAgentEvidence.attributesMapped, 1);
+  assert.deepEqual(patch.vonHalskyAgentMissingAttributes, ['Wiek']);
+  assert.match(patch.vonHalskyAgentRulesVersion, /^2026-07-29/);
 });
 
 test('minimalny stan kanału nigdy nie przekracza ustawionego maksimum', () => {
@@ -362,6 +421,59 @@ test('korekta dopasowania zapisuje aliasy identyfikatorów i blokuje duplikat EA
   assert.equal(duplicate.status, 409);
   assert.equal(duplicate.body.code, 'von_halsky_gtin_conflict');
   assert.equal(saves.length, 1);
+});
+
+test('route Agenta Von Halsky zapisuje wynik w centralnej kartotece bez publikacji', async () => {
+  const product = {
+    id: 'VH-AGENT-1',
+    nazwa: 'Gra edukacyjna Alexander',
+    opis: 'Krótki opis wymagający bezpiecznego uzupełnienia przez wyspecjalizowanego Agenta.',
+    ean: '5906018000030',
+    producent: 'Alexander',
+    zdjecie: '/produkt.webp',
+    cena: 39.9,
+    vonHalskyCategoryId: '33333333-3333-4333-8333-333333333333',
+  };
+  const savedAreas = [], progress = [];
+  const route = createVonHalskyRoute({
+    respond: (body, status = 200) => ({ body, status }),
+    isAdmin: () => true,
+    sessionOf: () => ({ email: 'admin@example.test' }),
+    readVersioned: async (_key, fallback) => ({ value: fallback, revision: 0 }),
+    writeIfVersion: async () => ({ modified: true }),
+    loadCatalog: async () => [product],
+    saveProductFields: async ({ fields, area }) => {
+      Object.assign(product, structuredClone(fields));
+      savedAreas.push(area);
+      return { confirmed: true, product: structuredClone(product) };
+    },
+    prepareProductWithAgent: async () => ({
+      run: { id: 'run-vh-agent-1' },
+      applied: {
+        applied: true,
+        patch: {
+          vonHalskyContentMode: 'custom',
+          vonHalskyTitle: 'Gra edukacyjna Alexander dla dzieci',
+          vonHalskyShortDescription: 'Angażująca gra edukacyjna wspierająca naukę przez wspólną zabawę.',
+          vonHalskyDescription: 'Angażująca gra edukacyjna wspierająca naukę przez wspólną zabawę. Zestaw zawiera elementy potrzebne do rozegrania partii i rozwijania spostrzegawczości oraz logicznego myślenia.',
+        },
+      },
+      retryScheduled: false,
+    }),
+    reportProgress: async (entry) => progress.push(entry),
+  });
+  const request = new Request('https://artwaytm.pl/api?action=von-halsky-agent-prepare', {
+    method: 'POST',
+    body: JSON.stringify({ productIds: ['VH-AGENT-1'] }),
+  });
+  const response = await route(request, new URL(request.url), 'von-halsky-agent-prepare');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.published, false);
+  assert.equal(response.body.ready, 1);
+  assert.equal(product.vonHalskyAgentStatus, 'ready');
+  assert.equal(product.vonHalskyAgentError, '');
+  assert.ok(savedAreas.includes('von-halsky-agent-preparation'));
+  assert.deepEqual(progress.map((entry) => entry.phase), ['matching', 'editorial', 'ready']);
 });
 
 test('ręczna publikacja tworzy wyłącznie zaznaczoną ofertę i zapisuje request ID', async () => {

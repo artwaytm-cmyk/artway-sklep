@@ -3689,7 +3689,7 @@ function adminModulyDlaTrasy(route=""){
   const t=String(route||"").split("?")[0],moduly=["core","ui"],add=(...items)=>items.forEach(item=>{if(!moduly.includes(item))moduly.push(item);});
   add("shell");
   if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
-  if(t==="/diagnostyka"||t==="/admin/system/diagnostyka")add("agent","warehouse","shipping","commerce","communications","inventory","catalog","personalization","system");
+  if(t==="/diagnostyka"||t==="/admin/system/diagnostyka")add("agent","warehouse","shipping","commerce","communications","inventory","catalog","personalization","system","vonHalsky");
   else if(t.startsWith("/admin/system"))add("system");
   else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("shipping","commerce","communications","inventory","system");
   else if(t.startsWith("/admin/agent-ai"))add("agent","warehouse","commerce","communications","inventory");

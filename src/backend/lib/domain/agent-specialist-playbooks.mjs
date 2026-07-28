@@ -1,4 +1,4 @@
-export const SPECIALIST_PLAYBOOK_VERSION = '2026-07-28.1';
+export const SPECIALIST_PLAYBOOK_VERSION = '2026-07-29.1';
 
 const COMMON = Object.freeze({
   input: [
@@ -94,13 +94,13 @@ const ROLE_OPERATING_CONTRACTS = Object.freeze({
   },
   von_halsky_offer: {
     triggers: ['produkt kwalifikuje się do kanału Von Halsky', 'zmiana wspólnych faktów kartoteki', 'brak nazwy albo opisu kanału'],
-    success: ['osobna nazwa, skrót i opis kanału', 'opis minimum 100 znaków', 'brak linków, obrazów, kontaktu i logistyki', 'treść zgodna z potwierdzonym wariantem'],
+    success: ['osobna nazwa, skrót i opis kanału', 'nazwa 7–150 znaków z najważniejszymi faktami na początku', 'opis minimum 100 znaków', 'brak linków, obrazów, kontaktu i logistyki', 'tożsamość przez EAN albo kod producenta i markę', 'treść zgodna z potwierdzonym wariantem'],
     failures: [
       'Adres artwaytm.pl lub link źródłowy w opisie powoduje usunięcie całego odesłania.',
       'Dane obsługi klienta nie należą do karty produktu; pozostaw je konfiguracji Portalu Merchanta.',
       'Jeżeli karta sklepu ma opis starszy niż materiał producenta, aktualizuj fakty, ale nie kopiuj layoutu strony źródłowej.',
     ],
-    examples: ['Nazwa zaczyna się od rodzaju/nazwy produktu i marki, a opis opisuje zastosowanie oraz potwierdzone cechy bez informacji handlowych.'],
+    examples: ['Nazwa zaczyna się od rodzaju/nazwy produktu i marki, a opis opisuje zastosowanie oraz potwierdzone cechy bez informacji handlowych.', 'Zdjęcie 600×600 albo ze znakiem wodnym zostaje wskazane do wymiany, a nie zastąpione przypadkowym obrazem podobnego produktu.', 'Parametr kategorii jest wypełniany tylko wtedy, gdy nazwa parametru i wartość mają dokładny odpowiednik w kartotece oraz słowniku API.'],
   },
   von_halsky_compliance: {
     triggers: ['bramka Von Halsky odrzuciła tekst', 'opis zawiera URL, obraz, kontakt, logistykę lub niedozwolony HTML'],
@@ -235,8 +235,8 @@ const PLAYBOOKS = Object.freeze({
   },
   von_halsky_offer: {
     purpose: 'Niezależna karta InPost Von Halsky przygotowana według publicznych wymagań kanału.',
-    procedure: ['Ustal tożsamość po EAN albo kodzie producenta i marce.', 'Nazwa: 7–150 znaków, najważniejsze informacje na początku.', 'Opis: minimum 100 znaków, czytelny, skoncentrowany na produkcie.', 'Zwróć osobne pola Von Halsky; sklep jest bazą faktów, nie miejscem zapisu wyniku.'],
-    mustNot: ['Opis nie może zawierać linków ani osadzonych zdjęć — oficjalnie powodują odrzucenie oferty.', 'Nie dodawaj telefonu, e-maila ani zachęty do kontaktu. Dane obsługi klienta należą do ustawień sklepu w Portalu Merchanta.', 'Nie dodawaj płatności, dostawy, logistyki ani haseł promocyjnych.', 'Nie nadpisuj sklepu ani Allegro.'],
+    procedure: ['Ustal tożsamość po EAN albo kodzie producenta i marce.', 'Nazwa: 7–150 znaków, najważniejsze informacje na początku.', 'Opis: minimum 100 znaków, czytelny, skoncentrowany na produkcie.', 'Sprawdź zdjęcia: minimum jedno, białe tło, bez znaku wodnego i co najmniej 800×800 px.', 'Dopasuj kategorię i parametry tylko na podstawie potwierdzonych faktów oraz aktualnego słownika API.', 'Zwróć osobne pola Von Halsky; sklep jest bazą faktów, nie miejscem zapisu wyniku.'],
+    mustNot: ['Opis nie może zawierać linków ani osadzonych zdjęć — oficjalnie powodują odrzucenie oferty.', 'Nie dodawaj telefonu, e-maila ani zachęty do kontaktu. Dane obsługi klienta należą do ustawień sklepu w Portalu Merchanta.', 'Nie dodawaj płatności, dostawy, logistyki ani haseł promocyjnych.', 'Nie zgaduj EAN, marki, kategorii, parametrów ani wartości słownikowej.', 'Nie pobieraj zdjęcia podobnego produktu.', 'Nie nadpisuj sklepu ani Allegro.'],
     example: 'Dozwolone: cechy i zastosowanie produktu. Niedozwolone: „więcej na artwaytm.pl”, „napisz do nas” albo obraz w HTML.',
   },
   von_halsky_compliance: {

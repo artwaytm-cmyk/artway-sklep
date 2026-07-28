@@ -216,6 +216,7 @@ test('pozytywny autotest zamyka odpowiadające mu stare zdarzenia przeglądarki,
   await service.record([
     { level: 'blad', message: 'products.json niedostępny: Failed to fetch', source: 'przeglądarka', kind: 'browser', route: '/' },
     { level: 'blad', message: 'Kontakt/FAQ/Dostawa nie mogą zostać wyrenderowane', source: 'pełny autotest', kind: 'browser', route: '/admin/system' },
+    { level: 'blad', message: 'Błąd renderowania strony: Invalid qualified name: 1000845', source: '/admin/von-halsky/wystawianie', kind: 'browser', route: '/#/admin/von-halsky/wystawianie' },
     { level: 'blad', message: 'Nie udało się zapisać zamówienia', source: 'przeglądarka', kind: 'browser', route: '/zamowienie' },
   ], { trusted: true });
   const request = new Request('https://artwaytm.pl/api/store?action=diagnostics-checks-sync', {
@@ -236,6 +237,7 @@ test('pozytywny autotest zamyka odpowiadające mu stare zdarzenia przeglądarki,
   assert.equal(body.summary.open, 1);
   assert.equal(record().items.find((item) => /products\.json/.test(item.message)).status, 'resolved');
   assert.equal(record().items.find((item) => /Kontakt/.test(item.message)).status, 'resolved');
+  assert.equal(record().items.find((item) => /Invalid qualified name/.test(item.message)).status, 'resolved');
   assert.equal(record().items.find((item) => /zamówienia/.test(item.message)).status, 'open');
 });
 
