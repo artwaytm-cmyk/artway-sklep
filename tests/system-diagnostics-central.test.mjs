@@ -187,6 +187,30 @@ test('pełny autotest przekazuje Agentowi błędy i ostrzeżenia oraz zamyka ust
   assert.ok(record().items.every((item) => /autotest/i.test(item.resolution)));
 });
 
+test('zmienne szczegóły tego samego autotestu nie tworzą kolejnych grup błędów', async () => {
+  const { service, record } = fixture();
+  for (const message of [
+    'Pamięć operacyjna przeglądarki: 3400 KB',
+    'Pamięć operacyjna przeglądarki: 3500 KB',
+  ]) {
+    const request = new Request('https://artwaytm.pl/api/store?action=diagnostics-checks-sync', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-admin': '1' },
+      body: JSON.stringify({ checks: [{
+        level: 'ostrzezenie',
+        message,
+        source: 'autotest:Pamięć',
+        route: '/#/admin/system/diagnostyka',
+        kind: 'autotest',
+      }] }),
+    });
+    await service.route(request, new URL(request.url), 'diagnostics-checks-sync');
+  }
+  assert.equal(record().items.length, 1);
+  assert.equal(record().items[0].count, 2);
+  assert.match(record().items[0].message, /3500 KB/);
+});
+
 test('pozytywny autotest zamyka odpowiadające mu stare zdarzenia przeglądarki, ale nie inne błędy', async () => {
   const { service, record } = fixture();
   await service.record([

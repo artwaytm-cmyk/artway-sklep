@@ -30,6 +30,20 @@ test('ciężka kopia danych serwerowych jest usuwana z localStorage po potwierdz
   assert.match(cloud, /chmuraUsunChunksLS\(klucz\)/);
 });
 
+test('diagnostyka pamięci ocenia największy zapis, a nie sumę małych ustawień', () => {
+  const diagnostics = read('src/frontend/16-diagnostics.js');
+  assert.match(diagnostics, /najwiekszaSerwerowa/);
+  assert.match(diagnostics, /pamiecStan\.najwiekszaSerwerowa>CHMURA_LS_OMIJANE_PRAG_BYTES/);
+  assert.doesNotMatch(diagnostics, /pamiecStan\.serwerowe>CHMURA_LS_OMIJANE_PRAG_BYTES/);
+});
+
+test('diagnostyka zdjęć obejmuje tylko produkty dostępne w publicznej sprzedaży', () => {
+  const diagnostics = read('src/frontend/16-diagnostics.js');
+  assert.match(diagnostics, /produktySprzedazowe=produkty\.filter/);
+  assert.match(diagnostics, /produktWidocznyWPublicznymKatalogu/);
+  assert.match(diagnostics, /Wszystkie aktywne produkty mają zdjęcia/);
+});
+
 test('centralny PostgreSQL jest źródłem katalogu, a products.json kopią startową', () => {
   const diagnostics = read('src/frontend/16-diagnostics.js');
   assert.match(diagnostics, /"Centralny katalog produktów"/);

@@ -2517,6 +2517,7 @@ function jestProduktemImportowanym(id){ return produktyImportowane.some(p=>Strin
 function produktDodanyPoId(id){ return produktyDodane.find(p=>Number(p.id)===Number(id)); }
 function czyProduktAdminWKoszu(p){
   if(!p) return false;
+  if(["trash","removed","deleted"].includes(String(p?._catalog?.recordStatus||p?.recordStatus||p?.record_status||"").toLowerCase()))return true;
   if(jestProduktemDodanym(p.id)) return false;
   return produktyUkryte.includes(p.id);
 }
@@ -2590,6 +2591,7 @@ function zbudujProdukty(){
     .map(p=>produktyEdytowane[p.id] ? {...p, ...produktyEdytowane[p.id], id:p.id} : p);
   produkty = [ ...bazowePoEdycji, ...produktyDodane ]
     .map(przygotujProduktDlaSklepu)
+    .filter(p=>!["trash","removed","deleted"].includes(String(p?._catalog?.recordStatus||p?.recordStatus||p?.record_status||"").toLowerCase()))
     .filter(p => !ukryteKat.includes(p.kategoria));
   // Brak u producenta wstrzymuje zakup, ale nie usuwa karty, adresu ani treści.
   // Tylko świadome przeniesienie do kosza / definitywne usunięcie wyłącza produkt.
@@ -2728,7 +2730,8 @@ function produktDostepnyWSprzedazy(p){
 function produktWidocznyWPublicznymKatalogu(p){
   if(!produktDostepnyWSprzedazy(p))return false;
   if(p.aktywny===false||p.ukryty===true||p.sprzedazAktywna===false||p.saleAvailable===false)return false;
-  return !["trash","removed","deleted"].includes(String(p.recordStatus||p.record_status||"").toLowerCase());
+  if(p?._catalog?.channels?.store?.active===false)return false;
+  return !["trash","removed","deleted"].includes(String(p?._catalog?.recordStatus||p.recordStatus||p.record_status||"").toLowerCase());
 }
 function odswiezDostepnoscProducentowWidoku(){
   if(typeof odswiezMonitoringProducentow==="function"&&odswiezMonitoringProducentow())return;

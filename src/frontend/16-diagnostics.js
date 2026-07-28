@@ -118,16 +118,16 @@ function rozmiarDanychLokalnych(){
   return n*2;
 }
 function systemPamiecSzczegoly(){
-  let razem=0,serwerowe=0,przestarzale=0;
+  let razem=0,serwerowe=0,przestarzale=0,najwiekszaSerwerowa=0;
   try{
     for(let i=0;i<localStorage.length;i++){
       const key=localStorage.key(i)||"",raw=localStorage.getItem(key)||"",bytes=chmuraRozmiarBajtow(key)+chmuraRozmiarBajtow(raw);
       razem+=bytes;
-      if(typeof CHMURA_LS_OMIJANE_KLUCZE!=="undefined"&&CHMURA_LS_OMIJANE_KLUCZE.has(key))serwerowe+=bytes;
+      if(typeof CHMURA_LS_OMIJANE_KLUCZE!=="undefined"&&CHMURA_LS_OMIJANE_KLUCZE.has(key)){serwerowe+=bytes;najwiekszaSerwerowa=Math.max(najwiekszaSerwerowa,bytes);}
       if(typeof KLUCZE_PRZESTARZALYCH_CACHE!=="undefined"&&KLUCZE_PRZESTARZALYCH_CACHE.includes(key))przestarzale+=bytes;
     }
   }catch(e){}
-  return {razem,serwerowe,przestarzale,operacyjne:Math.max(0,razem-serwerowe-przestarzale)};
+  return {razem,serwerowe,przestarzale,najwiekszaSerwerowa,operacyjne:Math.max(0,razem-serwerowe-przestarzale)};
 }
 async function systemOdswiezDiagnostyke(cicho=false){
   if(systemDiagStan.ladowanie)return false;
@@ -166,14 +166,15 @@ function testyDiagnostyczne(){
   const ids=produkty.map(p=>p.id), unikalne=new Set(ids), wszystkieAdmin=produktyDoAdministracji(), adminIds=new Set(wszystkieAdmin.map(p=>p.id));
   const mapa=ustawienia.mapaProduktow||{}, osieroconeMap=Object.keys(mapa).filter(id=>!adminIds.has(+id));
   const osieroconyKoszyk=koszyk.filter(x=>!ids.includes(x.id)), osieroconeUlub=ulubione.filter(id=>!ids.includes(id));
-  const bezZdjec=produkty.filter(p=>!p.zdjecie).length, bledneProdukty=produkty.filter(p=>!p.nazwa||!p.kategoria||!(p.cena>0));
+  const produktySprzedazowe=produkty.filter(p=>typeof produktWidocznyWPublicznymKatalogu!=="function"||produktWidocznyWPublicznymKatalogu(p));
+  const bezZdjec=produktySprzedazowe.filter(p=>!p.zdjecie).length, bledneProdukty=produktySprzedazowe.filter(p=>!p.nazwa||!p.kategoria||!(p.cena>0));
   const idsKosza=[...koszDodanych.map(p=>p.id),...bazoweProduktyWKoszu().map(p=>p.id)];
   const brakMetaKosza=idsKosza.filter(id=>!koszMeta[id]), wygasleKosza=idsKosza.filter(id=>Date.now()-Number(koszMeta[id]?.usunietoAt||Date.now())>=OKRES_KOSZA_MS);
   const pamiec=rozmiarDanychLokalnych(),pamiecStan=systemPamiecSzczegoly(),publikacjaKatalogu=stanPublikacjiKatalogu();
   dodaj("Produkty","Produkty są wczytane",produkty.length?"ok":"bad",`${produkty.length} widocznych produktów`);
   dodaj("Produkty","Unikalne identyfikatory produktów",unikalne.size===ids.length?"ok":"bad",unikalne.size===ids.length?"Brak duplikatów ID":`${ids.length-unikalne.size} zduplikowanych ID`);
   dodaj("Produkty","Poprawne dane i ceny",bledneProdukty.length?"bad":"ok",bledneProdukty.length?`${bledneProdukty.length} produktów wymaga poprawy`:"Nazwy, katalogi i ceny są poprawne");
-  dodaj("Produkty","Zdjęcia produktów",bezZdjec?"warn":"ok",bezZdjec?`${bezZdjec} produktów korzysta z ikon zamiast zdjęć`:"Wszystkie produkty mają zdjęcia");
+  dodaj("Produkty","Zdjęcia produktów",bezZdjec?"warn":"ok",bezZdjec?`${bezZdjec} aktywnych produktów korzysta z ikon zamiast zdjęć`:"Wszystkie aktywne produkty mają zdjęcia");
   dodaj("Produkty","Kosz produktów na 30 dni",brakMetaKosza.length||wygasleKosza.length?"warn":"ok",brakMetaKosza.length?`${brakMetaKosza.length} pozycji nie ma daty usunięcia`:wygasleKosza.length?`${wygasleKosza.length} pozycji czeka na automatyczne czyszczenie`:`${idsKosza.length} pozycji w koszu; metadane retencji są spójne`);
   dodaj("Produkty","Stronicowanie dużego katalogu",[12,24,48,96].includes(produktyNaStronie)&&[25,50,100,200].includes(produktyNaStronieAdmin)?"ok":"warn",`Sklep: ${produktyNaStronie} / strona • panel: ${produktyNaStronieAdmin} / strona`);
   dodaj("Produkty","Schemat importu i eksportu",POLA_CSV_PRODUKTU.length>=16?"ok":"warn",`${POLA_CSV_PRODUKTU.length} obsługiwanych kolumn • JSON i CSV • kopia przed importem`);
@@ -214,7 +215,10 @@ function testyDiagnostyczne(){
   const centralnyKatalog=stanBramki.store?.storage?.migrated===true&&String(stanBramki.store?.storage?.engine||"").startsWith("postgres-");
   dodaj("Publikacja","Centralny katalog produktów",!integracjeSprawdzone?"pending":centralnyKatalog?"ok":publikacjaKatalogu.gotowy?"ok":"warn",!integracjeSprawdzone?"Trwa kontrola źródła katalogu":centralnyKatalog?`PostgreSQL jest źródłem prawdy • ${stanBramki.store.storage.records||publikacjaKatalogu.razem} rekordów domenowych • products.json pełni wyłącznie rolę startowej kopii awaryjnej`:publikacjaKatalogu.gotowy?`Awaryjny products.json zabezpiecza ${publikacjaKatalogu.razem} kart`:`Brakujące ${publikacjaKatalogu.brakujace.length} • zmienione ${publikacjaKatalogu.nieaktualne.length}`);
   dodaj("Publikacja","Atomowe wydanie strony",!systemWersjaStan.sprawdzono||systemWersjaStan.ladowanie?"pending":systemWersjaStan.release&&systemWersjaStan.backendOnline?"ok":"bad",!systemWersjaStan.sprawdzono||systemWersjaStan.ladowanie?"Trwa automatyczna kontrola wydania":systemWersjaStan.release&&systemWersjaStan.backendOnline?`Aktywne wydanie ${systemWersjaStan.release.releaseId}`:systemWersjaStan.error||"Nie udało się potwierdzić aktywnego wydania");
-  const pamiecStatus=pamiecStan.przestarzale>0||pamiecStan.serwerowe>CHMURA_LS_OMIJANE_PRAG_BYTES?"warn":pamiec>7_500_000?"bad":pamiec>5_000_000?"warn":"ok";
+  // Suma wielu małych, poprawnych ustawień serwerowych może przekroczyć próg
+  // pojedynczego zapisu. Ostrzeżenie ma dotyczyć ciężkiego klucza, starego
+  // cache albo rzeczywistego rozmiaru całej pamięci — nie prawidłowej sumy.
+  const pamiecStatus=pamiecStan.przestarzale>0||pamiecStan.najwiekszaSerwerowa>CHMURA_LS_OMIJANE_PRAG_BYTES?"warn":pamiec>7_500_000?"bad":pamiec>5_000_000?"warn":"ok";
   dodaj("Pamięć","Pamięć operacyjna przeglądarki",pamiecStatus,`${(pamiec/1024).toFixed(1)} KB łącznie • ${(pamiecStan.operacyjne/1024).toFixed(1)} KB operacyjnych • ${(pamiecStan.serwerowe/1024).toFixed(1)} KB kopii danych serwerowych${systemDiagStan.zwolniono?` • ostatnio zwolniono ${(systemDiagStan.zwolniono/1024).toFixed(1)} KB`:""}`);
   const zleBannery=pobierzBannery().filter(b=>!b.tytul||bezpiecznyLink(b.link)==="#/"&&b.link!=="#/");
   dodaj("Wygląd","Konfiguracja banerów",zleBannery.length?"warn":"ok",zleBannery.length?`${zleBannery.length} banerów wymaga sprawdzenia`:`${pobierzBannery().length} poprawnych banerów`);

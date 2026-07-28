@@ -33,7 +33,8 @@ function produktDostepnyWSprzedazy(p){
 function produktWidocznyWPublicznymKatalogu(p){
   if(!produktDostepnyWSprzedazy(p))return false;
   if(p.aktywny===false||p.ukryty===true||p.sprzedazAktywna===false||p.saleAvailable===false)return false;
-  return !["trash","removed","deleted"].includes(String(p.recordStatus||p.record_status||"").toLowerCase());
+  if(p?._catalog?.channels?.store?.active===false)return false;
+  return !["trash","removed","deleted"].includes(String(p?._catalog?.recordStatus||p.recordStatus||p.record_status||"").toLowerCase());
 }
 function odswiezDostepnoscProducentowWidoku(){
   if(typeof odswiezMonitoringProducentow==="function"&&odswiezMonitoringProducentow())return;

@@ -26,9 +26,18 @@ test('niedostępny produkt zachowuje adres, ale nie trafia na publiczne listy sp
   ]);
   assert.match(inventory, /function produktWidocznyWPublicznymKatalogu/);
   assert.match(inventory, /produktDostepnyWSprzedazy\(p\)/);
+  assert.match(inventory, /_catalog\?\.channels\?\.store\?\.active===false/);
+  assert.match(inventory, /_catalog\?\.recordStatus/);
   assert.match(home, /publiczneProdukty=produkty\.filter\(produktWidocznyWPublicznymKatalogu\)/);
   assert.match(listing, /if\(!produktWidocznyWPublicznymKatalogu\(p\)\)return false/);
   assert.match(listing, /produktWidocznyWPublicznymKatalogu\(p\)&&galaz\.has/);
+});
+
+test('kartoteki z centralnego kosza nie wracają do aktywnego katalogu po synchronizacji', async () => {
+  const catalog = await readFile('src/frontend/05-catalog-inventory.js', 'utf8');
+  const builder = catalog.slice(catalog.indexOf('function zbudujProdukty()'), catalog.indexOf('function podpisPublikacjiProduktu'));
+  assert.match(catalog, /function czyProduktAdminWKoszu[\s\S]{0,400}_catalog\?\.recordStatus/);
+  assert.match(builder, /trash","removed","deleted/);
 });
 
 test('stary adres po połączeniu duplikatów prowadzi do zachowanej kartoteki', async () => {

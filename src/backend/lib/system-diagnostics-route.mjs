@@ -45,11 +45,14 @@ function normalizedFingerprintText(value = '') {
 }
 
 function eventFingerprint(event = {}) {
+  const messageForFingerprint = event.kind === 'autotest' || String(event.source || '').startsWith('autotest:')
+    ? String(event.message || '').split(':', 1)[0]
+    : event.message;
   return crypto.createHash('sha256')
     .update([
       event.level,
       normalizedFingerprintText(event.source),
-      normalizedFingerprintText(event.message),
+      normalizedFingerprintText(messageForFingerprint),
       normalizedFingerprintText(event.route),
     ].join('|'))
     .digest('hex')
