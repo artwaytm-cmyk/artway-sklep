@@ -46,13 +46,6 @@ function cleanState(value = {}) {
   };
 }
 
-function productMatchesCode(product = {}, code = '') {
-  const expected = String(code || '').trim().toLowerCase();
-  if (!expected) return false;
-  return [product.id, product.externalId, product.sku, product.kodProducenta, product.mpn, product.ean, product.gtin]
-    .some((value) => String(value ?? '').trim().toLowerCase() === expected);
-}
-
 function remoteOfferSummary(details = {}) {
   const offer = details?.offer || details || {};
   return {
@@ -393,16 +386,16 @@ export function createVonHalskyRoute({
       const productByExternalId = new Map(selectedList.map((product) => [vonHalskyOfferProjection(product, state.settings).externalId, product]));
       const deduplicated = deduplicateVonHalskyOffers(projections);
       const eligible = deduplicated.items.filter((item) => item.readiness.publishable && item.available);
-      const testCode = String(state.settings.testOfferCode || '1410');
-      const allowNewOffer = (item) => state.settings.catalogAutomationEnabled === true
-        || productMatchesCode(productByExternalId.get(item.externalId), testCode);
+      const allowNewOffer = (item) => {
+        const product = productByExternalId.get(item.externalId);
+        return Boolean(product && requestedProductIds.has(String(product.id)));
+      };
       if (body.publish !== true) return respond({
         ok: true,
         dryRun: true,
         eligible: eligible.length,
         allowedToCreate: eligible.filter(allowNewOffer).length,
-        publicationMode: state.settings.catalogAutomationEnabled ? 'automatic' : 'test_allowlist',
-        testOfferCode: testCode,
+        publicationMode: 'manual_selection',
         blocked: deduplicated.items.length - eligible.length,
         duplicates: deduplicated.conflicts.length,
       });
@@ -531,8 +524,7 @@ export function createVonHalskyRoute({
         await recordDiagnostic({ operation: 'catalog-sync', status: 'ok', message, requestId: lastRequestId });
         return respond({
           ok: true, sent, created, updated: updatedCount, closed, reopened, skippedNew,
-          publicationMode: state.settings.catalogAutomationEnabled ? 'automatic' : 'test_allowlist',
-          testOfferCode: testCode,
+          publicationMode: 'manual_selection',
           blocked: deduplicated.items.length - eligible.length,
           duplicates: deduplicated.conflicts.length,
           offers: updated.offers,

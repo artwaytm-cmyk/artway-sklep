@@ -612,6 +612,12 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await page.goto('/#/admin/von-halsky/oferty');
   await expect(page.getByRole('heading', { name: 'Produkty przygotowywane do Von Halsky' })).toBeVisible();
   await expect(page.locator('.von-halsky-table')).toBeVisible();
+  await expect(page.getByLabel('Jakość danych')).toBeVisible();
+  await expect(page.getByLabel('Status kanału')).toBeVisible();
+  await expect(page.getByLabel('Dostępność')).toBeVisible();
+  await expect(page.locator('.von-halsky-publication-bar')).toContainText('Publikacja wyłącznie zaznaczonych produktów');
+  await page.locator('.von-halsky-table tbody input[type="checkbox"]').first().check();
+  await expect(page.locator('.von-halsky-publication-count strong')).toHaveText('1');
   const previewButton = page.getByRole('button', { name: 'Podgląd karty' }).first();
   await expect(previewButton).toBeVisible();
   await previewButton.click();
@@ -622,6 +628,10 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.getByRole('heading', { name: 'Połączenie InPost Von Halsky' })).toBeVisible();
   await expect(page.locator('.von-halsky-settings').getByText('Bezpośrednie API', { exact: true })).toBeVisible();
   await expect(page.locator('.von-halsky-api-readiness article')).toHaveCount(4);
+  await expect(page.locator('.von-halsky-settings-layout')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Decyzja ręczna' })).toBeVisible();
+  await expect(page.locator('[name="testOfferCode"]')).toHaveCount(0);
+  await expect(page.getByText('brak automatycznego tworzenia nowych ofert', { exact: true })).toBeVisible();
   await expect.poll(() => page.locator('#artwayAdminStyle-vonHalsky').evaluate((link) => Boolean(link.sheet))).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/#/admin/von-halsky/oferty');
