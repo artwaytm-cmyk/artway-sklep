@@ -414,8 +414,8 @@ test('główne działy administratora mają jeden profesjonalny szablon i nie tw
   for (const route of routes) {
     await page.goto(`/#${route}`);
     const workspace = page.locator('.admin-workspace-content[data-admin-layout="unified-v2"]');
-    await expect(workspace).toBeVisible();
-    await expect(workspace.locator('.admin-unified-hero').first()).toBeVisible();
+    await expect(workspace, `Nie załadowano obszaru roboczego na ${route}`).toBeVisible();
+    await expect(workspace.locator('.admin-unified-hero').first(), `Brak wspólnego nagłówka na ${route}`).toBeVisible();
     const dimensions = await workspace.evaluate((element) => ({ width: element.clientWidth, content: element.scrollWidth }));
     expect(dimensions.content, `Poziome przepełnienie na ${route}`).toBeLessThanOrEqual(dimensions.width + 1);
   }

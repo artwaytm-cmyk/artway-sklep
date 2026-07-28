@@ -16,7 +16,7 @@
     '.allegro-listing-hero','.assortment-catalog-hero','.warehouse-page-context',
     '.orders-hero','.shipping-page-context','.ai-agent-hero','.home-editor-head',
     '.banner-workspace-head','.discount-workspace-head','.catalog-quality-hero',
-    '.dashboard-hero','.agent-command-hero','.warehouse-qr-hero',
+    '.dashboard-hero','.agent-command-hero','.agent-command-center','.warehouse-qr-hero',
     '.product-link-import-hero','.product-editor-hero','.seo-control-hero',
     '.system-release-hero',
   ].join(',');

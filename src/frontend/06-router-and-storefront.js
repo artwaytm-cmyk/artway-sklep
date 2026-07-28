@@ -73,7 +73,7 @@ function zaladujSklepModul(modul,version){
   const asset=SKLEP_MODULY_RUNTIME[modul];if(!asset)return Promise.reject(new Error(`Nieznany moduł sklepu: ${modul}`));
   const id=`artwayStoreModule-${modul}`,wczytaj=(proba=0)=>new Promise((resolve,reject)=>{
     document.getElementById(id)?.remove();
-    const script=document.createElement("script");script.id=id;script.src=`/assets/${asset}.js?v=${encodeURIComponent(version)}${proba?`&retry=${Date.now()}`:""}`;script.async=false;
+    const script=document.createElement("script");script.id=id;script.src=`/assets/${asset}.js?v=${encodeURIComponent(version)}${proba?`&retry=${Date.now()}`:""}`;script.async=true;script.fetchPriority="high";
     script.onload=()=>{sklepZaladowaneModuly.add(modul);resolve();};
     script.onerror=()=>{script.remove();if(proba<1)setTimeout(()=>wczytaj(proba+1).then(resolve,reject),250);else reject(new Error(`Nie udało się wczytać podstrony sklepu: ${modul}`));};
     document.body.appendChild(script);
@@ -107,7 +107,7 @@ function zaladujAdminModul(modul,version){
   if(!asset)return Promise.reject(new Error(`Nieznany moduł panelu: ${modul}`));
   const id=`artwayAdminModule-${modul}`,wczytaj=(proba=0)=>new Promise((resolve,reject)=>{
     document.getElementById(id)?.remove();
-    const script=document.createElement("script");script.id=id;script.src=`/assets/${asset}.js?v=${encodeURIComponent(version)}${proba?`&retry=${Date.now()}`:""}`;script.async=false;
+    const script=document.createElement("script");script.id=id;script.src=`/assets/${asset}.js?v=${encodeURIComponent(version)}${proba?`&retry=${Date.now()}`:""}`;script.async=true;script.fetchPriority="high";
     script.onload=()=>{adminZaladowaneModuly.add(modul);if(modul==="core")window.__artwayAdminReady=true;resolve();};
     script.onerror=()=>{script.remove();if(proba<1)setTimeout(()=>wczytaj(proba+1).then(resolve,reject),250);else reject(new Error(`Nie udało się wczytać modułu panelu: ${modul}`));};document.body.appendChild(script);
   });
@@ -135,7 +135,13 @@ function zaladujPanelAdmina(route=trasa()){
   const version = document.querySelector('meta[name="artway-version"]')?.content || "dev";
   const modules=adminModulyDlaTrasy(route);
   const core=modules.includes("core")?zaladujAdminModul("core",version):Promise.resolve();
-  const scripts=core.then(()=>Promise.all(modules.filter(module=>module!=="core").map(module=>zaladujAdminModul(module,version))));
+  // Moduły panelu mają zależności od wspólnego UI i powłoki. Dynamiczne
+  // skrypty z async=false uruchamiane równolegle potrafiły pozostać w kolejce
+  // Chromium podczas szybkiej zmiany kart. Ładujemy je deterministycznie:
+  // następny moduł zaczyna się dopiero po potwierdzonym onload poprzedniego.
+  const scripts=core.then(()=>modules
+    .filter(module=>module!=="core")
+    .reduce((kolejka,module)=>kolejka.then(()=>zaladujAdminModul(module,version)),Promise.resolve()));
   const styles=Promise.all(modules.map(module=>zaladujAdminStyleModul(module,version)));
   return Promise.all([zaladujAdminStyle(version),styles,scripts]).then(result=>{if(typeof zaplanujWstepneLadowaniePanelu==="function")zaplanujWstepneLadowaniePanelu(version);return result;});
 }

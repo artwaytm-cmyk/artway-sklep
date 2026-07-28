@@ -67,11 +67,11 @@ test('importowany katalog ma trwały cache IndexedDB i nie wraca z API po każdy
   assert.match(cloud, /chmuraKatalogCacheZapisz\(revision,imported\)/);
 });
 
-test('moduły aktywnej podstrony panelu są pobierane równolegle po rdzeniu', async () => {
+test('moduły aktywnej podstrony panelu są pobierane deterministycznie po rdzeniu', async () => {
   const [router, responsive] = await Promise.all([readFile('assets/app.js', 'utf8'), readFile('src/frontend/08a-admin-responsive-layout.js', 'utf8')]);
   assert.match(router, /const core=modules\.includes\("core"\)\?zaladujAdminModul\("core",version\)/);
-  assert.match(router, /Promise\.all\(modules\.filter\(module=>module!=="core"\)\.map\(module=>zaladujAdminModul\(module,version\)\)\)/);
-  assert.doesNotMatch(router, /modules\.reduce\(\(chain,module\)=>chain\.then/);
+  assert.match(router, /\.reduce\(\(kolejka,module\)=>kolejka\.then\(\(\)=>zaladujAdminModul\(module,version\)\),Promise\.resolve\(\)\)/);
+  assert.match(router, /script\.async=true;script\.fetchPriority="high"/);
   assert.match(responsive, /a\[href\^=\"#\/admin\"\]/);
   assert.match(responsive, /event\.type==="pointerdown"\?0:70/);
   assert.match(responsive, /addEventListener\("pointerdown",wskaz/);
