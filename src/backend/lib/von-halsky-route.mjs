@@ -80,6 +80,19 @@ function safeError(error) {
   };
 }
 
+function matchingText(value, max = 160) {
+  return String(value ?? '').replace(/\u0000/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+function matchingGtin(value) {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (![8, 12, 13, 14].includes(digits.length)) return null;
+  const payload = digits.slice(0, -1).split('').reverse();
+  const sum = payload.reduce((total, digit, index) => total + Number(digit) * (index % 2 === 0 ? 3 : 1), 0);
+  return (10 - (sum % 10)) % 10 === Number(digits.at(-1)) ? digits : null;
+}
+
 export function createVonHalskyRoute({
   respond,
   isAdmin,
@@ -230,6 +243,55 @@ export function createVonHalskyRoute({
         area: 'von-halsky-category',
       });
       return respond({ ok: true, productId, categoryId, category: category || null });
+    }
+
+    if (action === 'von-halsky-product-matching') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (typeof saveProductFields !== 'function') return respond({ ok: false, error: 'Centralna kartoteka produktów nie jest dostępna.' }, 503);
+      const body = await req.json().catch(() => ({}));
+      const productId = matchingText(body.productId, 200);
+      const rawEan = matchingText(body.ean, 40);
+      const ean = matchingGtin(rawEan);
+      const producerCode = matchingText(body.producerCode, 160);
+      const producer = matchingText(body.producer, 160);
+      const brand = matchingText(body.brand, 160);
+      if (!productId) return respond({ ok: false, error: 'Nie wskazano produktu do poprawy.' }, 422);
+      if (rawEan && ean === null) return respond({ ok: false, error: 'EAN/GTIN ma nieprawidłową długość albo cyfrę kontrolną.' }, 422);
+      if (producer && !/\p{L}/u.test(producer)) return respond({ ok: false, error: 'Producent musi być faktyczną nazwą, a nie samym numerem.' }, 422);
+      if (brand && !/\p{L}/u.test(brand)) return respond({ ok: false, error: 'Marka musi zawierać nazwę, a nie same cyfry.' }, 422);
+      const products = await loadCatalog();
+      const list = Array.isArray(products) ? products : [...(products?.values?.() || [])];
+      const product = list.find((item) => String(item?.id) === productId);
+      if (!product) return respond({ ok: false, error: 'Produkt nie istnieje w centralnej kartotece.' }, 404);
+      if (ean) {
+        const duplicate = list.find((item) => String(item?.id) !== productId && matchingGtin(item?.gtin || item?.ean) === ean);
+        if (duplicate) return respond({
+          ok: false,
+          error: `EAN ${ean} jest już przypisany do produktu „${matchingText(duplicate.nazwa || duplicate.name || duplicate.id, 180)}”. Najpierw rozwiąż duplikat.`,
+          code: 'von_halsky_gtin_conflict',
+          conflictingProductId: String(duplicate.id),
+        }, 409);
+      }
+      const method = ean ? 'manual_gtin' : producerCode && (brand || producer) ? 'manual_producer_code_brand' : 'incomplete';
+      const label = ean ? 'EAN/GTIN' : method === 'manual_producer_code_brand' ? 'Kod + marka' : 'Wymaga uzupełnienia';
+      const at = new Date().toISOString();
+      await saveProductFields({
+        productId,
+        fields: {
+          ean: ean || '',
+          gtin: ean || '',
+          kodProducenta: producerCode,
+          mpn: producerCode,
+          producent: producer,
+          marka: brand,
+          vonHalskyMatchingMethod: method,
+          vonHalskyMatchingVerifiedAt: at,
+        },
+        mutationId: `von-halsky-matching:${productId}:${Date.now()}`,
+        actor: 'admin-von-halsky',
+        area: 'von-halsky-matching',
+      });
+      return respond({ ok: true, productId, matching: { method, label, ean: ean || '', producerCode, producer, brand, verifiedAt: at } });
     }
 
     if (action === 'von-halsky-sync-orders') {

@@ -325,6 +325,45 @@ test('route zapisuje konfigurację i uczciwie zgłasza brak danych prywatnego AP
   assert.equal(scheduled.body.reason, 'not-configured');
 });
 
+test('korekta dopasowania zapisuje aliasy identyfikatorów i blokuje duplikat EAN', async () => {
+  const products = [
+    { id: 'P-1', nazwa: 'Gra pierwsza', ean: '', producent: '' },
+    { id: 'P-2', nazwa: 'Gra druga', ean: '', producent: '' },
+  ];
+  const saves = [];
+  const route = createVonHalskyRoute({
+    respond: (body, status = 200) => ({ body, status }),
+    isAdmin: () => true,
+    readVersioned: async (_key, fallback) => ({ value: fallback, revision: 0 }),
+    writeIfVersion: async () => ({ modified: true }),
+    loadCatalog: async () => products,
+    saveProductFields: async (input) => {
+      saves.push(structuredClone(input));
+      Object.assign(products.find((product) => product.id === input.productId), input.fields);
+      return { confirmed: true };
+    },
+  });
+  const request = new Request('https://artwaytm.pl/api?action=von-halsky-product-matching', {
+    method: 'POST',
+    body: JSON.stringify({ productId: 'P-1', ean: '5906018000030', producerCode: '0030', producer: 'Alexander', brand: 'MilliWOOD' }),
+  });
+  const saved = await route(request, new URL(request.url), 'von-halsky-product-matching');
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.matching.method, 'manual_gtin');
+  assert.equal(saves[0].fields.ean, '5906018000030');
+  assert.equal(saves[0].fields.gtin, '5906018000030');
+  assert.equal(saves[0].fields.kodProducenta, '0030');
+  assert.equal(saves[0].fields.mpn, '0030');
+  const duplicateRequest = new Request('https://artwaytm.pl/api?action=von-halsky-product-matching', {
+    method: 'POST',
+    body: JSON.stringify({ productId: 'P-2', ean: '5906018000030', producerCode: 'X-2', producer: 'Alexander', brand: 'Alexander' }),
+  });
+  const duplicate = await route(duplicateRequest, new URL(duplicateRequest.url), 'von-halsky-product-matching');
+  assert.equal(duplicate.status, 409);
+  assert.equal(duplicate.body.code, 'von_halsky_gtin_conflict');
+  assert.equal(saves.length, 1);
+});
+
 test('ręczna publikacja tworzy wyłącznie zaznaczoną ofertę i zapisuje request ID', async () => {
   let state;
   let revision = 0;
