@@ -3452,7 +3452,7 @@ function agentAIPolePracyLabel(value=""){
   };return labels[key]||key.replace(/([a-z])([A-Z])/g,"$1 $2").toLowerCase();
 }
 function agentAIRuntimePanelHTML(){
-  const state=agentAIRuntime,r=state.runtime||{},worker=r.worker||{},providers=r.providers||{},queue=r.queue||{},counts=queue.counts||{},current=r.currentRun,last=r.lastRun,currentWork=r.currentWork||null,publication=r.publication||{},runtimePublicationRows=Array.isArray(publication.recent)?publication.recent:[],preparationQueue=state.preparationQueue||{},preparationCounts=preparationQueue.currentSummary||{},preparationRecent=Array.isArray(preparationQueue.recent)?preparationQueue.recent:[],activity=Array.isArray(r.activity)?r.activity:[],rawWarnings=Array.isArray(r.integrationWarnings)?r.integrationWarnings:[];
+  const state=agentAIRuntime,r=state.runtime||{},worker=r.worker||{},providers=r.providers||{},queue=r.queue||{},counts=queue.counts||{},current=r.currentRun,last=r.lastRun,currentWork=r.currentWork||null,publication=r.publication||{},runtimePublicationRows=Array.isArray(publication.recent)?publication.recent:[],preparationQueue=state.preparationQueue||{},preparationCounts=preparationQueue.currentSummary||{},preparationCurrent=Array.isArray(preparationQueue.current)?preparationQueue.current:[],activity=Array.isArray(r.activity)?r.activity:[],rawWarnings=Array.isArray(r.integrationWarnings)?r.integrationWarnings:[];
   const warnings=[...new Map(rawWarnings.map(item=>[`${item.kind||"system"}:${item.error||item.label}`,item])).values()],aiWarnings=warnings.filter(item=>item.kind==="ai"),externalWarnings=warnings.filter(item=>item.kind!=="ai");
   if(state.loading&&!state.loaded)return `<section class="panel agent-runtime-shell"><div class="agent-runtime-loading"><i></i><div><b>Łączę pulpit z procesem wykonawczym…</b><small>Pobieram kolejkę, ostatni cykl i stan dostawców AI.</small></div></div></section>`;
   if(state.error&&!state.runtime)return `<section class="panel agent-runtime-shell"><div class="backend-note warn"><b>Nie udało się pobrać telemetrii Agenta.</b><p>${esc(state.error)}</p><button class="btn ghost" onclick="agentAIRuntimePobierz(false)">Ponów kontrolę</button></div></section>`;
@@ -3467,9 +3467,8 @@ function agentAIRuntimePanelHTML(){
   const workTrace=activity.filter(item=>item.type==="work"&&(!currentWork?.productId||String(item.productId||"")===String(currentWork.productId))).slice(0,12);
   const channelLabel=(channel)=>channel==="allegro"?"Allegro":channel==="vonHalsky"?"InPost Von Halsky":channel==="store"?"Sklep Artway-TM":"System";
   const workStatus=(work)=>work.status==="confirmed"||work.status==="completed"?"trwale zakończono":work.status==="pending"?"automatyczna korekta w kolejce":work.status==="waiting_provider"?"oczekuje na odnowienie AI":work.status==="decision_required"?"wymaga konkretnej decyzji":work.status==="failed"?"wymaga automatycznej naprawy":work.status==="attention"?"automatyczna korekta trwa":work.status==="running"?"wykonywane teraz":"pominięto";
-  const activePreparation=preparationQueue.active?{...preparationQueue.active,status:"running",name:currentWork?.productId===preparationQueue.active.productId?currentWork.productName:""}:null;
-  const preparationRows=[activePreparation,...preparationRecent].filter(Boolean).slice(0,12);
-  const preparationBusy=Number(preparationCounts.pending||0)+Number(preparationCounts.running||0)+Number(preparationCounts.attention||0);
+  const preparationRows=preparationCurrent.filter(item=>item&&item.status!=="attention").slice(0,12);
+  const preparationBusy=Number(preparationQueue.pending||0)+(preparationQueue.active?1:0);
   const preparationWaiting=Number(preparationCounts.waitingProvider||0);
   const preparationDecisions=Number(preparationCounts.decisionRequired||0)+Number(preparationCounts.failed||0);
   const preparationCompleted=Number(preparationCounts.completed||0);
