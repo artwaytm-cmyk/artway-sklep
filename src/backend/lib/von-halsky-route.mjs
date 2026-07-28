@@ -412,7 +412,15 @@ export function createVonHalskyRoute({
       let activeBatchProducts = [];
       try {
         const remoteResult = await api.listOffers();
-        const remoteOffers = remoteResult.data.map(remoteOfferSummary).filter((item) => item.offerId);
+        // Batch creation is asynchronous and a freshly accepted offer may not be
+        // visible in GET /offers yet. Keep the durable receipt in the local state
+        // as an idempotency barrier until the provider list catches up.
+        const offersByExternalId = new Map();
+        for (const source of [...state.offers, ...remoteResult.data]) {
+          const item = remoteOfferSummary(source);
+          if (item.offerId && item.externalId) offersByExternalId.set(item.externalId, item);
+        }
+        const remoteOffers = [...offersByExternalId.values()];
         const remoteByExternalId = new Map(remoteOffers.filter((item) => item.externalId).map((item) => [item.externalId, item]));
         lastRequestId = remoteResult.requestId || '';
         const existing = deduplicated.items.filter((item) => remoteByExternalId.has(item.externalId));

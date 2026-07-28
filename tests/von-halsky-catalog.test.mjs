@@ -326,6 +326,7 @@ test('tryb testowy tworzy tylko dozwoloną ofertę w schemacie kontraktu i zapis
   let state;
   let revision = 0;
   let catalogPayload;
+  let createRequests = 0;
   const env = {
     INPOST_VON_HALSKY_API_BASE_URL: 'https://api.example.test',
     INPOST_VON_HALSKY_AUTH_URL: 'https://auth.example.test/token',
@@ -340,6 +341,7 @@ test('tryb testowy tworzy tylko dozwoloną ofertę w schemacie kontraktu i zapis
   const fetchImpl = async (url, options = {}) => {
     if (String(url).includes('/token')) return new Response(JSON.stringify({ access_token: 'token', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } });
     if ((options.method || 'GET') === 'GET') return new Response(JSON.stringify({ data: [], page: { limit: 30, offset: 0, total: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    createRequests += 1;
     catalogPayload = JSON.parse(options.body);
     return new Response(JSON.stringify([{ commandId: '11111111-1111-4111-8111-111111111111', offerId: '22222222-2222-4222-8222-222222222222', externalId: 'P-7' }]), { status: 201, headers: { 'content-type': 'application/json', 'x-request-id': 'catalog-req-7' } });
   };
@@ -371,7 +373,7 @@ test('tryb testowy tworzy tylko dozwoloną ofertę w schemacie kontraktu i zapis
   await route(settingsRequest, new URL(settingsRequest.url), 'von-halsky-settings');
   const syncRequest = new Request('https://artwaytm.pl/api?action=von-halsky-sync-catalog', {
     method: 'POST',
-    body: JSON.stringify({ publish: true, scheduled: true }),
+    body: JSON.stringify({ publish: true, scheduled: false }),
   });
   const result = await route(syncRequest, new URL(syncRequest.url), 'von-halsky-sync-catalog');
   assert.equal(result.status, 200);
@@ -382,6 +384,14 @@ test('tryb testowy tworzy tylko dozwoloną ofertę w schemacie kontraktu i zapis
   assert.equal(catalogPayload[0].price.grossPrice.amount, 39.9);
   assert.equal(catalogPayload[0].price.taxRateInfo, '23%');
   assert.equal(result.body.sync.lastRequestId, 'catalog-req-7');
+  const repeatedRequest = new Request('https://artwaytm.pl/api?action=von-halsky-sync-catalog', {
+    method: 'POST',
+    body: JSON.stringify({ publish: true, scheduled: false }),
+  });
+  const repeated = await route(repeatedRequest, new URL(repeatedRequest.url), 'von-halsky-sync-catalog');
+  assert.equal(repeated.status, 200);
+  assert.equal(repeated.body.created, 0);
+  assert.equal(createRequests, 1);
 });
 
 test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny postęp pracy', async () => {
