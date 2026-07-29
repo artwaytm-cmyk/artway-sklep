@@ -12,9 +12,38 @@ test('edytor ma trzy kompletne i jednoznaczne sekcje kanałów', async () => {
   assert.match(workspace, /id="product-editor-von-halsky"/);
   assert.match(workspace, /function productEditorKanalDefinicja/);
   assert.match(workspace, /function productEditorKanalKontrolaHTML/);
-  assert.match(workspace, /Dane wspólne/);
-  assert.match(workspace, /Profil producenta/);
-  assert.match(workspace, /Media wspólne/);
+  assert.match(workspace, /function productEditorDaneWspolneDefinicja/);
+  assert.match(workspace, /function productEditorDaneWspolnePanelHTML/);
+  assert.match(workspace, /id="product-editor-shared-data"/);
+  assert.match(workspace, /Producent, identyfikatory, GPSR i zdjęcia nie są kopiowane/);
+});
+
+test('każdy kanał ma osobny podgląd klienta aktualizowany bez przeładowania formularza', async () => {
+  const [editor, workspace, styles] = await Promise.all([
+    readFile('src/frontend/12-product-editor.js', 'utf8'),
+    readFile('src/frontend/12-product-editor-workspace.js', 'utf8'),
+    readFile('src/styles/32-product-editor-workspace.css', 'utf8'),
+  ]);
+  assert.match(workspace, /function productEditorKanalPodgladHTML/);
+  assert.match(workspace, /function productEditorPodgladWnetrzeHTML/);
+  assert.match(workspace, /data-product-channel-preview=/);
+  assert.match(workspace, /product-preview-store/);
+  assert.match(workspace, /product-preview-allegro/);
+  assert.match(workspace, /product-preview-vh/);
+  assert.match(workspace, /requestAnimationFrame/);
+  assert.match(editor, /productEditorPodgladyPodlacz/);
+  assert.match(styles, /\.product-channel-live-preview/);
+  assert.match(styles, /@media\(max-width:620px\)/);
+});
+
+test('producent i inne dane wspólne nie są powielane w listach pól kanałów', async () => {
+  const workspace = await readFile('src/frontend/12-product-editor-workspace.js', 'utf8');
+  const definitionStart = workspace.indexOf('function productEditorKanalDefinicja');
+  const controlStart = workspace.indexOf('function productEditorKanalKontrolaHTML');
+  const definition = workspace.slice(definitionStart, controlStart);
+  assert.match(definition, /const shared=productEditorDaneWspolneDefinicja\(p\)/);
+  assert.match(definition, /return \{items:own,shared/);
+  assert.doesNotMatch(definition, /items=\[\.\.\.own,\.\.\.common\]/);
 });
 
 test('brakujące treści kanałów są uzupełniane z kartoteki wspólnej bez nadpisywania ręcznej wersji', async () => {

@@ -195,6 +195,59 @@ test('Asortyment filtruje i zapisuje cenę bez przebudowy całego panelu', async
   assertRuntime();
 });
 
+test('edytor produktu pokazuje trzy widoki klienta i aktualizuje je bez przeładowania', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  const productsResponse = await page.request.get('/products.json');
+  const products = await productsResponse.json();
+  const sourceProduct = products.find((item) => item?.id);
+  const productId = String(sourceProduct?.id);
+  expect(productId).not.toBe('');
+  await loginAdmin(page);
+  await page.route('**/api/store**', async (route) => {
+    const url = new URL(route.request().url()), action = url.searchParams.get('action');
+    if (action === 'product-catalog-item') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          product: {
+            ...sourceProduct,
+            manufacturerProfileId: 'e2e-profile',
+            manufacturerProfile: {
+              id: 'e2e-profile',
+              displayName: sourceProduct.producent || 'Alexander',
+              address: 'ul. Testowa 1, 00-001 Warszawa',
+              email: 'test@example.test',
+            },
+            _catalog: { ...(sourceProduct._catalog || {}), detailLevel: 'full' },
+          },
+        }),
+      });
+      return;
+    }
+    await route.fallback();
+  });
+  await page.goto(`/#/admin/produkty/edytuj/${encodeURIComponent(productId)}`);
+  const form = page.locator('form.product-editor-form');
+  await expect(form).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#product-editor-shared-data')).toHaveCount(1);
+  await expect(page.locator('[data-product-channel-preview]')).toHaveCount(3);
+  await expect(page.locator('[data-product-channel-preview="store"]')).toBeVisible();
+  await expect(page.locator('[data-product-channel-preview="allegro"]')).toBeVisible();
+  await expect(page.locator('[data-product-channel-preview="vonHalsky"]')).toBeVisible();
+
+  await page.evaluate(() => { window.__productEditorFormBefore = document.querySelector('form.product-editor-form'); });
+  await form.locator('[name="nazwa"]').fill('Produkt testowy — podgląd na żywo');
+  await expect(page.locator('[data-product-channel-preview="store"] h2')).toHaveText('Produkt testowy — podgląd na żywo');
+  expect(await page.evaluate(() => window.__productEditorFormBefore === document.querySelector('form.product-editor-form'))).toBe(true);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const dimensions = await page.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
+  expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
+  assertRuntime();
+});
+
 test('nowe konto klienta działa po rejestracji i ponownym logowaniu na czystym urządzeniu', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
   const user = { imie: 'Test Klienta', email: 'test-klienta@example.test', rola: 'klient' };
