@@ -190,6 +190,60 @@ test('brak zgodnego odczytu po publikacji nie może zostać uznany za wykonaną 
   );
 });
 
+test('centralna kartoteka jest publikowana jednym zapisem bez ukrytego drugiego PATCH', async () => {
+  let saveCalls = 0;
+  let publishCalls = 0;
+  const stored = { id: '91', opis: 'Trwale zapisany opis' };
+  const save = createPublishedCatalogProductFieldSaver({
+    saveFields: async (input) => {
+      saveCalls += 1;
+      return {
+        productId: input.productId,
+        fields: input.fields,
+        mutationId: input.mutationId,
+        confirmedAt: '2026-07-29T18:00:00.000Z',
+        rev: 104,
+        product: stored,
+      };
+    },
+    publishFields: async () => {
+      publishCalls += 1;
+      return { published: true };
+    },
+    readPublishedProduct: async () => stored,
+    saveIsPublished: true,
+  });
+  const result = await save({
+    productId: '91',
+    fields: { opis: 'Trwale zapisany opis' },
+    mutationId: 'agent-editorial:91',
+  });
+  assert.equal(saveCalls, 1);
+  assert.equal(publishCalls, 0);
+  assert.equal(result.publication.central, true);
+  assert.equal(result.publication.readbackConfirmed, true);
+});
+
+test('Agent nie może zapisać interfejsu strony producenta jako opisu produktu', async () => {
+  const save = createCatalogProductFieldSaver({
+    writeOperations: async () => {
+      throw new Error('writer nie powinien zostać wywołany');
+    },
+    readProduct: async () => ({ id: '92' }),
+  });
+  await assert.rejects(
+    () => save({
+      productId: '92',
+      area: 'allegro-preparation',
+      fields: {
+        opis: 'Gra rodzinna. Rozmiar uniwersalny 42 szt. 39,00 zł brutto / 1 szt. Najniższa cena z 30 dni przed obniżką: 0,00 zł / 1 szt. Możesz kupić za pkt.',
+      },
+    }),
+    (error) => error.code === 'catalog_product_editorial_source_noise'
+      && error.fields.includes('opis'),
+  );
+});
+
 test('brak produktu w projekcji uruchamia synchroniczną odbudowę i dopiero potem potwierdza publikację', async () => {
   let attempts = 0;
   const publish = createCentralProductFieldPublisher({

@@ -75,10 +75,23 @@ export function createCentralCatalogProductOperationWriter({ catalog } = {}) {
         fields: {},
         remove: new Set(),
         expectedProduct: operation.expectedProduct,
+        expectedFields: operation.expectedFields && typeof operation.expectedFields === 'object'
+          ? operation.expectedFields
+          : null,
         operationCount: 0,
       };
       if (current.expectedProduct === undefined && operation.expectedProduct !== undefined) {
         current.expectedProduct = operation.expectedProduct;
+      }
+      for (const [field, expectation] of Object.entries(
+        operation.expectedFields && typeof operation.expectedFields === 'object'
+          ? operation.expectedFields
+          : {},
+      )) {
+        if (!current.expectedFields) current.expectedFields = {};
+        if (!Object.prototype.hasOwnProperty.call(current.expectedFields, field)) {
+          current.expectedFields[field] = expectation;
+        }
       }
       for (const field of Array.isArray(operation.remove) ? operation.remove : []) {
         const name = String(field || '').trim();
@@ -111,7 +124,7 @@ export function createCentralCatalogProductOperationWriter({ catalog } = {}) {
         const index = nextIndex++;
         const operation = updates[index];
         const current = await catalog.get(operation.id, { admin: true });
-        if (!current || (operation.expectedProduct !== undefined && !sameValue(current, operation.expectedProduct))) {
+        if (!current) {
           skippedProductIds.push(operation.id);
           continue;
         }
@@ -123,6 +136,7 @@ export function createCentralCatalogProductOperationWriter({ catalog } = {}) {
           mutationId,
           actor: operation.fields?.lastAdminMutationBy || 'server',
           area: operation.fields?.lastAdminMutationArea || 'product',
+          expectedFields: operation.expectedFields,
         });
         if (!result?.updated) {
           skippedProductIds.push(operation.id);

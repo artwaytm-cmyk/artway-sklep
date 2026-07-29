@@ -4,6 +4,7 @@ import {
   resolveManufacturerProfile,
 } from './manufacturer-profile-registry.mjs';
 import { synchronizeProductIdentifierAliases } from './product-identifiers.mjs';
+import { assertSafeAgentEditorialFields } from './product-editorial-safety.mjs';
 
 const MAX_FIELDS = 180;
 const MAX_PAYLOAD_BYTES = 750_000;
@@ -173,6 +174,7 @@ export function createCatalogProductFieldSaver({
     const rawRemove = Array.isArray(remove) ? remove : [];
     const changedAt = now();
     const requested = sanitizeCatalogProductFields(fields, { allowEmpty: rawRemove.length > 0 });
+    assertSafeAgentEditorialFields(requested, area);
     let currentProduct = null;
     try {
       currentProduct = await readProduct(id);
@@ -235,7 +237,12 @@ export function createCatalogProductFieldSaver({
       error.code = 'catalog_product_not_found';
       throw error;
     }
-    const product = await readProduct(id, saved?.value?.data);
+    // Centralny writer zwraca dokładnie ten rekord, który utworzył pod
+    // blokadą wiersza. To jest atomowe potwierdzenie zapisu. Osobny odczyt
+    // pozostaje fallbackiem dla starszych writerów i testowych adapterów.
+    const product = (Array.isArray(saved?.publications)
+      ? saved.publications.find((item) => String(item?.productId || '') === id)?.product
+      : null) || await readProduct(id, saved?.value?.data);
     if (!product) {
       const error = new Error('Po zapisie nie udało się odczytać centralnej kartoteki produktu.');
       error.status = 500;
@@ -272,20 +279,34 @@ export function createPublishedCatalogProductFieldSaver({
   saveFields,
   publishFields,
   readPublishedProduct = null,
+  saveIsPublished = false,
 } = {}) {
   if (typeof saveFields !== 'function') return null;
-  if (typeof publishFields !== 'function') return saveFields;
+  if (typeof publishFields !== 'function' && saveIsPublished !== true) return saveFields;
   return async function saveAndPublishCatalogProductFields(input = {}) {
     const result = await saveFields(input);
-    const publication = await publishFields({
-      productId: input.productId,
-      fields: result.fields,
-      remove: result.remove || input.remove || [],
-      mutationId: result.mutationId || input.mutationId,
-      actor: input.actor || 'system',
-      area: input.area || 'product',
-      updatedAt: result.confirmedAt,
-    });
+    // Po migracji artway_products jest jednocześnie źródłem zapisu i
+    // publikowaną kartoteką. Ponowne PATCH tych samych pól tworzyło wyścig:
+    // starszy drugi zapis mógł cofnąć nowszą zmianę, a używając tego samego
+    // mutationId nie zostawiał śladu. W trybie centralnym tylko potwierdzamy
+    // już wykonany zapis i przechodzimy do niezależnego odczytu.
+    const publication = saveIsPublished === true
+      ? {
+          published: true,
+          queued: false,
+          central: true,
+          revision: result.rev || '',
+          updatedAt: result.confirmedAt,
+        }
+      : await publishFields({
+          productId: input.productId,
+          fields: result.fields,
+          remove: result.remove || input.remove || [],
+          mutationId: result.mutationId || input.mutationId,
+          actor: input.actor || 'system',
+          area: input.area || 'product',
+          updatedAt: result.confirmedAt,
+        });
     if (publication?.published !== true) {
       const error = new Error('Dane zapisano, ale centralna kartoteka nie potwierdziła jeszcze publikacji. System zachował zmianę i ponowi publikację.');
       error.status = 503;

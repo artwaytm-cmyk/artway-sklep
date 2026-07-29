@@ -6,6 +6,7 @@ import {
 } from './agent-specialists-support.mjs';
 import { enrichAllegroProductEvidence } from './allegro-parameter-enrichment.mjs';
 import { buildProfessionalProductDescription, professionalDescriptionQuality } from './product-content-layout.mjs';
+import { editorialSourceTextIsSafe } from './product-editorial-safety.mjs';
 import {
   ALLEGRO_PREPARATION_VERSION,
   allegroAutomaticPreparationDisposition,
@@ -42,12 +43,13 @@ function manufacturerKey(product = {}) {
 const SOURCE_PAGE_NOISE = /(?:dodaj produkty podając kody|wgraj pliki z kodami|przejdź do koszyka|zaloguj się|twoje konto|newsletter|polityka prywatności|regulamin sklepu|menu główne)/i;
 function usefulProductText(value = '', minimum = 20) {
   const clean = String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  return clean.length >= minimum && !SOURCE_PAGE_NOISE.test(clean);
+  return clean.length >= minimum && !SOURCE_PAGE_NOISE.test(clean) && editorialSourceTextIsSafe(clean);
 }
 
 const FORBIDDEN_EDITORIAL_LINE = /(?:skontaktuj|kontakt(?:uj|owy| przed)|zadzwoń|napisz do nas|e-?mail|www\.|https?:\/\/|dostaw|wysył|kurier|paczkomat|przesyłk|odbiór osobisty|czas realizacji|koszt transportu|koszt wysyłki|płatno|przelew|stan magazynowy|dostępn(?:y|ość)|powiadom o dostępności|dodaj do koszyka|dodaj do porównania|lista zakupowa|rozmiar uniwersalny\s*\d+\s*szt)/i;
 
 function deterministicEditorialText(value = '', limit = 30_000) {
+  if (!editorialSourceTextIsSafe(value)) return '';
   return String(value || '')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(?:p|div|li|h[1-6])>/gi, '\n')

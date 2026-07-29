@@ -9,7 +9,8 @@ test('mapowanie ręczne i automatyczne korzysta z kompletnego katalogu importowa
   const source = await readFile(storePath, 'utf8');
   assert.match(source, /productLinkImport\.catalog\.list\(\)/);
   assert.match(source, /allegroAgentProduktyKompletne\(data\)/);
-  assert.match(source, /allegroAktualizatorProduktowCentralnych\(data, products\.keys\(\)\)/);
+  assert.match(source, /createCentralProductPatchBuffer\(products\)/);
+  assert.match(source, /productPatches\.operations\(\)/);
   assert.match(source, /action === 'allegro-auto-map-offers'/);
 });
 

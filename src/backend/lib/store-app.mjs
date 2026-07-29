@@ -120,10 +120,8 @@ import { checkAllegroImageReadiness } from './domain/allegro-image-readiness.mjs
 import { createAllegroImagePublicationClient, prepareAllegroOfferImagesForPublication } from './domain/allegro-image-publication.mjs';
 import { applyRequiredAllegroSalesConditions, createAllegroOfferStatusWaiter, createAllegroSalesConditionsLoader } from './domain/allegro-sales-readiness.mjs';
 import { allegroNextScheduledSyncAt, allegroScheduledSyncDue, normalizeAllegroSyncSettings } from './domain/allegro-sync-policy.mjs';
-import { createCatalogProductUpdater as allegroAktualizatorProduktowCentralnych } from './domain/catalog-product-updater.mjs';
-import {
-  createCentralCatalogProductOperationWriter,
-} from './domain/catalog-product-operation-rebase.mjs';
+import { createCentralProductPatchBuffer } from './domain/central-product-patch-buffer.mjs';
+import { createCentralCatalogProductOperationWriter } from './domain/catalog-product-operation-rebase.mjs';
 import { centralAllegroPreparationCurrent, centralAllegroPreparationFingerprint, createCentralProductCatalog } from './domain/central-product-catalog.mjs';
 import { createCentralProductCatalogRoute } from './central-product-catalog-route.mjs';
 import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
@@ -336,8 +334,7 @@ const zapiszPolaProduktuCentralnie = createCatalogProductFieldSaver({
 });
 const zapiszIOpublikujPolaProduktuCentralnie = createPublishedCatalogProductFieldSaver({
   saveFields: zapiszPolaProduktuCentralnie,
-  publishFields: (input) => publishCentralProductFields(input),
-  readPublishedProduct: (productId) => centralProductCatalog.get(productId, { admin: true }),
+  readPublishedProduct: (productId) => centralProductCatalog.get(productId, { admin: true }), saveIsPublished: true,
 });
 const zapiszMapowaniaBezpiecznie = createAllegroMappingStore({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, getItems: allegroMapowaniaItems }).writeSafely;
 async function zwiekszLicznikKoduRabatowego(kod = '') {
@@ -843,12 +840,8 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
   ]);
   const data = settingsRec.data && typeof settingsRec.data === 'object' ? { ...settingsRec.data } : {};
   let products = await allegroAgentProduktyKompletne(data);
-  const baseMappings = { ...allegroMapowaniaItems(mappingsRec) }, updater = allegroAktualizatorProduktowCentralnych(data, products.keys()), pendingUpdates = [];
-  const applyUpdate = (id, fields = {}, remove = []) => {
-    const changed = updater.apply(id, fields, remove);
-    if (changed) pendingUpdates.push({ id: String(id), fields, remove, expectedProduct: products.get(String(id)) });
-    return changed;
-  };
+  const baseMappings = { ...allegroMapowaniaItems(mappingsRec) }, productPatches = createCentralProductPatchBuffer(products);
+  const applyUpdate = (id, fields = {}, remove = []) => productPatches.apply(id, fields, remove);
   const now = new Date().toISOString(), mappingPolicy = normalizeAllegroSyncSettings(offerSettings);
   const offersList = allegroOfertyItems(offers), offersById = new Map(offersList.map((offer) => [String(offer?.id || ''), offer]));
   const canonical = canonicalizeAllegroMappings({ mappings: baseMappings, offers: offersList, products, now });
@@ -892,8 +885,6 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
     applyUpdate(productId, { allegroMappingStatus: 'wymaga_sprawdzenia', allegroMappingConflict: mappings[offerId].conflict }, ['allegroOfferId', 'allegroProductId', 'allegroCategoryId']);
     quarantined++;
   }
-  updater.commit();
-  products = await allegroAgentProduktyKompletne(data);
   const used = new Map(Object.values(mappings).filter((m) => m?.blocked !== true && m?.lifecycle !== 'historical').map((m) => [String(m?.offerId || ''), String(m?.productId || '')]).filter(([o, p]) => o && p && products.has(p)));
   const usedProducts = new Set(Object.values(mappings).filter((m) => allegroMappingIsCanonical(m)).map((m) => String(m.productId)).filter((id) => products.has(id)));
   let autoMapped = 0, refreshed = 0, descriptionsUpdated = 0, producersUpdated = 0, productsUpdated = 0;
@@ -931,14 +922,22 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
     else if (JSON.stringify(record) !== JSON.stringify(current)) refreshed++;
     mappings[String(offer.id)] = record; used.set(String(offer.id), String(product.id)); usedProducts.add(String(product.id));
     const producer = allegroRozpoznajProducenta(product, offer, offerSettings);
+    const missingProducer = !tekst(product.producent, 300).trim();
+    const missingBrand = !tekst(product.marka, 300).trim();
     const fields = {
       allegroOfferId: String(offer.id),
       ...(record.allegroProductId ? { allegroProductId: record.allegroProductId } : {}),
       ...(record.categoryId ? { allegroCategoryId: record.categoryId } : {}),
-      ...(producer ? { producent: producer, marka: product.marka || producer } : {}),
+      ...(producer && missingProducer ? { producent: producer } : {}),
+      ...(producer && missingBrand ? { marka: producer } : {}),
       ...(!canonicalGtin(product.gtin || product.ean) && canonicalGtin(offer.gtin || offer.ean) ? { ean: tekst(offer.ean || offer.gtin, 80), gtin: tekst(offer.gtin || offer.ean, 80) } : {}),
-      allegroSyncedAt: record.synced_at, allegroSyncSource: 'offer-sync',
-      ...(record.syncState === 'pending' ? { allegroEditorialSyncPending: true, allegroEditorialSyncPendingAt: now, allegroEditorialSyncState: 'pending', allegroEditorialSyncReason: 'zmiana danych sklepu po trwałym mapowaniu' } : {}),
+      ...(record.synced_at ? { allegroSyncedAt: record.synced_at } : {}),
+      allegroSyncSource: 'offer-sync',
+      ...(record.syncState === 'pending' ? {
+        allegroEditorialSyncPending: true, allegroEditorialSyncPendingAt: product.allegroEditorialSyncPendingAt || now,
+        allegroEditorialSyncState: 'pending',
+        allegroEditorialSyncReason: 'zmiana danych sklepu po trwałym mapowaniu',
+      } : {}),
     };
     if (offerSettings.syncDescriptions !== false && tekst(offer.descriptionText, 20000).trim()) {
       const offerDescription = tekst(offer.descriptionText, 20000).trim();
@@ -952,7 +951,8 @@ async function allegroAutoMapujOfertyZKartoteka(offers = []) {
     if ((!Array.isArray(product.zdjecia) || !product.zdjecia.length) && Array.isArray(offer.images) && offer.images.length > 1) fields.zdjecia = offer.images.slice(1, 16);
     if (applyUpdate(product.id, fields, ['allegroMappingStatus', 'allegroMappingConflict'])) productsUpdated++;
   }
-  const productDataChanged = updater.commit();
+  const pendingUpdates = productPatches.operations();
+  const productDataChanged = pendingUpdates.length > 0;
   const canonicalFinal = canonicalizeAllegroMappings({ mappings, offers: offersList, products, now });
   const finalMappings = canonicalFinal.mappings;
   refreshed = Object.keys(finalMappings).filter((offerId) => baseMappings[offerId]
@@ -1742,8 +1742,7 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
   const pendingEditorial = products.filter((product) => product.allegroEditorialSyncPending === true).sort((left, right) => String(left.allegroEditorialSyncPendingAt || '').localeCompare(String(right.allegroEditorialSyncPendingAt || '')));
   const rotation = products.length <= limit ? products : Array.from({ length: limit }, (_, index) => products[(start + index) % products.length]);
   const requested = requestedProductIds.size ? products.filter((product) => requestedProductIds.has(String(product.id))) : [], candidates = options.pendingOnly === true ? [...requested, ...pendingEditorial] : [...requested, ...pendingEditorial, ...rotation], selected = [...new Map(candidates.map((product) => [String(product.id), product])).values()].slice(0, limit);
-  const updater = allegroAktualizatorProduktowCentralnych(data, completeProducts.keys()), pendingUpdates = [];
-  const applyUpdate = (id, fields = {}, remove = []) => { const changed = updater.apply(id, fields, remove); if (changed) pendingUpdates.push({ id: String(id), fields, remove, expectedProduct: completeProducts.get(String(id)) }); return changed; };
+  const productPatches = createCentralProductPatchBuffer(completeProducts), applyUpdate = (id, fields = {}, remove = []) => productPatches.apply(id, fields, remove);
   const baseMappings = { ...allegroMapowaniaItems(mappingsRec) }, mappings = { ...baseMappings }, syncedMappingIds = new Set();
   const report = { enabled: true, lastRun: new Date().toISOString(), scanned: selected.length, verified: 0, updated: 0, matched: 0, categories: 0, producers: 0, titles: 0, descriptions: 0, offersUpdated: 0, feesUpdated: 0, gpsrMatched: 0, categoriesRepaired: 0, unresolved: 0, errors: [] };
   let responsibleProducers = null;
@@ -1859,7 +1858,8 @@ async function allegroAutoUzupelnijKatalogProduktow(req, options = {}) {
       report.errors.push({ productId: String(product.id), name: tekst(product.nazwa || product.name, 180), error: tekst(error?.message || error, 500) });
     }
   }
-  const changed = updater.commit();
+  const pendingUpdates = productPatches.operations();
+  const changed = pendingUpdates.length > 0;
   if (changed) await zapiszOperacjeProduktow(pendingUpdates, report.lastRun);
   if (syncedMappingIds.size) {
     const persistedSettings = changed ? await czytaj('settings', { data: {}, rev: 0, updated_at: null }) : { data };

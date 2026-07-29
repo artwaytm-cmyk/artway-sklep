@@ -826,7 +826,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
   };
 
   const patchProductFields = async (id, fields = {}, remove = [], {
-    sourceRevision = '', mutationId = '', actor = 'system', area = 'product',
+    sourceRevision = '', mutationId = '', actor = 'system', area = 'product', expectedFields = null,
   } = {}) => {
     if (!available) return { available: false, updated: false };
     await ensureSchema();
@@ -837,8 +837,18 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
       await client.query('BEGIN');
       const current = await client.query('SELECT data,public_data,authoritative_fields FROM artway_products WHERE namespace=$1 AND product_id=$2 AND record_status<>$3 FOR UPDATE', [ns, productId, 'removed']);
       if (!current.rowCount) { await client.query('ROLLBACK'); return { available: true, updated: false, reason: 'not_found' }; }
-      const beforeFingerprint = crypto.createHash('sha256').update(JSON.stringify(asObject(current.rows[0].data))).digest('hex');
-      const adminData = { ...asObject(current.rows[0].data), ...safeFields };
+      const currentData = asObject(current.rows[0].data);
+      const fieldConflicts = Object.entries(asObject(expectedFields)).filter(([field, expectation]) => {
+        const rule = asObject(expectation), present = own(currentData, field);
+        return present !== (rule.present === true)
+          || (present && stableJson(currentData[field]) !== stableJson(rule.value));
+      }).map(([field]) => field);
+      if (fieldConflicts.length) {
+        await client.query('ROLLBACK');
+        return { available: true, updated: false, reason: 'field_conflict', conflictedFields: fieldConflicts };
+      }
+      const beforeFingerprint = crypto.createHash('sha256').update(JSON.stringify(currentData)).digest('hex');
+      const adminData = { ...currentData, ...safeFields };
       for (const field of removeFields) delete adminData[field];
       const syncedAt = new Date().toISOString();
       const previousCatalogMeta = asObject(adminData._catalog);
@@ -912,6 +922,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
       return {
         available: true, updated: true, productId, mutationId: durableMutationId,
         authoritativeFields, sourceRevision: text(sourceRevision, 300), syncedAt,
+        product: adminData,
       };
     } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; } finally { client.release(); }
   };
