@@ -32,3 +32,21 @@ test('parametry camelCase są scalane z ich polskimi odpowiednikami', () => {
   assert.equal((description.match(/Liczba elementów:/g) || []).length, 1);
   assert.doesNotMatch(description, /LiczbaGraczy|LiczbaElementow/);
 });
+
+test('techniczne etykiety producenta są czytelne i zachowują skróty EAN oraz GTIN', () => {
+  const description = buildProfessionalProductDescription({
+    parametryProducenta: {
+      IloscWOpakowaniuZbiorczym: '30 szt.',
+      KodProducenta: '0014',
+      NumerReferencyjny: '0014',
+      EAN: '5906395300143',
+      WymiaryOpakowaniaZbiorczego: '34/30,5/21 cm',
+    },
+  }, 'Zestaw edukacyjny pomaga dziecku rozwijać wyobraźnię oraz cierpliwość podczas wykonywania kolorowych prac. Proste zasady pozwalają szybko rozpocząć twórczą zabawę.');
+  assert.match(description, /Ilość w opakowaniu zbiorczym: 30 szt\./);
+  assert.match(description, /Kod producenta: 0014/);
+  assert.match(description, /Numer referencyjny: 0014/);
+  assert.match(description, /EAN: 5906395300143/);
+  assert.match(description, /Wymiary opakowania zbiorczego: 34\/30,5\/21 cm/);
+  assert.doesNotMatch(description, /WOpakowaniu|Kod Producenta|Numer Referencyjny|\bEan:/);
+});

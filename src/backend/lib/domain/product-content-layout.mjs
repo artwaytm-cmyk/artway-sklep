@@ -57,6 +57,7 @@ function sentences(value = '') {
 const PARAMETER_LABELS = Object.freeze({
   wiek: 'Wiek',
   age: 'Wiek',
+  wiekgraczyod: 'Wiek graczy od',
   liczbagraczy: 'Liczba graczy',
   gracze: 'Liczba graczy',
   players: 'Liczba graczy',
@@ -67,10 +68,20 @@ const PARAMETER_LABELS = Object.freeze({
   liczbaelementow: 'Liczba elementów',
   elementcount: 'Liczba elementów',
   elements: 'Liczba elementów',
+  iloscwopakowaniuzbiorczym: 'Ilość w opakowaniu zbiorczym',
+  kodproducenta: 'Kod producenta',
+  numerreferencyjny: 'Numer referencyjny',
+  ean: 'EAN',
+  gtin: 'GTIN',
+  wymiaryopakowania: 'Wymiary opakowania',
+  wagaopakowania: 'Waga opakowania',
+  wymiaryopakowaniazbiorczego: 'Wymiary opakowania zbiorczego',
+  wagaopakowaniazbiorczego: 'Waga opakowania zbiorczego',
 });
 
 function humanParameterLabel(value = '') {
   const expanded = String(value || '')
+    .replace(/([A-ZĄĆĘŁŃÓŚŹŻ])([A-ZĄĆĘŁŃÓŚŹŻ][a-ząćęłńóśźż])/g, '$1 $2')
     .replace(/([a-ząćęłńóśźż\d])([A-ZĄĆĘŁŃÓŚŹŻ])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
