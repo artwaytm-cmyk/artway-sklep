@@ -27,6 +27,7 @@ const report = {
   valid: 0,
   invalidReady: 0,
   migratedFingerprints: 0,
+  closedRepairSignals: 0,
   queuedForRepair: 0,
   examples: [],
 };
@@ -41,18 +42,30 @@ for (const row of rows) {
   if (store.ready && allegro.ready) {
     report.valid += 1;
     const fingerprint = centralAllegroPreparationFingerprint(product);
-    if (product.allegroAgentPreparationFingerprint === fingerprint) continue;
-    report.migratedFingerprints += 1;
+    const migrateFingerprint = product.allegroAgentPreparationFingerprint !== fingerprint;
+    const closeRepairSignal = product.forceEditorialRefresh === true
+      || product.allegroComplianceError === 'editorial_quality_gate_failed';
+    if (!migrateFingerprint && !closeRepairSignal) continue;
+    if (migrateFingerprint) report.migratedFingerprints += 1;
+    if (closeRepairSignal) report.closedRepairSignals += 1;
     if (apply) {
-      const mutationId = `agent-quality-fingerprint-v5:${row.product_id}`;
-      await catalog.patchProductFields(row.product_id, {
-        allegroAgentPreparationFingerprint: fingerprint,
+      const mutationId = `agent-quality-ready-cleanup-v1:${row.product_id}`;
+      const fields = {
+        ...(migrateFingerprint ? { allegroAgentPreparationFingerprint: fingerprint } : {}),
+        ...(closeRepairSignal ? {
+          forceEditorialRefresh: false,
+          allegroComplianceError: '',
+        } : {}),
         lastAdminMutationId: mutationId,
         lastAdminMutationAt: timestamp,
         lastAdminMutationBy: 'system-audit',
         lastAdminMutationArea: 'agent-editorial-quality-migration',
-        lastAdminMutationFields: ['allegroAgentPreparationFingerprint'],
-      }, [], {
+        lastAdminMutationFields: [
+          ...(migrateFingerprint ? ['allegroAgentPreparationFingerprint'] : []),
+          ...(closeRepairSignal ? ['forceEditorialRefresh', 'allegroComplianceError'] : []),
+        ],
+      };
+      await catalog.patchProductFields(row.product_id, fields, [], {
         mutationId,
         actor: 'system-audit',
         area: 'agent-editorial-quality-migration',
