@@ -34,6 +34,17 @@ test('MultiGra jest dopasowywana niezależnie od sklepu źródłowego Alexander'
   assert.equal(result.profile.id, 'multigra');
 });
 
+test('producent MultiGra i jego oficjalna domena rozstrzygają starszą sprzeczną markę Alexander', () => {
+  const result = resolveManufacturerProfile({
+    producent: 'Multigra',
+    marka: 'Alexander',
+    sourceUrl: 'https://multigra.com.pl/produkty/na-grzyby/',
+  });
+  assert.equal(result.ready, true);
+  assert.equal(result.profile.id, 'multigra');
+  assert.equal(result.method, 'verified-producer-and-official-domain');
+});
+
 test('wspólny sklep źródłowy nie narzuca błędnie producenta Alexander', () => {
   const result = resolveManufacturerProfile({
     sourceUrl: 'https://www.sklep.alexander.com.pl/product-pol-0310-Gra-planszowa-Multigra-Lap-zajaca.html',

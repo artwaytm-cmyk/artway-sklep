@@ -199,6 +199,11 @@ function profileCandidate(profile, product = {}) {
   const names = productNames(product), hosts = productHosts(product), gtins = productGtins(product);
   const aliases = [...profile.aliases, profile.legalName, profile.manufacturerName, profile.displayName].filter(Boolean);
   const brands = profile.brandAliases || [];
+  const producerKey = manufacturerKey(product.producent || product.manufacturer);
+  const producerAliasMatch = Boolean(producerKey && aliases.some((alias) => manufacturerKey(alias) === producerKey));
+  const officialHostMatch = hosts.find((host) => (
+    (profile.exclusiveSourceHosts || []).some((officialHost) => host === officialHost)
+  )) || '';
   let score = 0, method = '', matchedValue = '', matchedBrand = '';
   if (String(product.manufacturerProfileId || product.manufacturerProfile?.id || '') === profile.id) {
     score = 100; method = 'stored-verified-profile'; matchedValue = profile.id;
@@ -238,7 +243,19 @@ function profileCandidate(profile, product = {}) {
       score = 99; method = 'verified-official-domain'; matchedValue = host;
     }
   }
-  return { profile, score, confidence: score / 100, method, matchedValue, matchedBrand, names, hosts, gtins };
+  return {
+    profile,
+    score,
+    confidence: score / 100,
+    method,
+    matchedValue,
+    matchedBrand,
+    names,
+    hosts,
+    gtins,
+    producerAliasMatch,
+    officialHostMatch,
+  };
 }
 
 export function manufacturerProfileById(id = '') {
@@ -285,8 +302,14 @@ export function resolveManufacturerProfile(product = {}, { profileId = '' } = {}
   const candidates = VERIFIED_MANUFACTURER_PROFILES.map((profile) => profileCandidate(profile, product))
     .filter((candidate) => candidate.score >= 94)
     .sort((left, right) => right.score - left.score || left.profile.displayName.localeCompare(right.profile.displayName, 'pl'));
-  const best = candidates[0];
-  const ambiguous = Boolean(best && candidates[1] && candidates[1].score === best.score);
+  const corroborated = candidates.filter((candidate) => candidate.producerAliasMatch && candidate.officialHostMatch);
+  const best = corroborated.length === 1 ? {
+    ...corroborated[0],
+    method: 'verified-producer-and-official-domain',
+    matchedValue: `${product.producent || product.manufacturer} • ${corroborated[0].officialHostMatch}`,
+  } : candidates[0];
+  const ambiguous = corroborated.length > 1
+    || Boolean(!corroborated.length && best && candidates[1] && candidates[1].score === best.score);
   if (!best || ambiguous) {
     return {
       ready: false,

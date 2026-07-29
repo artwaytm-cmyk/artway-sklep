@@ -52,7 +52,9 @@ function structuredParty(value = {}) {
     source: text(value.source, 160),
     verifiedAt: text(value.verifiedAt, 80),
   };
-  return result;
+  return result.legalName || result.address || result.email || result.phone || result.sourceUrl
+    ? result
+    : null;
 }
 
 export function vonHalskyResponsibleProducerMissing(value = {}) {
