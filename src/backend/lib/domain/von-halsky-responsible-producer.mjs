@@ -106,6 +106,9 @@ export function responsibleProducerFromSourceText(value = '', {
  */
 export const VON_HALSKY_VERIFIED_RESPONSIBLE_PRODUCERS = Object.freeze([
   Object.freeze({
+    sourceHosts: Object.freeze([
+      'sklep.alexander.com.pl',
+    ]),
     aliases: Object.freeze([
       'Alexander',
       'Z.P. Alexander',
@@ -151,20 +154,58 @@ function targetNames(product = {}) {
   ].map(key).filter(Boolean))];
 }
 
+function targetSourceHosts(product = {}) {
+  return [...new Set([
+    product.sourceUrl,
+    product.producentUrl,
+    product.agentImportUrl,
+    product.sourceEvidence?.url,
+    product.sourceEvidence?.resolvedUrl,
+    product.sourceEvidence?.canonicalUrl,
+    product.sourceMaterial?.url,
+  ].flatMap((value) => {
+    try {
+      const url = new URL(text(value, 2000));
+      if (url.protocol !== 'https:') return [];
+      return [url.hostname.toLowerCase().replace(/^www\./, '')];
+    } catch {
+      return [];
+    }
+  }))];
+}
+
 function registryMatch(product = {}) {
   const targets = targetNames(product);
-  if (!targets.length) return null;
+  const sourceHosts = targetSourceHosts(product);
+  if (!targets.length && !sourceHosts.length) return null;
   const matches = VON_HALSKY_VERIFIED_RESPONSIBLE_PRODUCERS.map((profile) => {
     const aliases = profile.aliases.map(key);
-    let score = 0;
+    const officialHosts = (profile.sourceHosts || []).map((host) => text(host, 300).toLowerCase().replace(/^www\./, ''));
+    let score = 0, method = '';
     for (const target of targets) for (const alias of aliases) {
-      if (target === alias) score = Math.max(score, 100);
-      else if (target.length >= 5 && alias.length >= 5 && (target.includes(alias) || alias.includes(target))) score = Math.max(score, 94);
+      if (target === alias && score < 100) {
+        score = 100;
+        method = 'verified-producer-alias';
+      } else if (target.length >= 5 && alias.length >= 5 && (target.includes(alias) || alias.includes(target)) && score < 94) {
+        score = 94;
+        method = 'verified-producer-alias';
+      }
     }
-    return { profile, score };
+    for (const sourceHost of sourceHosts) {
+      if (officialHosts.includes(sourceHost) && score < 99) {
+        score = 99;
+        method = 'verified-manufacturer-product-domain';
+      }
+    }
+    return { profile, score, method };
   }).filter((item) => item.score >= 94).sort((left, right) => right.score - left.score);
   if (!matches.length || (matches[1] && matches[1].score === matches[0].score)) return null;
-  return { ...matches[0].profile, matchConfidence: matches[0].score / 100 };
+  return {
+    ...matches[0].profile,
+    matchConfidence: matches[0].score / 100,
+    matchMethod: matches[0].method,
+    matchedSourceHost: sourceHosts.find((host) => (matches[0].profile.sourceHosts || []).includes(host)) || '',
+  };
 }
 
 export function resolveVonHalskyResponsibleProducer(product = {}) {
@@ -192,9 +233,10 @@ export function resolveVonHalskyResponsibleProducer(product = {}) {
       value,
       missing: [],
       evidence: {
-        method: 'verified-producer-alias',
+        method: registry.matchMethod || 'verified-producer-alias',
         producer: value.legalName,
         matchConfidence: registry.matchConfidence,
+        matchedSourceHost: registry.matchedSourceHost || '',
         sourceUrl: registry.sourceUrl,
         sourceProductUrl: registry.sourceProductUrl,
       },

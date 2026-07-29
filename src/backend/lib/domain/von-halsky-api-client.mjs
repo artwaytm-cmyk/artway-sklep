@@ -211,7 +211,13 @@ export function createVonHalskyApiClient({
     return tokenCache.value;
   }
 
-  async function request(url, { method = 'GET', body, idempotent = false, timeoutMs = 15_000 } = {}) {
+  async function request(url, {
+    method = 'GET',
+    body,
+    idempotent = false,
+    timeoutMs = 15_000,
+    contentType = 'application/json',
+  } = {}) {
     const config = vonHalskyPrivateApiConfig(env);
     const accessToken = await token(config);
     const headers = {
@@ -221,7 +227,7 @@ export function createVonHalskyApiClient({
       'user-agent': 'Artway-TM-Von-Halsky/1.5.8',
     };
     if (config.merchantHeader) headers[config.merchantHeader] = config.merchantId;
-    if (body !== undefined) headers['content-type'] = 'application/json';
+    if (body !== undefined) headers['content-type'] = contentType;
     if (idempotent) headers['idempotency-key'] = randomId();
     const attempts = method === 'GET' || idempotent ? 3 : 1;
     for (let attempt = 0; attempt < attempts; attempt++) {
@@ -239,10 +245,15 @@ export function createVonHalskyApiClient({
         await wait(retryDelayMs(response, attempt));
         continue;
       }
-      throw apiError(text(payload?.message || payload?.error_description || payload?.error, 600) || `API Von Halsky zwróciło HTTP ${response.status}.`, {
+      throw apiError(text(payload?.message || payload?.errorMessage || payload?.error_description || payload?.error, 600) || `API Von Halsky zwróciło HTTP ${response.status}.`, {
         status: response.status === 401 || response.status === 403 ? 502 : response.status,
         code: 'von_halsky_provider_error',
-        details: { httpStatus: response.status, providerCode: text(payload?.code || payload?.error, 120), requestId, rateLimit },
+        details: {
+          httpStatus: response.status,
+          providerCode: text(payload?.code || payload?.errorCode || payload?.error, 120),
+          requestId,
+          rateLimit,
+        },
       });
     }
     throw apiError('Nie udało się wykonać żądania do API Von Halsky.');
@@ -298,7 +309,17 @@ export function createVonHalskyApiClient({
     async updateOffer(offerId, patch) {
       const config = vonHalskyPrivateApiConfig(env);
       const url = new URL(`${config.offersUrl.pathname.replace(/\/$/, '')}/${encodeURIComponent(text(offerId, 80))}`, config.offersUrl);
-      return request(url, { method: 'PATCH', body: patch, idempotent: true, timeoutMs: 30_000 });
+      // Kontrakt 1.5.8 deklaruje dla pojedynczej oferty:
+      // Accept-Patch: application/merge-patch+json. Zwykłe application/json
+      // kończy się HTTP 415, mimo że endpointy zbiorczych cen i stanów
+      // akceptują JSON.
+      return request(url, {
+        method: 'PATCH',
+        body: patch,
+        contentType: 'application/merge-patch+json',
+        idempotent: true,
+        timeoutMs: 30_000,
+      });
     },
     async getOffer(offerId) {
       const config = vonHalskyPrivateApiConfig(env);

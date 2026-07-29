@@ -312,6 +312,9 @@ const vonHalskyRoute = createVonHalskyRoute({
   saveProductFields: (input) => zapiszIOpublikujPolaProduktuCentralnie(input),
   reportProgress: (work) => agentRuntime.report({ event: 'work_progress', source: 'von-halsky-api', work }),
   prepareProductWithAgent: (productId, actor, options) => agentSpecialists.prepareVonHalskyProposal(productId, actor, options),
+  inspectSource: pobierzProduktProducentaZPamiecia,
+  sourceImages: inspectedSourceImages,
+  sourceUrlOf: sourcePageUrl,
   sessionOf: requestSession,
   loadCatalog: async () => {
     const settings = await czytaj('settings', { data: {}, rev: 0, updated_at: null });

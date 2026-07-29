@@ -150,6 +150,9 @@ export function createVonHalskyRoute({
   saveProductFields = null,
   reportProgress = async () => {},
   prepareProductWithAgent = null,
+  inspectSource = null,
+  sourceImages = null,
+  sourceUrlOf = () => '',
   sessionOf = () => null,
 } = {}) {
   const api = createVonHalskyApiClient({ env: new Proxy({}, { get: (_target, key) => env()?.[key] }), fetchImpl });
@@ -172,14 +175,33 @@ export function createVonHalskyRoute({
 
   async function recordDiagnostic({ operation, status, message = '', requestId = '' }) {
     return mutate((current) => {
+      const normalizedOperation = String(operation || '').slice(0, 80);
+      const normalizedStatus = String(status || '').slice(0, 40);
+      const normalizedMessage = String(message || '').slice(0, 500);
+      const previous = Array.isArray(current.diagnostics) ? current.diagnostics : [];
+      const repeated = previous.find((item) => (
+        item.operation === normalizedOperation
+        && item.status === normalizedStatus
+        && item.message === normalizedMessage
+      ));
+      const remaining = previous.filter((item) => {
+        if (item === repeated) return false;
+        // Po udanej operacji stare błędy tego samego kroku nie są nadal
+        // problemami bieżącymi. Pełny ślad pozostaje w centralnym audycie
+        // zdarzeń, a lokalna diagnostyka kanału pokazuje stan operacyjny.
+        if (normalizedStatus === 'ok' && item.operation === normalizedOperation && item.status !== 'ok') return false;
+        return true;
+      });
       current.diagnostics = [{
         id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
         at: new Date().toISOString(),
-        operation: String(operation || '').slice(0, 80),
-        status: String(status || '').slice(0, 40),
-        message: String(message || '').slice(0, 500),
+        firstAt: repeated?.firstAt || repeated?.at || new Date().toISOString(),
+        count: Math.max(1, Number(repeated?.count) || 0) + (repeated ? 1 : 0),
+        operation: normalizedOperation,
+        status: normalizedStatus,
+        message: normalizedMessage,
         requestId: String(requestId || '').slice(0, 240),
-      }, ...(current.diagnostics || [])].slice(0, 30);
+      }, ...remaining].slice(0, 30);
       return current;
     });
   }
@@ -405,7 +427,7 @@ export function createVonHalskyRoute({
         }
         const timestamp = new Date().toISOString();
         const workId = `von-halsky-agent:${productId}:${Date.now().toString(36)}`;
-        let categoryMatch = null, attributeMatch = null, deterministicFields = {};
+        let categoryMatch = null, attributeMatch = null, deterministicFields = {}, workingProduct = product;
         try {
           await progress({
             id: workId, productId, productName: matchingText(product.nazwa || product.name, 180),
@@ -413,8 +435,48 @@ export function createVonHalskyRoute({
             target: 'katalog InPost Von Halsky',
             message: 'Sprawdzam tożsamość, kategorię i fakty produktu według dokumentacji InPost.',
           });
-          const categoryRejection = categoryRejectionForProduct(state, product);
-          const responsibleProducer = resolveVonHalskyResponsibleProducer(product);
+          const sourceUrl = matchingText(sourceUrlOf(product), 2000);
+          if (
+            sourceUrl
+            && typeof inspectSource === 'function'
+            && typeof sourceImages === 'function'
+            && !vonHalskyProductReadiness(workingProduct).hasImage
+          ) {
+            try {
+              const inspection = await inspectSource(sourceUrl);
+              const verifiedImages = sourceImages(workingProduct, inspection || {});
+              if (verifiedImages?.ok && verifiedImages.patch) {
+                const imageFields = {
+                  ...verifiedImages.patch,
+                  vonHalskySourceImageStatus: 'verified',
+                  vonHalskySourceImageVerifiedAt: timestamp,
+                };
+                await saveProductFields({
+                  productId,
+                  fields: imageFields,
+                  mutationId: `von-halsky-source-images:${productId}:${Date.now()}`,
+                  actor: matchingText(actor?.email || actor?.name || actor?.source || 'von-halsky-agent', 200),
+                  area: 'von-halsky-source-images',
+                });
+                workingProduct = { ...workingProduct, ...imageFields };
+              } else {
+                deterministicFields.vonHalskySourceImageStatus = 'requires_data';
+                deterministicFields.vonHalskySourceImageEvidence = {
+                  sourceUrl,
+                  identityMode: matchingText(verifiedImages?.identity?.mode, 120),
+                  reason: 'Źródło nie potwierdziło galerii należącej do tej kartoteki.',
+                };
+              }
+            } catch (error) {
+              deterministicFields.vonHalskySourceImageStatus = 'retry';
+              deterministicFields.vonHalskySourceImageEvidence = {
+                sourceUrl,
+                reason: matchingText(error?.message || error, 500),
+              };
+            }
+          }
+          const categoryRejection = categoryRejectionForProduct(state, workingProduct);
+          const responsibleProducer = resolveVonHalskyResponsibleProducer(workingProduct);
           deterministicFields.vonHalskyGpsrRequired = true;
           deterministicFields.vonHalskyResponsibleProducerStatus = responsibleProducer.ready ? 'ready' : 'requires_data';
           deterministicFields.vonHalskyResponsibleProducerMissing = responsibleProducer.missing;
@@ -422,8 +484,8 @@ export function createVonHalskyRoute({
           if (responsibleProducer.ready) deterministicFields.vonHalskyResponsibleProducer = responsibleProducer.value;
           const existingCategoryId = categoryRejection.rejected
             ? ''
-            : matchingText(product.vonHalskyCategoryId || product.inpostVonHalskyCategoryId, 100);
-          categoryMatch = suggestVonHalskyCategory(product, state.categories, {
+            : matchingText(workingProduct.vonHalskyCategoryId || workingProduct.inpostVonHalskyCategoryId, 100);
+          categoryMatch = suggestVonHalskyCategory(workingProduct, state.categories, {
             minimumConfidence: state.settings.agentMinimumConfidence,
           });
           let categoryId = existingCategoryId;
@@ -443,10 +505,10 @@ export function createVonHalskyRoute({
           if (categoryId && config.configured && state.settings.agentAttributeAutoMatchEnabled !== false) {
             try {
               const attributesResult = await api.fetchCategoryAttributes(categoryId);
-              attributeMatch = matchVonHalskyAttributes(product, attributesResult.payload);
+              attributeMatch = matchVonHalskyAttributes(workingProduct, attributesResult.payload);
               if (Object.keys(attributeMatch.mapped).length) {
                 deterministicFields.vonHalskyAttributes = {
-                  ...(product.vonHalskyAttributes || {}),
+                  ...(workingProduct.vonHalskyAttributes || {}),
                   ...attributeMatch.mapped,
                 };
               }
@@ -480,7 +542,7 @@ export function createVonHalskyRoute({
           });
           const agent = await prepareProductWithAgent(productId, actor, { source: body.source === 'automatic' ? 'automatic' : 'manual' });
           const merged = {
-            ...product,
+            ...workingProduct,
             ...deterministicFields,
             ...(agent?.applied?.persistedPatch || {}),
             ...(agent?.applied?.patch || {}),
@@ -852,8 +914,13 @@ export function createVonHalskyRoute({
         const safe = safeError(error);
         await mutate((current) => {
           current.sync = { ...current.sync, status: 'error', lastError: safe.message, lastRequestId: String(safe.details?.requestId || '') };
-          current.diagnostics = [{ id: `${Date.now()}-connection`, at: new Date().toISOString(), operation: 'connection-check', status: 'error', message: safe.message, requestId: '' }, ...(current.diagnostics || [])].slice(0, 30);
           return current;
+        });
+        await recordDiagnostic({
+          operation: 'connection-check',
+          status: 'error',
+          message: safe.message,
+          requestId: String(safe.details?.requestId || ''),
         });
         return respond({ ok: false, connected: false, mode: 'api', config, error: safe.message, code: safe.code, details: safe.details }, safe.status);
       }
@@ -1065,8 +1132,13 @@ export function createVonHalskyRoute({
         })));
         await mutate((current) => {
           current.sync = { ...current.sync, status: 'error', lastError: safe.message };
-          current.diagnostics = [{ id: `${Date.now()}-catalog`, at: new Date().toISOString(), operation: 'catalog-sync', status: 'error', message: safe.message, requestId: '' }, ...(current.diagnostics || [])].slice(0, 30);
           return current;
+        });
+        await recordDiagnostic({
+          operation: 'catalog-sync',
+          status: 'error',
+          message: safe.message,
+          requestId: String(safe.details?.requestId || ''),
         });
         return respond({ ok: false, sent, created, updated: updatedCount, closed, reopened, skippedNew, error: safe.message, code: safe.code, details: safe.details }, safe.status);
       }

@@ -254,7 +254,13 @@ export function createAllegroPreparationWorker({
       if (inspectedImages.ok) product = { ...product, ...inspectedImages.patch };
       product.sourceUrl = incoming.sourceUrl || incoming.producentUrl || sourceUrl;
       product.producentUrl = incoming.producentUrl || incoming.sourceUrl || sourceUrl;
-      product.sourceEvidence = incoming.sourceEvidence || product.sourceEvidence;
+      // Dowód galerii w wersji SOURCE_IMAGE_POLICY_VERSION jest częścią
+      // inspectedImages.patch. Nie wolno nadpisać go starszym blokiem
+      // sourceEvidence zwróconym przez parser strony.
+      product.sourceEvidence = {
+        ...(incoming.sourceEvidence && typeof incoming.sourceEvidence === 'object' ? incoming.sourceEvidence : {}),
+        ...(product.sourceEvidence && typeof product.sourceEvidence === 'object' ? product.sourceEvidence : {}),
+      };
       product.sourceMaterial = {
         url: product.sourceUrl,
         title: incoming.nazwa || incoming.name || '',

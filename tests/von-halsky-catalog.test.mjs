@@ -420,6 +420,32 @@ test('klient API zachowuje prefiks ścieżki produkcyjnego adresu bazowego', asy
   assert.equal(new URL(calls[1]).pathname, '/inpsa/v1/offers');
 });
 
+test('aktualizacja istniejącej oferty używa wymaganego JSON Merge Patch', async () => {
+  const calls = [];
+  const env = {
+    INPOST_VON_HALSKY_API_BASE_URL: 'https://api.inpost-group.com/inpsa/',
+    INPOST_VON_HALSKY_AUTH_URL: 'https://auth.example.test/token',
+    INPOST_VON_HALSKY_CLIENT_ID: 'client',
+    INPOST_VON_HALSKY_CLIENT_SECRET: 'secret',
+    INPOST_VON_HALSKY_MERCHANT_ID: 'org-123',
+    INPOST_VON_HALSKY_HEALTH_PATH: '/v1/categories',
+    INPOST_VON_HALSKY_CATALOG_PATH: '/v1/organizations/org-123/offers/batch',
+    INPOST_VON_HALSKY_ORDERS_PATH: '/v1/organizations/org-123/orders',
+    INPOST_VON_HALSKY_CONTRACT_VERSION: '1.5.8',
+  };
+  const client = createVonHalskyApiClient({
+    env,
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), options });
+      if (String(url).includes('/token')) return new Response(JSON.stringify({ access_token: 'token', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  await client.updateOffer('offer-1', { product: { name: 'Gra rodzinna' } });
+  assert.equal(calls[1].options.headers['content-type'], 'application/merge-patch+json');
+  assert.deepEqual(JSON.parse(calls[1].options.body), { product: { name: 'Gra rodzinna' } });
+});
+
 test('klient API obsługuje statusy poleceń, zwroty, reklamacje i refundacje kontraktu 1.5.8', async () => {
   const calls = [];
   const env = {
@@ -649,6 +675,79 @@ test('Agent usuwa odrzuconą kategorię, dobiera grę rodzinną i zapisuje GPSR 
   assert.equal(product.vonHalskyResponsibleProducerStatus, 'ready');
   assert.equal(product.vonHalskyResponsibleProducer.legalName, 'Zakład Produkcyjny "Alexander" Piotr Pundzis');
   assert.ok(saves.some((entry) => entry.area === 'von-halsky-agent-evidence'));
+});
+
+test('Agent odnawia dowód galerii producenta i rozpoznaje GPSR Alexandra dla marki Pink Frog', async () => {
+  const product = {
+    id: 'PINK-1',
+    externalId: '2739',
+    nazwa: 'GLUTY – gra karciana',
+    opis: 'Dynamiczna gra karciana dla rodziny, której zasady opierają się na dopasowywaniu kart i podejmowaniu szybkich decyzji podczas wspólnej rozgrywki.',
+    ean: '5906018027396',
+    producent: 'Pink Frog',
+    marka: 'Pink Frog',
+    cena: 28.9,
+    sourceUrl: 'https://www.sklep.alexander.com.pl/product-pol-1397-GLUTY.html',
+    sourceEvidence: {
+      canonicalUrl: 'https://www.sklep.alexander.com.pl/product-pol-1397-GLUTY.html',
+    },
+    vonHalskyCategoryId: '33333333-3333-4333-8333-333333333333',
+  };
+  const savedAreas = [];
+  const route = createVonHalskyRoute({
+    respond: (body, status = 200) => ({ body, status }),
+    isAdmin: () => true,
+    readVersioned: async (_key, fallback) => ({ value: fallback, revision: 0 }),
+    writeIfVersion: async () => ({ modified: true }),
+    loadCatalog: async () => [product],
+    sourceUrlOf: (item) => item.sourceUrl,
+    inspectSource: async () => ({
+      canonicalUrl: product.sourceUrl,
+      product: {
+        id: product.id,
+        nazwa: product.nazwa,
+        ean: product.ean,
+        kodProducenta: product.externalId,
+        zdjecie: 'https://www.sklep.alexander.com.pl/images/gluty-1.jpg',
+        sourceUrl: product.sourceUrl,
+        sourceEvidence: { canonicalUrl: product.sourceUrl },
+      },
+    }),
+    sourceImages: (_item, inspection) => ({
+      ok: true,
+      patch: {
+        zdjecie: inspection.product.zdjecie,
+        zdjecia: [],
+        sourceEvidence: {
+          canonicalUrl: product.sourceUrl,
+          imagePolicyVersion: 2,
+          imageSourceUrl: product.sourceUrl,
+          imageUrls: [inspection.product.zdjecie],
+        },
+      },
+    }),
+    saveProductFields: async ({ fields, area }) => {
+      Object.assign(product, structuredClone(fields));
+      savedAreas.push(area);
+      return { confirmed: true, product: structuredClone(product) };
+    },
+    prepareProductWithAgent: async () => ({
+      run: { id: 'run-pink-1' },
+      applied: { patch: {} },
+      retryScheduled: false,
+    }),
+  });
+  const request = new Request('https://artwaytm.pl/api?action=von-halsky-agent-prepare', {
+    method: 'POST',
+    body: JSON.stringify({ productId: product.id }),
+  });
+  const response = await route(request, new URL(request.url), 'von-halsky-agent-prepare');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ready, 1);
+  assert.equal(product.vonHalskyResponsibleProducerStatus, 'ready');
+  assert.equal(product.vonHalskyResponsibleProducer.legalName, 'Zakład Produkcyjny "Alexander" Piotr Pundzis');
+  assert.equal(product.vonHalskyResponsibleProducerEvidence.method, 'verified-manufacturer-product-domain');
+  assert.ok(savedAreas.includes('von-halsky-source-images'));
 });
 
 test('ręczna publikacja tworzy wyłącznie zaznaczoną ofertę i zapisuje request ID', async () => {
