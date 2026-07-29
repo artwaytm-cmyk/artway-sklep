@@ -12,6 +12,7 @@ export function createAllegroCommunicationsRoute(deps) {
     caseKey, latestCustomerMessage, messageKey, learnedReplyStyle, fullReplyCase, previousCustomerCases,
     checkReplyContext, callAllegro, betaJson, normalizeIssueMessage, normalizeThreadMessage,
     rememberManualReplyStyle, fetchCommunications, markNewCommunications, sendAutoReplies,
+    emitAgentEvent = null,
   } = deps;
   return async function allegroCommunicationsRoute(req, url, action) {
     if (!ACTIONS.has(action)) return null;
@@ -141,6 +142,41 @@ export function createAllegroCommunicationsRoute(deps) {
     if (body.autoReply !== false && settings.enabled) autoReply = await sendAutoReplies(req, data, settings);
     const rec = { threads: data.threads, issues: data.issues, errors: data.errors || [], requiresReauth: !!data.requiresReauth, updated_at: new Date().toISOString(), autoReplyLastRun: autoReply.sent?.length || 0, lastSyncSummary: syncSummary };
     await write('allegro_communications', rec);
+    if (typeof emitAgentEvent === 'function' && syncSummary.newBuyerMessages > 0) {
+      const events = [
+        ...(data.threads || []).filter((item) => !item?.cachedOlder && Number(item?.newIncomingCount || 0) > 0)
+          .map((item) => ({
+            type: 'communication.allegro.message.received',
+            area: 'communications',
+            entityId: String(item.id || ''),
+            dedupeKey: `communication.allegro.message:${item.id}:${item.latestNewIncomingKey || item.latestNewIncoming?.id || ''}`,
+            source: 'allegro-message-center',
+            priority: 800,
+            payload: {
+              type: 'thread',
+              id: String(item.id || ''),
+              action: 'obsługa nowej wiadomości klienta',
+              incomingCount: Number(item.newIncomingCount || 0),
+            },
+          })),
+        ...(data.issues || []).filter((item) => !item?.cachedOlder && Number(item?.newIncomingCount || 0) > 0)
+          .map((item) => ({
+            type: 'communication.allegro.issue.received',
+            area: 'communications',
+            entityId: String(item.id || ''),
+            dedupeKey: `communication.allegro.issue:${item.id}:${item.latestNewIncomingKey || item.latestNewIncoming?.id || ''}`,
+            source: 'allegro-issues',
+            priority: 850,
+            payload: {
+              type: 'issue',
+              id: String(item.id || ''),
+              action: 'obsługa nowej dyskusji klienta',
+              incomingCount: Number(item.newIncomingCount || 0),
+            },
+          })),
+      ];
+      Promise.all(events.map((event) => emitAgentEvent(event))).catch(() => {});
+    }
     return respond({ ok: true, allegro: await allegroStatus(req), ...rec, settings, autoReply, syncSummary });
   };
 }

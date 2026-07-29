@@ -6,6 +6,7 @@ export function createAllegroPreparationRoute(deps = {}) {
     respond, isAdmin, sessionOf, text, readVersioned, writeIfVersion, runtime,
     pool = null, namespace = 'artway-sklep',
     worker: workerDependencies,
+    afterPrepare = null,
   } = deps;
   const prepare = createAllegroPreparationWorker({
     ...workerDependencies,
@@ -15,12 +16,55 @@ export function createAllegroPreparationRoute(deps = {}) {
       work,
     }),
   });
-  const queue = createAllegroPreparationQueue({
+  let queue = null;
+  let backlogEnabled = false;
+  let automaticPromise = null;
+  async function runAutomaticPreparation(raw = {}) {
+    if (automaticPromise) return automaticPromise;
+    automaticPromise = (async () => {
+      if (typeof workerDependencies?.loadProducts !== 'function') {
+        backlogEnabled = false;
+        return { skipped: true, reason: 'catalog_unavailable', candidates: [], enqueued: 0 };
+      }
+      const currentQueue = await queue.status();
+      if (Number(currentQueue.pending || 0) > 0 || currentQueue.active) {
+        return { skipped: true, reason: 'queue_busy', candidates: [], enqueued: 0, queue: currentQueue };
+      }
+      const products = await workerDependencies.loadProducts();
+      const candidates = selectAllegroPreparationCandidates(products, {
+        now: new Date(),
+        limit: Math.max(1, Math.min(1000, Number(raw.batchSize) || 1000)),
+        preparationCurrent: workerDependencies.preparationCurrent,
+      });
+      if (!candidates.length) {
+        backlogEnabled = false;
+        return { skipped: true, reason: 'catalog_ready', candidates: [], enqueued: 0, queue: currentQueue };
+      }
+      const state = await queue.enqueue(candidates.map((item) => item.id), {
+        operation: 'product-full-review',
+        requestedBy: 'agent-zdarzeniowy',
+      });
+      return {
+        skipped: false,
+        candidates,
+        enqueued: Number(state.batches?.[0]?.enqueued || candidates.length),
+        queue: state,
+      };
+    })();
+    try {
+      return await automaticPromise;
+    } finally {
+      automaticPromise = null;
+    }
+  }
+  queue = createAllegroPreparationQueue({
     readVersioned,
     writeIfVersion,
     pool,
     namespace,
     prepare,
+    afterPrepare,
+    onIdle: () => backlogEnabled ? runAutomaticPreparation({ batchSize: 1000 }) : null,
     report: ({ task, status, result = {} }) => runtime.report({
       event: 'work_progress',
       source: 'allegro-preparation-queue',
@@ -59,62 +103,40 @@ export function createAllegroPreparationRoute(deps = {}) {
   const resumeTimer = setTimeout(() => queue.resume().catch((error) => console.error('allegro_preparation_queue_resume', error)), 1500);
   resumeTimer.unref?.();
 
-  let automaticPromise = null;
-  async function runAutomaticPreparation(raw = {}) {
-    if (automaticPromise) return { skipped: true, reason: 'already_running', candidates: [] };
-    automaticPromise = (async () => {
-      if (typeof workerDependencies?.loadProducts !== 'function') {
-        return { skipped: true, reason: 'catalog_unavailable', candidates: [] };
-      }
-      const currentQueue = await queue.status();
-      if (Number(currentQueue.pending || 0) >= 100) {
-        return { skipped: true, reason: 'queue_busy', candidates: [], queue: currentQueue };
-      }
-      const products = await workerDependencies.loadProducts();
-      const candidates = selectAllegroPreparationCandidates(products, {
-        now: new Date(),
-        limit: Math.max(1, Math.min(250, Number(raw.batchSize) || 50)),
-        preparationCurrent: workerDependencies.preparationCurrent,
-      });
-      if (!candidates.length) return { skipped: true, reason: 'catalog_ready', candidates: [], queue: currentQueue };
-      const state = await queue.enqueue(candidates.map((item) => item.id), {
-        operation: 'allegro-auto-remediation',
-        requestedBy: 'agent-serwerowy',
-      });
-      return { skipped: false, candidates, queue: state };
-    })();
-    try {
-      return await automaticPromise;
-    } finally {
-      automaticPromise = null;
-    }
+  async function prepareProducts(productIds = [], {
+    operation = 'product-full-review',
+    requestedBy = 'agent-zdarzeniowy',
+    wait = false,
+  } = {}) {
+    if (operation === 'product-full-review') backlogEnabled = true;
+    const state = await queue.enqueue(productIds, { operation, requestedBy });
+    if (wait) await queue.kick();
+    return state;
   }
 
-  // Backend sam zasila kolejkę. Przeglądarka służy wyłącznie do obserwacji
-  // i ręcznego nadawania priorytetu, więc zamknięcie panelu nie zatrzymuje pracy.
-  const automaticTimer = setInterval(() => {
-    runAutomaticPreparation({ batchSize: 50 }).catch((error) => console.error('allegro_preparation_auto', error));
-  }, 60_000);
-  automaticTimer.unref?.();
-  const automaticStartupTimer = setTimeout(() => {
-    runAutomaticPreparation({ batchSize: 50 }).catch((error) => console.error('allegro_preparation_auto_startup', error));
-  }, 5000);
-  automaticStartupTimer.unref?.();
+  async function startBacklog() {
+    backlogEnabled = true;
+    return runAutomaticPreparation({ batchSize: 1000 });
+  }
 
-  return async function allegroPreparationRoute(req, url, action) {
+  const allegroPreparationRoute = async function allegroPreparationRoute(req, url, action) {
     if (!['allegro-preparation-queue-status', 'allegro-preparation-queue-enqueue', 'allegro-preparation-queue-auto'].includes(action)) return null;
     if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
     if (action === 'allegro-preparation-queue-status') return respond({ ok: true, queue: await queue.status() });
     if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
     const body = await req.json().catch(() => ({}));
     if (action === 'allegro-preparation-queue-auto') {
-      const automatic = await runAutomaticPreparation(body);
+      const automatic = await startBacklog(body);
       return respond({ ok: true, automatic }, automatic.skipped ? 200 : 202);
     }
-    const state = await queue.enqueue(Array.isArray(body.productIds) ? body.productIds : [], {
+    const state = await prepareProducts(Array.isArray(body.productIds) ? body.productIds : [], {
       operation: text(body.operation || 'allegro', 40),
       requestedBy: text(sessionOf(req)?.email || 'administrator', 200),
     });
     return respond({ ok: true, queued: true, queue: state }, 202);
   };
+  allegroPreparationRoute.prepareProducts = prepareProducts;
+  allegroPreparationRoute.startBacklog = startBacklog;
+  allegroPreparationRoute.status = () => queue.status();
+  return allegroPreparationRoute;
 }

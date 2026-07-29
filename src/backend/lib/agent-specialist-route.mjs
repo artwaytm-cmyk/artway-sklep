@@ -8,7 +8,7 @@ function authError(respond) {
 
 export function createAgentSpecialistRoute({ service, isAdmin, rateLimit, respond, sessionOf = () => null } = {}) {
   if (!service || typeof service.status !== 'function') throw new Error('Trasa specjalistów wymaga serwisu GPT.');
-  const actions = new Set(['agent-specialists-status', 'agent-specialist-run', 'agent-specialists-config', 'agent-specialist-apply', 'agent-specialist-decision', 'agent-specialist-product-proposal', 'agent-specialist-auto-cycle']);
+  const actions = new Set(['agent-specialists-status', 'agent-specialist-run', 'agent-specialists-config', 'agent-specialist-apply', 'agent-specialist-decision', 'agent-specialist-product-proposal']);
 
   return async function agentSpecialistRoute(req, url, action) {
     if (!actions.has(action)) return null;
@@ -48,7 +48,6 @@ export function createAgentSpecialistRoute({ service, isAdmin, rateLimit, respon
       const result = await service.prepareProductProposal(body.productId, actor, body);
       return respond({ ok: true, ...result, draftOnly: result?.applied?.applied !== true, sentExternally: false, published: false });
     }
-    const cycle = await service.automaticCycle({ coordinatorPlan: body.coordinatorPlan, maxItems: body.maxItems, forceCommunicationScan: body.forceCommunicationScan === true });
-    return respond({ ok: true, cycle });
+    return respond({ ok: false, error: 'Nieobsługiwane działanie Agenta', code: 'agent_action_unknown' }, 404);
   };
 }

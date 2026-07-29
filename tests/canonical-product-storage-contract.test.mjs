@@ -122,6 +122,7 @@ test('wsadowy import aktualizuje rekord bez kasowania jego pozostałych pól i p
   const products = new Map([
     ['17', { id: '17', nazwa: 'Stara nazwa', cena: 20, opis: 'Opis pozostaje' }],
   ]);
+  const productSignals = [];
   const route = createStoreDataRoute({
     odpowiedz: (body, status = 200) => ({ body, status }),
     czyAdmin: () => true,
@@ -138,6 +139,10 @@ test('wsadowy import aktualizuje rekord bez kasowania jego pozostałych pól i p
     createCatalogProduct: async (product) => {
       products.set(String(product.id), { ...product });
       return { updated: true, product };
+    },
+    signalProductMutation: async (productId, details) => {
+      productSignals.push({ productId: String(productId), details });
+      return { event: { id: `event-${productId}` } };
     },
   });
   const response = await route(
@@ -161,4 +166,6 @@ test('wsadowy import aktualizuje rekord bez kasowania jego pozostałych pól i p
   assert.equal(products.get('17').opis, 'Opis pozostaje');
   assert.equal(products.get('17').nazwa, 'Nowa nazwa');
   assert.equal(products.get('18').nazwa, 'Nowy produkt');
+  assert.deepEqual(productSignals.map((item) => item.productId).sort(), ['17', '18']);
+  assert.ok(productSignals.every((item) => item.details.source.startsWith('catalog-import')));
 });

@@ -23,6 +23,7 @@ export function createCatalogProductAdminRoute(deps = {}) {
     readProduct,
     setProductStatus,
     purgeProduct,
+    signalProductMutation,
   } = deps;
   const saveAndPublishFields = createPublishedCatalogProductFieldSaver({
     saveFields,
@@ -35,6 +36,15 @@ export function createCatalogProductAdminRoute(deps = {}) {
     sessionOf,
     saveFields: saveAndPublishFields,
   });
+  const signalProduct = async (productId, details = {}) => {
+    if (typeof signalProductMutation !== 'function') return null;
+    try {
+      return await signalProductMutation(productId, details);
+    } catch (error) {
+      console.error('catalog_product_agent_event', error);
+      return null;
+    }
+  };
 
   return async function catalogProductAdminRoute(req, url, action) {
     if (action === 'catalog-manufacturer-directory') {
@@ -227,6 +237,14 @@ export function createCatalogProductAdminRoute(deps = {}) {
         if (!product) skipped.add(operation.id);
         return product || null;
       }))).filter(Boolean);
+      await Promise.all(products.map((product) => signalProduct(product.id, {
+        source: area,
+        productName: product.nazwa || product.name || '',
+        changedFields: operations.find((operation) => operation.id === String(product.id))
+          ? Object.keys(operations.find((operation) => operation.id === String(product.id)).fields || {})
+          : [],
+        priority: 500,
+      })));
       return respond({
         ok: skipped.size === 0,
         confirmed: skipped.size === 0,
@@ -295,6 +313,14 @@ export function createCatalogProductAdminRoute(deps = {}) {
         for (const productId of write?.skippedProductIds || []) {
           errors.push({ productId: String(productId), error: 'Nie potwierdzono aktualizacji istniejącej kartoteki.' });
         }
+        const failed = new Set(errors.map((item) => String(item.productId)));
+        await Promise.all(existingOperations
+          .filter((operation) => !failed.has(String(operation.id)))
+          .map((operation) => signalProduct(operation.id, {
+            source: 'catalog-import',
+            changedFields: Object.keys(operation.fields || {}),
+            priority: 600,
+          })));
       }
       let nextCreate = 0;
       const createResults = [];
@@ -309,6 +335,12 @@ export function createCatalogProductAdminRoute(deps = {}) {
               allowUpdate: false,
             });
             createResults.push(result);
+            await signalProduct(item.product.id, {
+              source: 'catalog-import-created',
+              productName: result?.product?.nazwa || item.product.nazwa || '',
+              changedFields: Object.keys(item.product).filter((field) => field !== 'id'),
+              priority: 700,
+            });
           } catch (error) {
             errors.push({
               productId: String(item.product.id),
@@ -361,7 +393,19 @@ export function createCatalogProductAdminRoute(deps = {}) {
           actor,
           allowUpdate: false,
         });
-        return respond({ ok: true, product: result.product, productId, mutationId: result.mutationId }, 201);
+        const agentEvent = await signalProduct(productId, {
+          source: 'product-created',
+          productName: result.product?.nazwa || result.product?.name || '',
+          changedFields: Object.keys(fields),
+          priority: 700,
+        });
+        return respond({
+          ok: true,
+          product: result.product,
+          productId,
+          mutationId: result.mutationId,
+          agentEvent: agentEvent?.event?.id || '',
+        }, 201);
       } catch (error) {
         return respond({
           ok: false,
@@ -402,6 +446,13 @@ export function createCatalogProductAdminRoute(deps = {}) {
             area: 'product-lifecycle',
           });
         results.push({ productId, ...result });
+        if (operation === 'restore') {
+          await signalProduct(productId, {
+            source: 'product-restored',
+            action: 'pełny przegląd przywróconego produktu',
+            priority: 650,
+          });
+        }
       }
       return respond({
         ok: true,

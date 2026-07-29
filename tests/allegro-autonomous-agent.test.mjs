@@ -76,17 +76,13 @@ test('cykl autonomiczny mapuje pewne dane, ale zakończenie duplikatu oddaje do 
   assert.equal(database.get('allegro_duplicate_resolution_audit').items.length, 0);
 });
 
-test('VPS uruchamia cykl w tle co 15 minut bez ujawniania tokenu', async () => {
-  const [script, service, timer] = await Promise.all([
-    readFile(new URL('../scripts/run-background-agent.mjs', import.meta.url), 'utf8'),
-    readFile(new URL('../ops/systemd/artway-agent-cycle.service', import.meta.url), 'utf8'),
-    readFile(new URL('../ops/systemd/artway-agent-cycle.timer', import.meta.url), 'utf8'),
+test('VPS nie uruchamia już szerokiego cyklu czasowego Agenta', async () => {
+  const [service, route] = await Promise.all([
+    readFile(new URL('../ops/systemd/artway-agent.service', import.meta.url), 'utf8'),
+    readFile(new URL('../src/backend/lib/allegro-preparation-route.mjs', import.meta.url), 'utf8'),
   ]);
-  assert.match(script, /allegro-autonomous-agent-cycle/);
-  assert.match(script, /allegro-sync-orders/);
-  assert.match(script, /allegro-sync-communications/);
-  assert.doesNotMatch(script, /console\.log\([^\n]*token/);
-  assert.match(service, /User=artway/);
-  assert.match(timer, /\*:00\/15:00/);
-  assert.match(timer, /Persistent=true/);
+  assert.match(service, /run-agent-panel-worker\.mjs/);
+  assert.doesNotMatch(service, /run-background-agent/);
+  assert.doesNotMatch(route, /setInterval/);
+  assert.match(route, /startBacklog/);
 });

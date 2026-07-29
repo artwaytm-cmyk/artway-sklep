@@ -190,7 +190,6 @@ async function allegroZapiszUstawieniaOfert(form){
       autoFees:fd.get("autoFees")==="on",
       autoCorrections:fd.get("autoCorrections")==="on",
       autonomousAgent:fd.get("autonomousAgent")==="on",
-      autonomousAgentMinutes:Number(fd.get("autonomousAgentMinutes")||15),
       autoResolveDuplicates:fd.get("autoResolveDuplicates")==="on",
       autoResolveDuplicateMinScore:Number(fd.get("autoResolveDuplicateMinScore")||97)
     },timeout:12000});

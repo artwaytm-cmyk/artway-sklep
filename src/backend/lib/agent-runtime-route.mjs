@@ -11,6 +11,7 @@ const ACTIONS = new Set([
 
 export function createAgentRuntimeRoute({
   queue,
+  events = null,
   runtime,
   isAdmin,
   respond,
@@ -23,10 +24,22 @@ export function createAgentRuntimeRoute({
       return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
     }
     if (action === 'agent-runtime-status') {
-      const queueStatus = queue && typeof queue.status === 'function'
-        ? await queue.status()
-        : { workerOnline: false, workerLastSeenAt: '', counts: {}, active: 0 };
-      return respond({ ok: true, runtime: await runtime.status(queueStatus) });
+      const [queueStatus, eventStatus] = await Promise.all([
+        queue && typeof queue.status === 'function'
+          ? queue.status()
+          : { workerOnline: false, workerLastSeenAt: '', counts: {}, active: 0 },
+        events && typeof events.status === 'function'
+          ? events.status()
+          : Promise.resolve({ mode: 'event_driven', scheduledCycles: false, active: 0, queued: 0, running: 0, recent: [] }),
+      ]);
+      return respond({
+        ok: true,
+        runtime: {
+          ...(await runtime.status(queueStatus, eventStatus)),
+          eventQueue: eventStatus,
+          automationMode: 'event_driven',
+        },
+      });
     }
     if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
     const body = await req.json().catch(() => ({}));

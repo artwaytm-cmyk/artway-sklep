@@ -223,10 +223,21 @@ export function allegroAutomaticPreparationDisposition(product = {}) {
   };
 }
 
+function productFullReviewCurrent(product = {}) {
+  const editorial = asObject(product?.contentEditorial);
+  const channels = asObject(editorial.channelStates);
+  const storeReady = channels.store?.status === 'ready';
+  const allegroReady = channels.allegro?.status === 'ready';
+  const vonHalskyReady = channels.vonHalsky?.status === 'ready'
+    || clean(product?.vonHalskyAgentStatus, 40).toLowerCase() === 'ready';
+  const activeAllegroVerified = allegroAutomaticPreparationDisposition(product).verificationOnly;
+  return vonHalskyReady && ((storeReady && allegroReady) || activeAllegroVerified);
+}
+
 /**
  * Wybiera pracę dla serwerowego Agenta bez dziennego limitu. Limit parametru
- * to wyłącznie rozmiar jednej bezpiecznej partii; następny cykl kontynuuje
- * od miejsca, w którym poprzedni skończył.
+ * to wyłącznie rozmiar jednej bezpiecznej partii; po jej opróżnieniu kolejka
+ * natychmiast pobiera następną bez zegara i bez cyklu czasowego.
  */
 export function selectAllegroPreparationCandidates(products = [], {
   now = new Date(),
@@ -243,7 +254,7 @@ export function selectAllegroPreparationCandidates(products = [], {
     // Aktywne, kanonicznie powiązane oferty są weryfikowane przez okresową
     // synchronizację ofert. Nie wolno przepisywać ich opisów tylko dlatego,
     // że pochodzą sprzed wprowadzenia technicznego pokwitowania Agenta.
-    if (allegroAutomaticPreparationDisposition(product).verificationOnly) continue;
+    if (allegroAutomaticPreparationDisposition(product).verificationOnly && productFullReviewCurrent(product)) continue;
     const status = clean(product?.allegroAgentPreparationStatus, 40).toLowerCase();
     const preparationVersion = Math.max(0, Number(product?.allegroAgentPreparationVersion) || 0);
     const preparedAt = parsedDate(product?.allegroAgentPreparedAt || product?.allegroAgentPreparationConfirmedAt);
@@ -260,15 +271,18 @@ export function selectAllegroPreparationCandidates(products = [], {
     let priority = 0, reason = '';
     if (status === 'decision_required') {
       if (implementationChanged) {
-        priority = 380 + salePriority(product);
+        priority = 550 + salePriority(product);
         reason = 'nowa_wersja_automatycznej_naprawy';
       } else if (sourceChangedAt > preparedAt) {
         priority = 340 + salePriority(product);
         reason = 'nowe_dane_po_decyzji';
       }
     } else if (['needs_attention', 'attention', 'retrying', 'failed', 'waiting_provider'].includes(status) && retryDue) {
-      priority = 300 + salePriority(product);
+      priority = 500 + salePriority(product);
       reason = status === 'waiting_provider' ? 'wznowienie_po_dostawcy' : 'wymaga_uzupelnienia';
+    } else if (!productFullReviewCurrent(product)) {
+      priority = 360 + salePriority(product);
+      reason = 'pelny_przeglad_edytora_i_von_halsky';
     } else if (!status || status === 'new' || status === 'queued' || !preparedAt) {
       priority = 200 + salePriority(product);
       reason = 'nieprzygotowany';
@@ -330,13 +344,15 @@ export function createAllegroPreparationQueue({
   writeIfVersion,
   prepare,
   report = null,
+  onIdle = null,
+  afterPrepare = null,
   now = () => new Date(),
   pool = null,
   namespace = 'artway-sklep',
 } = {}) {
   if (pool) {
     return createPostgresAllegroPreparationQueue({
-      pool, namespace, readVersioned, prepare, report, now,
+      pool, namespace, readVersioned, prepare, report, onIdle, afterPrepare, now,
     }, {
       clean, asArray, asObject, initialState, normalizeTask, normalizeState,
       publicState, providerQuotaUnavailable, MAX_AUTOMATIC_REMEDIATION_ATTEMPTS,
@@ -469,7 +485,11 @@ export function createAllegroPreparationQueue({
     };
     while (true) {
       const task = await claim();
-      if (!task) break;
+      if (!task) {
+        const refill = typeof onIdle === 'function' ? await onIdle() : null;
+        if (Number(refill?.enqueued || 0) > 0) continue;
+        break;
+      }
       if (typeof report === 'function') await report({ task, status: 'running' }).catch(() => {});
       try {
         let result = await prepare(task);
@@ -497,6 +517,13 @@ export function createAllegroPreparationQueue({
               missing: asArray(result?.missing),
               attempts: Number(task.attempt || 0),
             },
+          };
+        }
+        if (typeof afterPrepare === 'function' && result?.ready === true) {
+          const downstream = await afterPrepare(task, result);
+          result = {
+            ...result,
+            downstream: asObject(downstream),
           };
         }
         await finish(task, result);

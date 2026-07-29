@@ -1,11 +1,15 @@
 import crypto from 'node:crypto';
 
+const STATE_KEY = 'allegro_preparation_queue';
+
 export function createPostgresAllegroPreparationQueue({
   pool,
   namespace = 'artway-sklep',
   readVersioned,
   prepare,
   report = null,
+  onIdle = null,
+  afterPrepare = null,
   now = () => new Date(),
 } = {}, tools = {}) {
   const {
@@ -354,7 +358,11 @@ export function createPostgresAllegroPreparationQueue({
   const run = async () => {
     while (true) {
       const task = await claim();
-      if (!task) break;
+      if (!task) {
+        const refill = typeof onIdle === 'function' ? await onIdle() : null;
+        if (Number(refill?.enqueued || 0) > 0) continue;
+        break;
+      }
       if (typeof report === 'function') await report({ task, status: 'running' }).catch(() => {});
       try {
         let result = await prepare(task);
@@ -384,6 +392,13 @@ export function createPostgresAllegroPreparationQueue({
               missing: asArray(result?.missing),
               attempts: Number(task.attempt || 0),
             },
+          };
+        }
+        if (typeof afterPrepare === 'function' && result?.ready === true) {
+          const downstream = await afterPrepare(task, result);
+          result = {
+            ...result,
+            downstream: asObject(downstream),
           };
         }
         await finish(task, result);
@@ -447,4 +462,3 @@ export function createPostgresAllegroPreparationQueue({
   const status = async () => publicState(await readState());
   return Object.freeze({ enqueue, status, resume, kick });
 }
-

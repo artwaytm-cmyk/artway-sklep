@@ -33,6 +33,8 @@ export function createStoreDataRoute(deps = {}) {
     readCatalogProduct = null,
     setCatalogProductStatus = null,
     purgeCatalogProduct = null,
+    emitAgentEvent = null,
+    signalProductMutation = null,
   } = deps;
   const catalogProductAdminRoute = createCatalogProductAdminRoute({
     respond: odpowiedz,
@@ -46,6 +48,7 @@ export function createStoreDataRoute(deps = {}) {
     readProduct: readCatalogProduct,
     setProductStatus: setCatalogProductStatus,
     purgeProduct: purgeCatalogProduct,
+    signalProductMutation,
   });
   const settingsFieldMutationRoute = createSettingsFieldMutationHandler({
     isAdmin: czyAdmin,
@@ -222,6 +225,21 @@ export function createStoreDataRoute(deps = {}) {
       // Zamówienie jest już bezpiecznie zapisane. Chwilowa awaria katalogu
       // lub konflikt settings nie może cofnąć checkoutu klienta.
       const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
+      if (typeof emitAgentEvent === 'function') {
+        emitAgentEvent({
+          type: 'order.store.received',
+          area: 'orders',
+          entityId: String(zam.nr || ''),
+          dedupeKey: `order.store.received:${zam.nr}`,
+          source: 'checkout',
+          priority: 900,
+          payload: {
+            orderNumber: String(zam.nr || ''),
+            action: 'obsługa nowego zamówienia sklepu',
+            itemCount: Array.isArray(zam.produkty) ? zam.produkty.length : 0,
+          },
+        }).catch(() => {});
+      }
       if (zam.platnoscId !== 'paynow') {
         try { email = await wyslijEmaileNowegoZamowienia(zam); }
         catch (e) {

@@ -1,11 +1,8 @@
 import {
-  PROMPT_VERSION,
   productEditorialFingerprint,
-  productEditorialSourceFingerprint,
   providerQuotaUnavailable,
 } from './agent-specialists-support.mjs';
 import { enrichAllegroProductEvidence } from './allegro-parameter-enrichment.mjs';
-import { buildProfessionalProductDescription, professionalDescriptionQuality } from './product-content-layout.mjs';
 import { editorialProductContentReport, editorialSourceTextIsSafe } from './product-editorial-safety.mjs';
 import {
   ALLEGRO_PREPARATION_VERSION,
@@ -13,6 +10,8 @@ import {
   allegroPreparationAttemptDisposition,
   allegroPreparationRetryState,
 } from './allegro-preparation-queue.mjs';
+import { enrichProductFromAuxiliarySources } from './product-auxiliary-source-enrichment.mjs';
+import { deterministicProductEditorialFallback } from './product-editorial-fallback.mjs';
 
 const asArray = (value) => Array.isArray(value) ? value : [];
 const asObject = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -49,93 +48,6 @@ const SOURCE_PAGE_NOISE = /(?:dodaj produkty podając kody|wgraj pliki z kodami|
 function usefulProductText(value = '', minimum = 20) {
   const clean = String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   return clean.length >= minimum && !SOURCE_PAGE_NOISE.test(clean) && editorialSourceTextIsSafe(clean);
-}
-
-const FORBIDDEN_EDITORIAL_LINE = /(?:skontaktuj|kontakt(?:uj|owy| przed)|zadzwoń|napisz do nas|e-?mail|www\.|https?:\/\/|dostaw|wysył|kurier|paczkomat|przesyłk|odbiór osobisty|czas realizacji|koszt transportu|koszt wysyłki|płatno|przelew|stan magazynowy|dostępn(?:y|ość)|powiadom o dostępności|dodaj do koszyka|dodaj do porównania|lista zakupowa|rozmiar uniwersalny\s*\d+\s*szt)/i;
-
-function deterministicEditorialText(value = '', limit = 30_000) {
-  if (!editorialSourceTextIsSafe(value)) return '';
-  return String(value || '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(?:p|div|li|h[1-6])>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .split(/\n+/)
-    .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter((line) => line.length >= 3 && !SOURCE_PAGE_NOISE.test(line) && !FORBIDDEN_EDITORIAL_LINE.test(line))
-    .join('\n\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-    .slice(0, limit);
-}
-
-function deterministicEditorialFallback(product = {}) {
-  const source = asObject(product.sourceMaterial);
-  const title = deterministicEditorialText(product.nazwa || product.name || source.title, 150).replace(/\n+/g, ' ').trim();
-  const sourceLongDescription = [
-    source.longDescription,
-    product.opis,
-    product.allegroDescription,
-  ].map((value) => deterministicEditorialText(value)).find((value) => value.length >= 150) || '';
-  if (!title || !sourceLongDescription) return null;
-  const sourceShort = [
-    source.shortDescription,
-    product.opisKrotki,
-  ].map((value) => deterministicEditorialText(value, 500)).find((value) => value.length >= 40) || '';
-  const shortDescription = (sourceShort || sourceLongDescription.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ') || sourceLongDescription)
-    .slice(0, 500)
-    .trim();
-  if (shortDescription.length < 40) return null;
-  const longDescription = buildProfessionalProductDescription({
-    ...product,
-    parametryProducenta: source.parameters || product.parametryProducenta,
-  }, sourceLongDescription);
-  if (!professionalDescriptionQuality(longDescription).professional) return null;
-  const timestamp = new Date().toISOString();
-  const base = {
-    ...product,
-    nazwa: title,
-    opisKrotki: shortDescription,
-    opis: longDescription,
-    allegroTitle: deterministicEditorialText(product.allegroTitle || title, 75).replace(/\n+/g, ' ').trim(),
-    allegroDescription: longDescription,
-    seoTitle: deterministicEditorialText(product.seoTitle || title, 70).replace(/\n+/g, ' ').trim(),
-    seoDescription: deterministicEditorialText(product.seoDescription || shortDescription, 160).replace(/\n+/g, ' ').trim(),
-  };
-  const storeQuality = editorialProductContentReport(base, 'store');
-  const allegroQuality = editorialProductContentReport(base, 'allegro');
-  if (!storeQuality.ready || !allegroQuality.ready) return null;
-  const fingerprint = productEditorialFingerprint(base);
-  const sourceFingerprint = productEditorialSourceFingerprint(base);
-  const previous = asObject(product.contentEditorial), previousChannels = asObject(previous.channelStates);
-  const receipt = (channel) => ({
-    ...asObject(previousChannels[channel]),
-    status: 'ready',
-    promptVersion: PROMPT_VERSION,
-    inputFingerprint: fingerprint,
-    preparedAt: timestamp,
-    source: 'deterministic-source-policy',
-    qualityConfirmed: true,
-  });
-  return {
-    ...base,
-    contentEditorial: {
-      ...previous,
-      status: 'ready',
-      inputFingerprint: fingerprint,
-      sourceFingerprint,
-      channelStates: {
-        ...previousChannels,
-        store: receipt('store'),
-        allegro: receipt('allegro'),
-      },
-      preparedAt: timestamp,
-      source: 'deterministic-source-policy',
-    },
-    contentEditorialPreparedAt: timestamp,
-    contentEditorialSource: 'deterministic-source-policy',
-  };
 }
 
 export function createAllegroPreparationWorker({
@@ -316,6 +228,21 @@ export function createAllegroPreparationWorker({
           : 'Źródło nie zwróciło nowych danych. Kontynuuję na potwierdzonych danych kartoteki.',
       });
     }
+    const auxiliary = await enrichProductFromAuxiliarySources({
+      product,
+      primaryUrl: sourceUrl,
+      inspectSource,
+    });
+    product = auxiliary.product;
+    if (auxiliary.evidence.length) {
+      await progress({
+        productName,
+        phase: 'źródła_pomocnicze',
+        status: 'running',
+        fields: auxiliary.changedFields,
+        message: 'Sprawdziłem źródła pomocnicze. Użyłem ich wyłącznie do uzupełnienia braków zgodnych z tożsamością produktu.',
+      });
+    }
     product = enrichAllegroProductEvidence(product, products).product;
     await progress({
       productName,
@@ -349,15 +276,21 @@ export function createAllegroPreparationWorker({
         }
       : await editorialize(product, sourceUrl, actor);
     const firstChannelStates = asObject(asObject(editorial.product?.contentEditorial).channelStates);
-    if (editorial.editorialReused !== true && task.skipEditorial !== true && (firstChannelStates.store?.status !== 'ready' || firstChannelStates.allegro?.status !== 'ready')) {
+    if (editorial.editorialReused !== true && task.skipEditorial !== true && (
+      firstChannelStates.store?.status !== 'ready'
+      || firstChannelStates.allegro?.status !== 'ready'
+    )) {
       // Identyczne, zakończone kanały zostaną zwrócone z cache specjalistów.
       // Ponawiamy tylko dlatego, że co najmniej jeden kanał nie dostarczył
       // poprawnego wyniku strukturalnego albo nie przeszedł bramki jakości.
       editorial = await editorialize(product, sourceUrl, actor);
     }
     const unresolvedChannelStates = asObject(asObject(editorial.product?.contentEditorial).channelStates);
-    if (unresolvedChannelStates.store?.status !== 'ready' || unresolvedChannelStates.allegro?.status !== 'ready') {
-      const fallbackProduct = deterministicEditorialFallback(editorial.product || product);
+    if (
+      unresolvedChannelStates.store?.status !== 'ready'
+      || unresolvedChannelStates.allegro?.status !== 'ready'
+    ) {
+      const fallbackProduct = deterministicProductEditorialFallback(editorial.product || product);
       if (fallbackProduct) {
         editorial = {
           ...editorial,
@@ -467,7 +400,10 @@ export function createAllegroPreparationWorker({
     const providerUnavailable = (
       task.skipEditorial === true
       || editorialWarnings.some((warning) => providerQuotaUnavailable(warning))
-    ) && (finalEditorialStates.store?.status !== 'ready' || finalEditorialStates.allegro?.status !== 'ready');
+    ) && (
+      finalEditorialStates.store?.status !== 'ready'
+      || finalEditorialStates.allegro?.status !== 'ready'
+    );
     const ready = missing.length === 0, completedAt = new Date().toISOString(), fingerprintProduct = { ...stored, ...fields };
     const automaticAttempt = Math.max(1, Number(task.attempt) || 1);
     const disposition = allegroPreparationAttemptDisposition({

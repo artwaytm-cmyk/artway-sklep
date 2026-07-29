@@ -150,6 +150,28 @@ test('kolejka po restarcie przywraca aktywny produkt przed oczekującymi', async
   assert.equal(repository.value().active, null);
 });
 
+test('zadanie jest zakończone dopiero po potwierdzonym etapie drugiego kanału', async () => {
+  const repository = memoryRepository();
+  let downstreamAttempts = 0;
+  const queue = createAllegroPreparationQueue({
+    ...repository,
+    prepare: async () => ({ ready: true, status: 'completed', savedFields: ['opis'] }),
+    afterPrepare: async () => {
+      downstreamAttempts += 1;
+      if (downstreamAttempts < 2) throw new Error('Von Halsky nie potwierdził jeszcze zapisu');
+      return { channel: 'vonHalsky', status: 'ready', readbackConfirmed: true };
+    },
+  });
+  await queue.enqueue(['multi-channel']);
+  const status = await waitUntil(async () => {
+    const value = await queue.status();
+    return !value.running && value.recent.length === 1 ? value : null;
+  });
+  assert.equal(downstreamAttempts, 2);
+  assert.equal(status.recent[0].status, 'completed');
+  assert.equal(status.recent[0].ready, true);
+});
+
 test('ponowne przygotowanie śledzi zajęte produkty zamiast tworzyć pustą partię', async () => {
   const repository = memoryRepository();
   let release;
@@ -202,7 +224,7 @@ test('bieżący licznik nie dolicza historycznego ostrzeżenia po późniejszym 
   assert.equal(status.current.find((item) => item.productId === '17').status, 'completed');
 });
 
-test('automatyczna kolejka najpierw wybiera braki, potem nowe produkty, a gotowe tylko do okresowej weryfikacji', () => {
+test('ciągła kolejka najpierw wybiera braki, a potem domyka pełny przegląd wszystkich kanałów', () => {
   const selected = selectAllegroPreparationCandidates([
     {
       id: 'attention',
@@ -224,11 +246,12 @@ test('automatyczna kolejka najpierw wybiera braki, potem nowe produkty, a gotowe
     now: new Date('2026-07-27T08:00:00.000Z'),
     preparationCurrent: (product) => product.allegroAgentPreparationStatus === 'ready',
   });
-  assert.deepEqual(selected.map((item) => item.id), ['attention', 'new', 'old']);
+  assert.deepEqual(selected.map((item) => item.id), ['attention', 'new', 'old', 'fresh']);
   assert.deepEqual(selected.map((item) => item.reason), [
     'wymaga_uzupelnienia',
-    'nieprzygotowany',
-    'weryfikacja_okresowa',
+    'pelny_przeglad_edytora_i_von_halsky',
+    'pelny_przeglad_edytora_i_von_halsky',
+    'pelny_przeglad_edytora_i_von_halsky',
   ]);
 });
 
@@ -246,7 +269,7 @@ test('stara decyzja jest automatycznie ponawiana dokładnie po wdrożeniu nowsze
   assert.equal(selected[0].reason, 'nowa_wersja_automatycznej_naprawy');
 });
 
-test('aktywna powiązana oferta trafia tylko do lekkiej weryfikacji, a nie do ponownej redakcji', () => {
+test('aktywna oferta jest lekko weryfikowana, ale brak karty Von Halsky uruchamia jeden pełny przegląd', () => {
   const active = {
     id: 'active',
     allegroOfferId: '123456789',
@@ -260,7 +283,13 @@ test('aktywna powiązana oferta trafia tylko do lekkiej weryfikacji, a nie do po
     verificationOnly: true,
     reason: 'active_listing_verification_only',
   });
-  assert.deepEqual(selectAllegroPreparationCandidates([active]), []);
+  const selected = selectAllegroPreparationCandidates([active]);
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].reason, 'pelny_przeglad_edytora_i_von_halsky');
+  assert.deepEqual(selectAllegroPreparationCandidates([{
+    ...active,
+    vonHalskyAgentStatus: 'ready',
+  }]), []);
 });
 
 test('rzeczywisty sygnał naprawy może ponownie otworzyć aktywną ofertę', () => {

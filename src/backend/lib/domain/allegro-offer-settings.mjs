@@ -12,7 +12,6 @@ export function normalizeAllegroOfferSettings(raw = {}) {
     : ALLEGRO_DEFAULT_OFFER_STOCK;
   const producers = [...new Set((Array.isArray(raw?.producers) ? raw.producers : ALLEGRO_DEFAULT_PRODUCERS)
     .map((value) => canonicalManufacturerName(value, 100)).filter(Boolean))].slice(0, 50);
-  const autonomousAgentMinutes = Math.min(120, Math.max(15, Number(raw?.autonomousAgentMinutes) || 15));
   const autoResolveDuplicateMinScore = Math.min(100, Math.max(95, Number(raw?.autoResolveDuplicateMinScore) || 97));
   return {
     defaultStock,
@@ -32,7 +31,6 @@ export function normalizeAllegroOfferSettings(raw = {}) {
     autoFees: raw?.autoFees !== false,
     autoCorrections: raw?.autoCorrections !== false,
     autonomousAgent: raw?.autonomousAgent !== false,
-    autonomousAgentMinutes,
     autoResolveDuplicates: raw?.autoResolveDuplicates !== false,
     autoResolveDuplicateMinScore,
     ...normalizeAllegroSyncSettings(raw),

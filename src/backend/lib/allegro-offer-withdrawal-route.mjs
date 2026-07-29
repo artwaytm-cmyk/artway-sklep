@@ -44,23 +44,19 @@ export function createAllegroOfferWithdrawalRoute({
     if (action === 'allegro-autonomous-agent-cycle') {
       const startedAt = new Date().toISOString(), runId = crypto.randomUUID(), source = text(body.source || 'manual-admin', 100);
       const dryRun = body.dryRun === true;
-      const [offerSettings, previousState] = await Promise.all([read('allegro_offer_settings', {}), read('allegro_autonomous_agent_state', {})]);
+      const offerSettings = await read('allegro_offer_settings', {});
       const enabled = offerSettings.autonomousAgent !== false;
       const autoResolveDuplicatesConfigured = offerSettings.autoResolveDuplicates !== false;
       // Zakończenie oferty jest operacją destrukcyjną. Cykl może wskazać
       // najlepszą pozycję do pozostawienia, lecz wykonanie należy do jawnej
       // trasy allegro-resolve-duplicate uruchamianej decyzją administratora.
       const autoResolveDuplicates = false;
-      const intervalMinutes = Math.min(120, Math.max(15, Number(offerSettings.autonomousAgentMinutes) || 15));
       if (!enabled) {
         const completedAt = new Date().toISOString();
         const state = { runId, enabled: false, status: 'disabled', source, startedAt, completedAt, nextRunAt: null, message: 'Autonomiczny Agent Allegro jest wyłączony w ustawieniach.' };
         await write('allegro_autonomous_agent_state', state);
         return respond({ ok: true, skipped: true, reason: 'disabled', state });
       }
-      const scheduled = /^(?:vps|scheduled)/i.test(source), dueAt = Date.parse(previousState?.completedAt || '') + intervalMinutes * 60 * 1000;
-      if (scheduled && Number.isFinite(dueAt) && Date.now() < dueAt) return respond({ ok: true, skipped: true, reason: 'not_due', state: { ...previousState, nextRunAt: new Date(dueAt).toISOString() } });
-
       let mapping = null;
       if (!dryRun && typeof autoMapOffers === 'function' && offerSettings.autoMapping !== false) {
         const currentOffers = getOffers(await read('allegro_offers', { items: [], updated_at: null }));
@@ -120,10 +116,10 @@ export function createAllegroOfferWithdrawalRoute({
       for (const result of results.filter((item) => item.withdrawOfferIds.length)) audit.unshift({ id: crypto.randomUUID(), productId: result.productId, keepOfferId: result.keepOfferId, withdrawOfferIds: result.withdrawOfferIds, results: result.results, confidence: result.confidence, reason: result.reason, at: now, operator: 'autonomous-agent', runId, source });
       const pendingDuplicates = analysis.duplicates;
       const review = [...analysis.review, ...pendingDuplicates.map((group) => ({ code: 'requires_approval', productId: group.productId, productName: group.productName, keepOfferId: group.keepOfferId, withdrawOfferIds: group.withdrawOfferIds, score: group.confidence, reason: 'Zakończenie duplikatu wymaga potwierdzenia administratora.' }))];
-      const completedAt = new Date().toISOString(), nextRunAt = new Date(Date.parse(completedAt) + intervalMinutes * 60 * 1000).toISOString();
+      const completedAt = new Date().toISOString(), nextRunAt = null;
       const state = {
         runId, enabled: true, status: results.some((item) => !item.ok) ? 'warning' : review.length ? 'review' : 'ok', source, startedAt, completedAt, nextRunAt,
-        intervalMinutes, dryRun, autoResolveDuplicates, autoResolveDuplicatesConfigured, destructiveActionsRequireApproval: true, minimumScore: threshold,
+        mode: 'event_driven', scheduledCycles: false, dryRun, autoResolveDuplicates, autoResolveDuplicatesConfigured, destructiveActionsRequireApproval: true, minimumScore: threshold,
         mapping: { autoMapped: Number(mapping?.autoMapped) || 0, refreshed: Number(mapping?.refreshed) || 0, quarantined: Number(mapping?.quarantined) || 0, reassessed: Number(mapping?.reassessed) || 0 },
         stats: analysis.stats, duplicateGroupsResolved: results.filter((item) => item.withdrawOfferIds.length).length, duplicateOffersEnded: endedIds.size, reviewCount: review.length,
         recentActions: results.slice(0, 25).map((item) => ({ productId: item.productId, productName: item.productName, keepOfferId: item.keepOfferId, withdrawOfferIds: item.withdrawOfferIds, confidence: item.confidence, ok: item.ok, partial: item.partial, errors: item.results.filter((result) => !result.ended).map((result) => ({ offerId: result.offerId, code: result.code, error: result.error })) })),

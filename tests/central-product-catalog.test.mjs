@@ -268,12 +268,14 @@ test('publiczny katalog obsługuje gałęzie, wybrane produkty, nowości i oceny
 test('backend udostępnia stronicowaną kartotekę, pojedynczy produkt, synchronizację i status', async () => {
   const source = await readFile('src/backend/lib/store-app.mjs', 'utf8');
   const route = await readFile('src/backend/lib/central-product-catalog-route.mjs', 'utf8');
+  const synchronizer = await readFile('src/backend/lib/domain/central-product-catalog-synchronizer.mjs', 'utf8');
   for (const action of ['product-catalog-query', 'product-catalog-item', 'product-catalog-sync', 'product-catalog-status']) assert.match(route, new RegExp(action));
   assert.match(source, /createCentralProductCatalog/);
   assert.match(source, /createCentralProductCatalogRoute/);
-  assert.match(source, /synchronizeCentralProductCatalog/);
-  assert.match(source, /centralProductCatalogRevisionState/);
-  assert.match(source, /repository\.revisionToken/);
+  assert.match(source, /createCentralProductCatalogSynchronizer/);
+  assert.match(synchronizer, /synchronize/);
+  assert.match(synchronizer, /revisionState/);
+  assert.match(synchronizer, /repository\.revisionToken/);
   assert.match(route, /Promise\.all\(\[catalog\.metadata\(\), revisionState\(\)\]\)/);
 });
 

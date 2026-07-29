@@ -7,7 +7,6 @@ const MAX_STEPS = 24;
 const MAX_WORK_ITEMS = 300;
 const MAX_WRITE_ATTEMPTS = 8;
 const WORKER_ONLINE_MS = 150_000;
-const CYCLE_FRESH_MS = 35 * 60_000;
 
 function clean(value = '', limit = 500) {
   return String(value ?? '')
@@ -363,20 +362,28 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
     });
   }
 
-  async function status(queue = {}) {
+  async function status(queue = {}, events = {}) {
     const version = await readVersioned(KEY, {}), record = asRecord(version.value), current = now(), currentMs = current.getTime();
     const runtimeSeen = Date.parse(record.worker.lastSeenAt || '') || 0;
     const queueSeen = Date.parse(queue.workerLastSeenAt || '') || 0;
-    const lastSeenMs = Math.max(runtimeSeen, queueSeen), workerOnline = queue.workerOnline === true || (lastSeenMs > 0 && currentMs - lastSeenMs <= WORKER_ONLINE_MS);
-    const lastRun = record.history[0] || null, lastRunMs = Date.parse(lastRun?.completedAt || '') || 0;
-    const cycleFresh = lastRunMs > 0 && currentMs - lastRunMs <= CYCLE_FRESH_MS;
+    const eventSeen = Date.parse(events.updatedAt || events.current?.updatedAt || events.recent?.[0]?.updatedAt || '') || 0;
+    const lastSeenMs = Math.max(runtimeSeen, queueSeen, eventSeen);
+    const workerOnline = events.workerOnline === true
+      || queue.workerOnline === true
+      || (lastSeenMs > 0 && currentMs - lastSeenMs <= WORKER_ONLINE_MS);
+    const lastRun = record.history[0] || null;
     const integrationWarnings = (lastRun?.steps || []).filter((step) => ['warning', 'failed'].includes(step.status)).map((step) => ({
       id: step.id,
       label: step.label,
       error: step.error || step.detail,
       kind: ['oferty-lekkie', 'oferty-pelne', 'zamowienia', 'komunikacja'].includes(step.id) ? 'allegro' : step.id === 'tresci-gpt-nano' ? 'ai' : 'system',
     }));
-    const state = !workerOnline ? 'offline' : record.currentRun ? 'working' : !cycleFresh ? 'stale' : integrationWarnings.length ? 'degraded' : 'online';
+    const eventActive = number(events.active, 0, 1_000_000);
+    const state = record.currentRun || record.currentWork || eventActive > 0
+      ? 'working'
+      : integrationWarnings.length
+        ? 'degraded'
+        : 'ready';
     const pendingPublication = record.workItems.filter((item) => ['pending', 'attention', 'waiting_provider', 'failed', 'decision_required'].includes(item.status));
     const confirmedPublication = record.workItems.filter((item) => item.status === 'confirmed');
     return {
@@ -410,16 +417,14 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
       activity: record.activity.slice(0, 60),
       integrationWarnings,
       updatedAt: record.updatedAt,
-      schedule: { mode: 'event_queue', detectorIntervalMinutes: 15, maxHeavyJobsPerRun: 2, lightOffersMinutes: 60, fullOffersHours: 24, nextAt: nextQuarterHour(current).toISOString() },
+      schedule: {
+        mode: 'event_driven',
+        scheduledCycles: false,
+        nextAt: '',
+        description: 'Agent czeka na sygnał domenowy i uruchamia wyłącznie właściwy moduł.',
+      },
     };
   }
 
   return Object.freeze({ report, status });
-}
-
-function nextQuarterHour(date = new Date()) {
-  const next = new Date(date);
-  next.setSeconds(0, 0);
-  next.setMinutes(Math.floor(next.getMinutes() / 15) * 15 + 15);
-  return next;
 }

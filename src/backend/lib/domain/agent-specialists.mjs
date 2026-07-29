@@ -237,7 +237,10 @@ export function createAgentSpecialists({
       configured: !!clean(apiKey, 500), model: clean(model, 80) || 'routing automatyczny', modelRouting: modelPolicySummary({ override: model }), config: current.config,
       promptVersion: PROMPT_VERSION,
       policy: {
-        mode: 'event_queue_plus_versioned_gpt_scenarios', cycleMinutes: 15, detectorMinutes: 15, maxJobsPerCycle: 2, safeAutoApply: current.config.safeAutoApply,
+        mode: 'event_driven_queue_plus_versioned_gpt_scenarios',
+        scheduledCycles: false,
+        trigger: 'new_domain_event_or_active_product_backlog',
+        safeAutoApply: current.config.safeAutoApply,
         progressiveAutonomy: true, editorialAutonomy: current.config.autoApplyProductEditorial !== false,
         linkedAllegroContentAutonomy: current.config.autoUpdateLinkedAllegroContent !== false,
         neverAutomatic: NEVER_AUTOMATIC, actionPolicy: AGENT_ACTION_POLICY,
@@ -506,9 +509,9 @@ export function createAgentSpecialists({
     number, day, MAX_DECISIONS, upsertDecision,
   });
 
-  // Timer i panel mogą zażądać cyklu w tej samej chwili. Tylko jeden
-  // wykonawca może wybierać produkty; pozostałe wywołania dostają jawny status
-  // zamiast tworzyć drugi szkic dla tego samego odcisku danych.
+  // Zgodnościowa metoda starszego wykonawcy pozostaje wyłącznie dla testów
+  // i bezpośredniego użycia serwisowego. Nie ma publicznej trasy ani timera.
+  // Blokada chroni przed utworzeniem dwóch szkiców dla tego samego odcisku.
   let automaticCyclePromise = null;
   async function automaticCycle(options = {}) {
     if (automaticCyclePromise) {

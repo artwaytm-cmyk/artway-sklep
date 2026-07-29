@@ -573,7 +573,7 @@ test('poprawiona treść nie zmienia odcisku źródła i kolejny cykl nie redagu
   assert.deepEqual(calls, ['store', 'vonHalsky']);
 });
 
-test('automatyczny cykl zapisuje trzy niezależne i bezpieczne wersje kanałów', async () => {
+test('zdarzeniowe przygotowanie zapisuje trzy niezależne i bezpieczne wersje kanałów', async () => {
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [{ id: 99, nazwa: 'NOWA GRA | SKLEP', producent: 'Alexander', kategoria: 'Gry rodzinne', gtin: '5906018000092', opis: 'Słaby opis.', opisKrotki: 'Stary skrót.', allegroCategoryId: '123' }] }, rev: 1 } });
   let calls = 0;
   const longDescription = '<h2>Rodzinna rozgrywka</h2><p>Ta gra pozwala wspólnie spędzić czas, ćwiczyć spostrzegawczość i poznawać zasady opisane w dołączonej instrukcji.</p><ul><li>Czytelne zasady</li><li>Wspólna zabawa</li></ul>';
@@ -629,7 +629,8 @@ test('automatyczny cykl zapisuje trzy niezależne i bezpieczne wersje kanałów'
   const status = await service.status();
   assert.equal(status.history[0].approvalStatus, 'auto_applied');
   assert.equal(status.history[0].source, 'automatic');
-  assert.equal(status.policy.cycleMinutes, 15);
+  assert.equal(status.policy.mode, 'event_driven_queue_plus_versioned_gpt_scenarios');
+  assert.equal(status.policy.scheduledCycles, false);
   assert.equal(status.policy.editorialAutonomy, true);
   assert.equal(status.policy.linkedAllegroContentAutonomy, true);
   assert.equal(status.learning.productContent.approvals, 0);

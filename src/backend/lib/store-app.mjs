@@ -59,6 +59,7 @@ import {
 import { createInventoryDecisionService } from './domain/inventory-decisions.mjs';
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { createAgentRuntime } from './domain/agent-runtime.mjs';
+import { createAgentEventSystem } from './domain/agent-event-system.mjs';
 import { createAgentRuntimeRoute } from './agent-runtime-route.mjs';
 import { createAgentSpecialists } from './domain/agent-specialists.mjs';
 import { createAllegroPreparationRoute } from './allegro-preparation-route.mjs';
@@ -124,6 +125,7 @@ import { createCentralProductPatchBuffer } from './domain/central-product-patch-
 import { createCentralCatalogProductOperationWriter } from './domain/catalog-product-operation-rebase.mjs';
 import { centralAllegroPreparationCurrent, centralAllegroPreparationFingerprint, createCentralProductCatalog } from './domain/central-product-catalog.mjs';
 import { createCentralProductCatalogRoute } from './central-product-catalog-route.mjs';
+import { createCentralProductCatalogSynchronizer } from './domain/central-product-catalog-synchronizer.mjs';
 import { createInventoryDecisionRoute } from './inventory-decision-route.mjs';
 import { createInventoryStockRoute } from './inventory-route.mjs';
 import { createProductLinkImportBundle } from './product-link-import-route.mjs';
@@ -305,6 +307,15 @@ const inpostServiceShipmentRoute = createInpostServiceShipmentRoute({
   labelReady: inpostEtykietaGotowa, offerId: inpostOfertaId, infaktPublicConfig, infaktCall: infaktWywolaj, infaktReference: infaktRef,
 });
 const agentRuntime = createAgentRuntime({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const agentEvents = createAgentEventSystem({
+  pool: postgresPool,
+  namespace: STORE_NAME,
+  readVersioned: czytajWersjonowane,
+  writeIfVersion: zapiszJesliWersja,
+  runtime: agentRuntime,
+  text: tekst,
+});
+const { queue: agentEventQueue, emit: emitAgentEvent } = agentEvents;
 const vonHalskyRoute = createVonHalskyRoute({
   respond: odpowiedz, isAdmin: czyAdmin, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja,
   saveProductFields: (input) => zapiszIOpublikujPolaProduktuCentralnie(input),
@@ -332,10 +343,10 @@ const zapiszPolaProduktuCentralnie = createCatalogProductFieldSaver({
   writeOperations: zapiszOperacjeProduktow,
   readProduct: async (productId) => centralProductCatalog.get(productId, { admin: true }),
 });
-const zapiszIOpublikujPolaProduktuCentralnie = createPublishedCatalogProductFieldSaver({
+const zapiszIOpublikujPolaProduktuCentralnie = agentEvents.wrapProductSaver(createPublishedCatalogProductFieldSaver({
   saveFields: zapiszPolaProduktuCentralnie,
   readPublishedProduct: (productId) => centralProductCatalog.get(productId, { admin: true }), saveIsPublished: true,
-});
+}));
 const zapiszMapowaniaBezpiecznie = createAllegroMappingStore({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, getItems: allegroMapowaniaItems }).writeSafely;
 async function zwiekszLicznikKoduRabatowego(kod = '') {
   const code = tekst(kod, 30).trim().toUpperCase(); if (!code) return false;
@@ -370,10 +381,16 @@ const diagnosticAgent = createDiagnosticAgentWorkflow();
 const allegroPublicationAgent = createAllegroPublicationAgent({ text: tekst, canonicalGtin, linkFromPreparation: allegroDanePowiazaniaZPrzygotowania, runSpecialist: agentSpecialists.run, mutateSettings: mutateSettingsSafely, saveProductFields: zapiszIOpublikujPolaProduktuCentralnie });
 function allegroZapiszZadanieAgentaOferty(product = {}, details = {}) { return allegroPublicationAgent.recordFailure(product, details); }
 const linkedProductEditorial = (product, sourceUrl, actor) => prepareLinkedProductEditorial(product, { sourceUrl, runSpecialist: agentSpecialists.run, actor });
+const przygotujProduktVonHalskyPoPelnejKontroli = agentEvents.vonHalskyFinisher({
+  route: vonHalskyRoute,
+  publicOrigin: process.env.ARTWAY_PUBLIC_ORIGIN,
+  adminToken: process.env.ARTWAY_ADMIN_TOKEN,
+});
 const allegroPreparationRoute = createAllegroPreparationRoute({
   respond: odpowiedz, isAdmin: czyAdmin, sessionOf: requestSession, text: tekst,
   readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, runtime: agentRuntime,
   pool: postgresPool, namespace: STORE_NAME,
+  afterPrepare: przygotujProduktVonHalskyPoPelnejKontroli,
   worker: {
     text: tekst, readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), loadProducts: allegroAgentProduktyKompletne,
     getCatalogProduct: (productId) => centralProductCatalog.get(productId, { admin: true }), sourceUrlOf: sourcePageUrl,
@@ -410,6 +427,13 @@ async function productLinkRefreshCentralProduct(productId, incoming = {}) {
     actor: 'product-link-import',
     area: 'product-source-refresh',
   });
+  agentEvents.signalProduct(productId, {
+    source: 'product-source-refresh',
+    priority: 600,
+    productName: next.nazwa || next.name || '',
+    action: 'pełny przegląd po aktualizacji źródła',
+    changedFields,
+  }).catch((error) => console.error('agent_product_source_event', error));
   return { updated: true, product: { ...existing, ...fields }, changedFields };
 }
 const productLinkImport = createProductLinkImportBundle({
@@ -439,60 +463,13 @@ const productLinkImport = createProductLinkImportBundle({
     adminEmail: () => process.env.ARTWAY_ADMIN_EMAIL || '',
   },
 });
-let centralProductCatalogSyncPromise = null;
-const CENTRAL_PRODUCT_SOURCE_KEYS = [
-  // Produkty są już rekordami artway_products. Rewizja projekcji zależy tylko
-  // od niezależnych domen operacyjnych, które wpływają na widok katalogu.
-  'artway_stany', 'artway_dostepnosc', 'artway_magazyn_produkty', 'artway_opinie',
-];
-function centralProductSettingsFingerprint(data = {}) {
-  const source = Object.fromEntries(CENTRAL_PRODUCT_SOURCE_KEYS.map((key) => [key, data?.[key] ?? null]));
-  return crypto.createHash('sha256').update(JSON.stringify(source)).digest('hex').slice(0, 24);
-}
-async function centralProductCatalogRevisionState() {
-  if (typeof repository.revisionToken === 'function') {
-    const token = await repository.revisionToken({ settingsKeys: CENTRAL_PRODUCT_SOURCE_KEYS, keys: ['allegro_offers', 'allegro_mappings'] });
-    const sourceRevision = crypto.createHash('sha256').update(`canonical-products|${token}`).digest('hex').slice(0, 32);
-    return { sourceRevision };
-  }
-  const [settings, offers, mappings] = await Promise.all([
-    czytaj('settings', { data: {}, rev: 0, updated_at: null }),
-    czytaj('allegro_offers', { items: [], updated_at: null }), czytaj('allegro_mappings', { items: {}, updated_at: null }),
-  ]);
-  const sourceRevision = ['canonical-products', centralProductSettingsFingerprint(settings.data || {}), offers.updated_at || '', mappings.updated_at || ''].join(':');
-  return { sourceRevision };
-}
-async function centralProductCatalogRevisionSnapshot(revision = null) {
-  const state = revision || await centralProductCatalogRevisionState();
-  const [settings, offers, mappings] = await Promise.all([
-    czytaj('settings', { data: {}, rev: 0, updated_at: null }),
-    czytaj('allegro_offers', { items: [], updated_at: null }), czytaj('allegro_mappings', { items: {}, updated_at: null }),
-  ]);
-  // Rewizja kartoteki zależy wyłącznie od danych produktowych. Zmiana bannera,
-  // regulaminu lub innego ustawienia nie może przebudowywać dziesiątek tysięcy produktów.
-  return { settings, offers, mappings, sourceRevision: state.sourceRevision };
-}
-async function synchronizeCentralProductCatalog({ force = false, revision = null } = {}) {
-  if (!centralProductCatalog.available) return { available: false, synchronized: false, count: 0 };
-  if (centralProductCatalogSyncPromise) return centralProductCatalogSyncPromise;
-  centralProductCatalogSyncPromise = (async () => {
-    const state = revision || await centralProductCatalogRevisionState(), meta = await centralProductCatalog.metadata();
-    if (!force && meta.count > 0 && !meta.outdated && meta.sourceRevision === state.sourceRevision) return { ...meta, synchronized: false, current: true };
-    const snapshot = await centralProductCatalogRevisionSnapshot(state);
-    const canonicalProducts = meta.count > 0
-      ? [...(await centralProductCatalog.listDataMap({ includeTrash: true })).values()]
-      : [];
-    const importedProducts = canonicalProducts.length ? [] : await productLinkImport.catalog.list();
-    return centralProductCatalog.synchronize(snapshot.settings.data || {}, {
-      canonicalProducts,
-      importedProducts,
-      offers: allegroOfertyItems(snapshot.offers),
-      mappings: allegroMapowaniaItems(snapshot.mappings),
-      sourceRevision: snapshot.sourceRevision,
-    });
-  })();
-  try { return await centralProductCatalogSyncPromise; } finally { centralProductCatalogSyncPromise = null; }
-}
+const centralProductCatalogSynchronizer = createCentralProductCatalogSynchronizer({
+  repository, read: czytaj, catalog: centralProductCatalog,
+  importedProducts: () => productLinkImport.catalog.list(),
+  offerItems: allegroOfertyItems, mappingItems: allegroMapowaniaItems,
+});
+const centralProductCatalogRevisionState = centralProductCatalogSynchronizer.revisionState;
+const synchronizeCentralProductCatalog = centralProductCatalogSynchronizer.synchronize;
 const publishCentralProductFields = createCentralProductFieldPublisher({
   catalog: centralProductCatalog, revisionState: centralProductCatalogRevisionState,
   synchronize: synchronizeCentralProductCatalog, errorText: tekst,
@@ -527,6 +504,7 @@ const agentCentrumOperacyjne = createAgentOperationalCenter({
 });
 const agentRuntimeRoute = createAgentRuntimeRoute({
   queue: codexAgentQueue,
+  events: agentEventQueue,
   runtime: agentRuntime,
   isAdmin: czyAdmin,
   respond: odpowiedz,
@@ -2862,7 +2840,10 @@ const storeDataRoute = createStoreDataRoute({
   czytajWersjonowane,
   preserveSupplierPlanOnGenericSettings,
   LIMIT_USTAWIEN,
-  zapiszJesliWersja, zapiszOperacjeProduktow, zapiszPolaProduktuCentralnie, publikujPolaProduktuCentralnie: publishCentralProductFields,
+  zapiszJesliWersja,
+  zapiszOperacjeProduktow,
+  zapiszPolaProduktuCentralnie: zapiszIOpublikujPolaProduktuCentralnie,
+  publikujPolaProduktuCentralnie: null,
   createCatalogProduct: (product, options) => centralProductCatalog.upsertProduct(product, options),
   readCatalogProduct: (productId) => centralProductCatalog.get(productId, { admin: true }),
   setCatalogProductStatus: (productId, status, options) => centralProductCatalog.setRecordStatus(productId, status, options),
@@ -2872,6 +2853,8 @@ const storeDataRoute = createStoreDataRoute({
   loadCheckoutProducts: async () => [...(await centralProductCatalog.listDataMap({ includeTrash: false })).values()]
     .filter((product) => product?._catalog?.availability?.saleAvailable !== false),
   requestSession,
+  emitAgentEvent,
+  signalProductMutation: (productId, details) => agentEvents.signalProduct(productId, details),
   mapaUsunietych,
   storeOrderSupplierReconciliation,
   zwiekszLicznikKoduRabatowego,
@@ -2962,6 +2945,7 @@ const allegroCommunicationsRoute = createAllegroCommunicationsRoute({
   rememberManualReplyStyle: allegroZapamietajStylRecznejOdpowiedzi, fetchCommunications: allegroPobierzKomunikacje,
   markNewCommunications: allegroOznaczNowaKomunikacje,
   sendAutoReplies: allegroWyslijAutoOdpowiedzi,
+  emitAgentEvent,
 });
 const allegroMappingRoute = createAllegroMappingRoute({
   respond: odpowiedz, isAdmin: czyAdmin, text: tekst, read: czytaj, write: zapisz,
@@ -2987,6 +2971,13 @@ const emailRoute = createEmailRoute({
   syncProcurement: synchronizujEtapyZakupoweZlecen, orderNumber: numerZamowienia, emailConfig: emailKonfiguracja,
   orderConfirmation: wiadomoscKlientaZamowienie, appendHistory: dopiszHistorieEmaila, sendStatus: wyslijEmailStatusowy,
 });
+
+agentEvents.connect({
+  preparationRoute: allegroPreparationRoute,
+  storeOrderReconciliation: storeOrderSupplierReconciliation,
+  readAllegroOrders: () => czytaj('allegro_orders', { items: [] }),
+  reconcileAllegroPlan: allegroZapisStanIMozeUzgodnijPlan,
+});
 export default async (req) => {
   const url = new URL(req.url);
   const action = url.searchParams.get('action') || 'health';
@@ -2994,7 +2985,6 @@ export default async (req) => {
   if (req.method === 'OPTIONS') return odpowiedz({ ok: true });
   const contentLength = Number(req.headers.get('content-length') || 0);
   if (contentLength > MAX_PAYLOAD_BYTES) return odpowiedz({ ok: false, error: 'Żądanie jest zbyt duże.', code: 'payload_too_large' }, 413);
-
   try {
     await przygotujZweryfikowanaSesje(req);
     const agentRuntimeResponse = await agentRuntimeRoute(req, url, action);
@@ -3210,6 +3200,10 @@ export default async (req) => {
       // samego markera jest bezpieczne i idempotentne.
       if (baselineMarkerMissing) await zapisz('allegro_orders_baseline_v2', { baseline_at: baselineAt, reason: baselineCreated ? 'existing_orders_confirmed_handled' : 'recovered_from_orders_record', created_at: baselineAt });
       const plan = await allegroZapisStanIMozeUzgodnijPlan(items);
+      if (!baselineCreated && noweIds.length) {
+        agentEvents.signalAllegroOrders(noweIds)
+          .catch((error) => console.error('agent_allegro_order_events', error));
+      }
       return odpowiedz({ ok: true, allegro: await allegroStatus(req), orders: items, mappings: orderMappings || undefined, archive: retention.summary, archived: retention.archived, retention_days: 30, updated_at: rec.updated_at, fetched: rec.fetched, imported_new: rec.imported_new, changed_orders: rec.changed_orders, refreshed: rec.refreshed, filtered: rec.filtered, mode: rec.mode, baseline_at: rec.baseline_at, baseline_created: rec.baseline_created, baseline_archived: rec.baseline_archived, agent, ...plan });
     }
 
