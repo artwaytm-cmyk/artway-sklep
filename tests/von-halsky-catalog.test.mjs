@@ -149,6 +149,19 @@ test('gra rodzinna nie może zostać dopasowana do akcesoriów dla mamy', () => 
   assert.equal(result.intent.subtype, 'family');
 });
 
+test('zestaw wielu gier nie przegrywa z pojedynczym domino znalezionym w opisie zawartości', () => {
+  const result = suggestVonHalskyCategory({
+    nazwa: '20 Gier - zestaw klasycznych rozgrywek Alexander',
+    opis: 'W zestawie znajdują się warcaby, młynek, domino, pamięć i Piotruś.',
+    kategoria: 'Gry rodzinne',
+  }, [
+    { id: 'family', name: 'Rodzinne', path: 'Kultura i rozrywka › Gry › Planszowe › Rodzinne', leaf: true },
+    { id: 'domino', name: 'Domino', path: 'Kultura i rozrywka › Gry › Tradycyjne › Domino', leaf: true },
+  ], { minimumConfidence: 0.82 });
+  assert.equal(result.selected.id, 'family');
+  assert.equal(result.autoApplicable, true);
+});
+
 test('znany producent Alexander otrzymuje kompletną, źródłową kartotekę GPSR', () => {
   const result = resolveVonHalskyResponsibleProducer({
     producent: 'Alexander',

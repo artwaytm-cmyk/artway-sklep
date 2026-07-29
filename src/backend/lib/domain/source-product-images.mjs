@@ -30,6 +30,28 @@ function sourcePageKey(value) {
   }
 }
 
+function samePublicHost(left, right) {
+  try {
+    const leftHost = new URL(text(left)).hostname.toLowerCase().replace(/^www\./, '');
+    const rightHost = new URL(text(right)).hostname.toLowerCase().replace(/^www\./, '');
+    return !!leftHost && leftHost === rightHost;
+  } catch {
+    return false;
+  }
+}
+
+function legacySourceImageIdentity(pageUrl, imageUrl) {
+  try {
+    if (!samePublicHost(pageUrl, imageUrl)) return false;
+    const page = new URL(text(pageUrl));
+    const image = new URL(text(imageUrl));
+    const productId = page.pathname.match(/product-pol-(\d+)-/i)?.[1] || '';
+    return !!productId && new RegExp(`(?:^|[-_])${productId}(?:[-_.]|$)`).test(image.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function identifier(value) {
   return text(value, 160).toLowerCase().replace(/[^a-z0-9]+/g, '').replace(/^0+(?=\d{8,14}$)/, '');
 }
@@ -91,8 +113,22 @@ export function inspectedSourceImages(product = {}, inspection = {}) {
 
 export function verifiedSourceImages(product = {}) {
   const evidence = product.sourceEvidence && typeof product.sourceEvidence === 'object' ? product.sourceEvidence : {};
-  if ((Number(evidence.imagePolicyVersion) || 0) < SOURCE_IMAGE_POLICY_VERSION) return [];
-  const expectedPage = sourcePageUrl(product), evidencePage = canonicalUrl(evidence.imageSourceUrl);
-  if (!expectedPage || !evidencePage || sourcePageKey(expectedPage) !== sourcePageKey(evidencePage)) return [];
-  return uniqueImages(evidence.imageUrls);
+  const expectedPage = sourcePageUrl(product);
+  if (!expectedPage) return [];
+  if ((Number(evidence.imagePolicyVersion) || 0) < SOURCE_IMAGE_POLICY_VERSION) {
+    // Jednorazowa migracja starszych kartotek IdoSell: numer konkretnej strony
+    // produktu musi wystąpić w ścieżce grafiki na tej samej domenie.
+    return uniqueImages([product.zdjecie, product.zdjecia, product.images])
+      .filter((url) => legacySourceImageIdentity(expectedPage, url));
+  }
+  const evidencePage = canonicalUrl(evidence.imageSourceUrl);
+  if (!evidencePage || sourcePageKey(expectedPage) !== sourcePageKey(evidencePage)) return [];
+  const recorded = uniqueImages(evidence.imageUrls);
+  if (recorded.length) return recorded;
+  // Reader-fallback potrafi potwierdzić właściwą stronę produktu, ale nie
+  // zwrócić galerii (np. chwilowa blokada CDN producenta). Nie wolno wtedy
+  // wyzerować wcześniej pobranych zdjęć z dokładnie tej samej domeny.
+  if (evidence.imageSourceType !== 'product_source_page') return [];
+  return uniqueImages([product.zdjecie, product.zdjecia, product.images])
+    .filter((url) => samePublicHost(url, evidencePage));
 }

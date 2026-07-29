@@ -1956,7 +1956,8 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
     preparedProduct.zdjecie,
     ...(Array.isArray(preparedProduct.zdjecia) ? preparedProduct.zdjecia : []),
   ], { limit: 16 });
-  if (!imageReadiness.ready && !imageReadiness.adaptable.length) {
+  const remoteImageValidation = sourceImages.length > 0 && imageReadiness.remote.length > 0;
+  if (!imageReadiness.ready && !imageReadiness.adaptable.length && !remoteImageValidation) {
     if (options.catalogProductId || existingOffer) {
       // Dla istniejącego produktu katalogowego Allegro posiada zweryfikowane
       // zdjęcia. Nie wysyłamy małych miniatur producenta i nie nadpisujemy
@@ -2026,9 +2027,16 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
       requiredParametersResolved: requiredParameters.length === 0,
       gpsrReady: gpsr.ready || !!existingOffer || preparedProduct.marketedBeforeGPSRObligation === true,
       gpsrSource: gpsr.source,
-      imagesReady: imageReadiness.ready || imageReadiness.adaptable.length > 0 || !!options.catalogProductId || !!existingOffer,
-      imageSource: imageReadiness.ready ? 'zweryfikowane zdjęcie źródłowe' : (imageReadiness.adaptable.length ? 'zdjęcie źródłowe do automatycznego dopasowania' : ((options.catalogProductId || existingOffer) ? 'zdjęcia produktu katalogowego Allegro' : '')),
+      imagesReady: imageReadiness.ready || imageReadiness.adaptable.length > 0 || remoteImageValidation || !!options.catalogProductId || !!existingOffer,
+      imageSource: imageReadiness.ready
+        ? 'zweryfikowane zdjęcie źródłowe'
+        : imageReadiness.adaptable.length
+          ? 'zdjęcie źródłowe do automatycznego dopasowania'
+          : remoteImageValidation
+            ? 'oficjalne zdjęcie źródłowe — końcowa walidacja przez Allegro'
+            : ((options.catalogProductId || existingOffer) ? 'zdjęcia produktu katalogowego Allegro' : ''),
       imageAdaptationRequired: imageReadiness.adaptable.length > 0,
+      imageRemoteValidationRequired: remoteImageValidation,
       imageInspection: imageReadiness.inspected.map((item) => ({ url: item.url, ok: item.ok, width: item.width || 0, height: item.height || 0, error: item.error || '' })),
       checks: ['tożsamość GTIN', 'kategoria katalogowa', 'parametry wymagane', 'GPSR', 'wymiary zdjęć', 'warunki sprzedaży', 'zgodność opisu'],
     },

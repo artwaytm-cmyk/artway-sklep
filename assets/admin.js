@@ -6844,7 +6844,12 @@ async function vonHalskySynchronizujKatalog(){
   try{const data=await chmura("von-halsky-sync-catalog",{method:"POST",body:{publish:true,batchSize:50,productIds},timeout:180000});vonHalskyStan.sync={...vonHalskyStan.sync,...(data.sync||{})};vonHalskyZaznaczone.clear();toast(`Nowe ${data.created||0} • aktualizacje ${data.updated||0} • zamknięte ${data.closed||0} • wznowione ${data.reopened||0} ✅`);await vonHalskyLaduj(true);}catch(error){toast("Synchronizacja Von Halsky: "+(error.message||error));await vonHalskyLaduj(true);}finally{vonHalskyStan.operation="";renderuj();}
 }
 function vonHalskyDiagnostykaHTML(){
-  const rows=Array.isArray(vonHalskyStan.diagnostics)?vonHalskyStan.diagnostics.slice(0,6):[];
+  const latestByOperation=new Map();
+  for(const row of Array.isArray(vonHalskyStan.diagnostics)?vonHalskyStan.diagnostics:[]){
+    const key=String(row.operation||"operacja-api");
+    if(!latestByOperation.has(key))latestByOperation.set(key,row);
+  }
+  const rows=[...latestByOperation.values()].slice(0,6);
   const action=String(trasa()).endsWith("/ustawienia")?`<button class="btn ghost" type="button" onclick="vonHalskyLaduj(true)">↻ Odśwież rejestr</button>`:`<a class="btn ghost" href="#/admin/von-halsky/ustawienia">Pełna konfiguracja</a>`;
   return `<section class="panel von-halsky-diagnostics"><div class="order-section-head"><div><span class="order-pro-label">Rejestr techniczny</span><h2>Ostatnie operacje API</h2></div>${action}</div><div class="von-halsky-diagnostic-list">${rows.map(row=>`<article class="${row.status==="ok"?"ok":"error"}"><span>${row.status==="ok"?"✓":"!"}</span><div><b>${esc(row.operation||"operacja API")}</b><small>${esc(row.message||"")}</small></div><time>${esc(allegroDataTxt(row.at))}</time></article>`).join("")||`<div class="admin-empty-state compact"><span>🧪</span><div><b>Brak wykonanych testów API</b><small>Pierwszy prawdziwy wynik pojawi się po sprawdzeniu połączenia.</small></div></div>`}</div></section>`;
 }

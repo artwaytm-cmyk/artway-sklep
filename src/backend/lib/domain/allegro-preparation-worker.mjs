@@ -6,6 +6,7 @@ import {
 } from './agent-specialists-support.mjs';
 import { enrichAllegroProductEvidence } from './allegro-parameter-enrichment.mjs';
 import {
+  ALLEGRO_PREPARATION_VERSION,
   allegroAutomaticPreparationDisposition,
   allegroPreparationAttemptDisposition,
   allegroPreparationRetryState,
@@ -462,7 +463,7 @@ export function createAllegroPreparationWorker({
       allegroAgentComplianceCheckedAt: compliance.compliance.checkedAt || completedAt,
       allegroAgentPreparationError: editorialWarnings.length ? editorialWarnings.join('; ').slice(0, 2000) : '',
       allegroAgentPreparationFingerprint: preparationFingerprint(fingerprintProduct),
-      allegroAgentPreparationVersion: 5,
+      allegroAgentPreparationVersion: ALLEGRO_PREPARATION_VERSION,
       allegroAgentPreparationRunId: task.id,
       allegroAgentPreparationConfirmedAt: ready ? completedAt : '',
       allegroAgentPreparationRetryCount: retry.retryCount,

@@ -78,11 +78,20 @@ export function createAllegroImagePublicationService({
     const readiness = await inspect(urls, { fetcher, limit: 16, minLongEdge: 500, maxLongEdge: 2560 });
     const published = [], errors = [];
     for (const item of readiness.inspected) {
-      if (!item.ok || Math.max(Number(item.width) || 0, Number(item.height) || 0) < 300) {
-        errors.push({ url: item.url, error: item.error || 'zdjęcie jest zbyt małe' });
-        continue;
-      }
       try {
+        // Gdy CDN producenta nie odpowiada z VPS-a, Allegro nadal może pobrać
+        // ten sam publiczny URL we własnej usłudze obrazów. Ostatecznym
+        // potwierdzeniem jest wtedy odpowiedź /sale/images, nie lokalny timeout.
+        if (!item.ok) {
+          const uploaded = await uploadByUrl(req, item.url);
+          const location = text(uploaded?.location || uploaded?.url || uploaded, 1000);
+          if (!location) throw new Error('Allegro nie zwróciło adresu zapisanego zdjęcia.');
+          published.push({ sourceUrl: item.url, location, adapted: false, remotelyValidated: true, width: 0, height: 0 });
+          continue;
+        }
+        if (Math.max(Number(item.width) || 0, Number(item.height) || 0) < 300) {
+          throw new Error('zdjęcie jest zbyt małe');
+        }
         const direct = readiness.valid.some((candidate) => candidate.url === item.url);
         const uploaded = direct
           ? await uploadByUrl(req, item.url)

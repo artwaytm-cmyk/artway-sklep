@@ -80,7 +80,7 @@ export async function checkAllegroImageReadiness(urls = [], {
   limit = 16,
 } = {}) {
   const selected = [...new Set((Array.isArray(urls) ? urls : []).map((url) => text(url)).filter(Boolean))].slice(0, Math.max(1, limit));
-  if (!selected.length) return { ready: false, adaptable: [], valid: [], inspected: [], minLongEdge, maxLongEdge, reason: 'brak zdjęć' };
+  if (!selected.length) return { ready: false, adaptable: [], remote: [], valid: [], inspected: [], minLongEdge, maxLongEdge, reason: 'brak zdjęć' };
   const inspected = await Promise.all(selected.map((url) => inspectImage(url, fetcher, now)));
   const allowedFormats = new Set(['jpeg', 'png', 'gif']);
   const valid = inspected.filter((item) => {
@@ -91,15 +91,19 @@ export async function checkAllegroImageReadiness(urls = [], {
     const edge = Math.max(Number(item.width) || 0, Number(item.height) || 0);
     return item.ok && !valid.includes(item) && edge >= minAdaptableLongEdge;
   });
+  const remote = inspected.filter((item) => !item.ok && /^https?:\/\//i.test(item.url));
   return {
     ready: valid.length > 0,
     valid,
     adaptable,
+    remote,
     inspected,
     minLongEdge,
     maxLongEdge,
     reason: valid.length ? '' : adaptable.length
       ? 'zdjęcie wymaga technicznego dopasowania przed wysłaniem do Allegro'
+      : remote.length
+        ? 'wymiary zostaną potwierdzone przez usługę obrazów Allegro'
       : `żadne zdjęcie nie spełnia zakresu ${minLongEdge}–${maxLongEdge}px`,
   };
 }

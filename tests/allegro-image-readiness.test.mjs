@@ -37,3 +37,11 @@ test('obraz 400 px jest kwalifikowany do bezpiecznego dopasowania przed wysłani
   assert.equal(result.adaptable.length, 1);
   assert.match(result.reason, /dopasowania/i);
 });
+
+test('chwilowo nieosiągalny publiczny obraz przechodzi do końcowej walidacji Allegro', async () => {
+  const fetcher = async () => { throw new Error('timeout CDN producenta'); };
+  const result = await checkAllegroImageReadiness(['https://producer.test/game.jpg'], { fetcher, now: 4 });
+  assert.equal(result.ready, false);
+  assert.equal(result.remote.length, 1);
+  assert.match(result.reason, /Allegro/i);
+});

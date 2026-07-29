@@ -1,4 +1,4 @@
-export const VON_HALSKY_AGENT_RULES_VERSION = '2026-07-29.2';
+export const VON_HALSKY_AGENT_RULES_VERSION = '2026-07-29.3';
 
 const PUBLIC_GUIDE = 'https://inpost.pl/aktualnosci-inpost-von-halsky-jak-stworzyc-dobra-oferte';
 
@@ -49,6 +49,7 @@ function categoryIntent(product = {}) {
     && !/\b(?:gra na pc|gry na pc|xbox|playstation|nintendo|rpg)\b/.test(corpus);
   const balloon = /\b(?:balon|balony|foliow|lateksow|hel)\w*\b/.test(corpus);
   const creative = /\b(?:origami|malowan|plastycz|kreatywn|piaskow)\w*\b/.test(corpus);
+  const multiGame = /\b(?:\d+\s+gier|zestaw gier|kolekcja gier)\b/.test(corpus);
   const subtype = boardGame
     ? /\b(?:familijn|rodzinn)\w*\b/.test(corpus) ? 'family'
       : /\b(?:edukacyjn|logicz)\w*\b/.test(corpus) ? 'educational'
@@ -56,7 +57,7 @@ function categoryIntent(product = {}) {
           : /\b(?:slow|slown|liter|liczb)\w*\b/.test(corpus) ? 'word_number'
             : 'generic'
     : '';
-  return { corpus, boardGame, balloon, creative, subtype };
+  return { corpus, boardGame, balloon, creative, multiGame, subtype };
 }
 
 function categoryIntentScore(intent = {}, path = '') {
@@ -72,6 +73,10 @@ function categoryIntentScore(intent = {}, path = '') {
       evidence.push('rozpoznano produkt jako grę planszową');
     } else if (wrongDigital || wrongAccessory || !/\bkultura i rozrywka gry\b/.test(normalizedPath)) {
       score -= 0.75;
+    }
+    if (intent.multiGame && /\bgry tradycyjne (?:domino|chinczyk|warcaby|szachy)\b/.test(normalizedPath)) {
+      score -= 0.32;
+      evidence.push('zestaw wielu gier nie jest pojedynczą grą tradycyjną');
     }
     const subtypeRules = {
       family: [/\bplanszowe rodzinne\b/, 0.34, 'rodzinna/familijna → Planszowe › Rodzinne'],

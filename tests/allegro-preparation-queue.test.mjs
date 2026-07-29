@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
+  ALLEGRO_PREPARATION_VERSION,
   allegroAutomaticPreparationDisposition,
   allegroPreparationAttemptDisposition,
   allegroPreparationRetryState,
@@ -229,6 +230,20 @@ test('automatyczna kolejka najpierw wybiera braki, potem nowe produkty, a gotowe
     'nieprzygotowany',
     'weryfikacja_okresowa',
   ]);
+});
+
+test('stara decyzja jest automatycznie ponawiana dokładnie po wdrożeniu nowszej wersji naprawy', () => {
+  const base = {
+    id: 'decision',
+    allegroAgentPreparationStatus: 'decision_required',
+    allegroAgentPreparedAt: '2026-07-27T07:00:00.000Z',
+  };
+  const selected = selectAllegroPreparationCandidates([
+    { ...base, allegroAgentPreparationVersion: ALLEGRO_PREPARATION_VERSION - 1 },
+    { ...base, id: 'current', allegroAgentPreparationVersion: ALLEGRO_PREPARATION_VERSION },
+  ], { now: new Date('2026-07-29T08:00:00.000Z') });
+  assert.deepEqual(selected.map((item) => item.id), ['decision']);
+  assert.equal(selected[0].reason, 'nowa_wersja_automatycznej_naprawy');
 });
 
 test('aktywna powiązana oferta trafia tylko do lekkiej weryfikacji, a nie do ponownej redakcji', () => {

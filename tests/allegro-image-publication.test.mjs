@@ -61,3 +61,20 @@ test('zdjęcie 400 px jest proporcjonalnie dopasowane do minimum 500 px i wysył
   assert.equal(result.published[0].adapted, true);
   assert.deepEqual(uploadedDimensions, { width: 500, height: 375, format: 'jpeg' });
 });
+
+test('timeout CDN na VPS-ie przekazuje oficjalny URL do walidacji usługi obrazów Allegro', async () => {
+  const service = createAllegroImagePublicationService({
+    inspect: async () => ({
+      valid: [],
+      inspected: [{ url: 'https://producer.test/game.jpg', ok: false, error: 'timeout' }],
+    }),
+    uploadByUrl: async (_req, url) => {
+      assert.equal(url, 'https://producer.test/game.jpg');
+      return { location: 'https://a.allegroimg.com/original/remote-validated' };
+    },
+    uploadBinary: async () => assert.fail('bez odczytu obrazu nie wykonujemy lokalnej konwersji'),
+  });
+  const result = await service({}, ['https://producer.test/game.jpg']);
+  assert.equal(result.ready, true);
+  assert.equal(result.published[0].remotelyValidated, true);
+});

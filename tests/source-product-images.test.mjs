@@ -59,3 +59,30 @@ test('aktualizacja z linku nadpisuje zdjęcie nawet gdy kartoteka miała wcześn
   assert.equal(refreshed.zdjecie, 'https://cdn.example.pl/1188-main.jpg');
   assert.deepEqual(refreshed.zdjecia, ['https://cdn.example.pl/1188-side.jpg']);
 });
+
+test('potwierdzona galeria tej samej domeny nie znika po chwilowym reader-fallback bez zdjęć', () => {
+  const retained = verifiedSourceImages({
+    ...product,
+    zdjecie: 'https://hurtownia.example.pl/media/1188-main.jpg',
+    zdjecia: ['https://hurtownia.example.pl/media/1188-side.jpg'],
+    sourceEvidence: {
+      imagePolicyVersion: 2,
+      imageSourceType: 'product_source_page',
+      imageSourceUrl: sourceUrl,
+      imageUrls: [],
+    },
+  });
+  assert.deepEqual(retained, [
+    'https://hurtownia.example.pl/media/1188-main.jpg',
+    'https://hurtownia.example.pl/media/1188-side.jpg',
+  ]);
+});
+
+test('starsze zdjęcie IdoSell jest odzyskiwane tylko gdy numer strony produktu zgadza się ze ścieżką obrazu', () => {
+  const legacy = {
+    sourceUrl: 'https://shop.example.pl/product-pol-438-Gra.html',
+    zdjecie: 'https://www.shop.example.pl/media/pol_pm_Gra-438_1.jpg',
+  };
+  assert.deepEqual(verifiedSourceImages(legacy), [legacy.zdjecie]);
+  assert.deepEqual(verifiedSourceImages({ ...legacy, zdjecie: 'https://www.shop.example.pl/media/Kajak-999_1.jpg' }), []);
+});

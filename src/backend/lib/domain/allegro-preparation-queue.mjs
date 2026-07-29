@@ -6,6 +6,7 @@ const MAX_PENDING = 2000;
 const MAX_RESULTS = 1000;
 const MAX_ATTEMPTS = 10;
 const MAX_AUTOMATIC_REMEDIATION_ATTEMPTS = 3;
+export const ALLEGRO_PREPARATION_VERSION = 6;
 const AUTO_RETRY_INTERVALS = Object.freeze([
   15_000,
   60_000,
@@ -249,14 +250,18 @@ export function selectAllegroPreparationCandidates(products = [], {
       parsedDate(product?.sourceRefreshedAt),
     );
     const nextRetryAt = parsedDate(product?.allegroAgentPreparationNextRetryAt);
-    const retryDue = preparationVersion < 5 || !nextRetryAt || nextRetryAt <= timestamp || sourceChangedAt > preparedAt;
+    const implementationChanged = preparationVersion < ALLEGRO_PREPARATION_VERSION;
+    const retryDue = implementationChanged || !nextRetryAt || nextRetryAt <= timestamp || sourceChangedAt > preparedAt;
     const current = typeof preparationCurrent === 'function'
       ? preparationCurrent(product)
       : ['ready', 'published'].includes(status) && !asArray(product?.allegroAgentPreparationMissing).length;
 
     let priority = 0, reason = '';
     if (status === 'decision_required') {
-      if (sourceChangedAt > preparedAt) {
+      if (implementationChanged) {
+        priority = 380 + salePriority(product);
+        reason = 'nowa_wersja_automatycznej_naprawy';
+      } else if (sourceChangedAt > preparedAt) {
         priority = 340 + salePriority(product);
         reason = 'nowe_dane_po_decyzji';
       }
