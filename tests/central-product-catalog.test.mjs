@@ -137,7 +137,7 @@ test('pojedyncza cena aktualizuje centralną kartotekę bez pełnej synchronizac
   const client = {
     query: async (sql, params = []) => {
       calls.push({ sql, params });
-      if (sql.startsWith('SELECT data')) return { rowCount: 1, rows: [current] };
+      if (sql.includes('SELECT data,public_data,authoritative_fields')) return { rowCount: 1, rows: [current] };
       return { rowCount: 1, rows: [] };
     },
     release() {},
@@ -156,6 +156,38 @@ test('pojedyncza cena aktualizuje centralną kartotekę bez pełnej synchronizac
   assert.ok(calls.some((entry) => entry.sql.startsWith('UPDATE artway_product_catalog_meta')));
 });
 
+test('ponowienie tego samego mutationId nie tworzy niewidocznej zmiany produktu', async () => {
+  const calls = [], current = {
+    data: { id: '17', nazwa: 'Wersja potwierdzona', cena: 20 },
+    public_data: { id: '17', nazwa: 'Wersja potwierdzona', cena: 20 },
+    authoritative_fields: ['nazwa'],
+    mutation_exists: true,
+  };
+  const client = {
+    query: async (sql) => {
+      calls.push(sql);
+      if (sql.includes('SELECT data,public_data,authoritative_fields')) {
+        return { rowCount: 1, rows: [current] };
+      }
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const pool = { query: async () => ({ rowCount: 0, rows: [] }), connect: async () => client };
+  const catalog = createCentralProductCatalog({ pool, namespace: 'test' });
+  const result = await catalog.patchProductFields(
+    '17',
+    { nazwa: 'Niewidoczna druga wersja' },
+    [],
+    { mutationId: 'agent:17:run-1' },
+  );
+  assert.equal(result.updated, true);
+  assert.equal(result.idempotent, true);
+  assert.equal(result.product.nazwa, 'Wersja potwierdzona');
+  assert.equal(calls.some((sql) => sql.startsWith('UPDATE artway_products SET')), false);
+  assert.equal(calls.some((sql) => sql.includes('INSERT INTO artway_product_mutations')), false);
+});
+
 test('wynik publikacji Allegro aktualizuje dane i indeks kanału w centralnej kartotece', async () => {
   const calls = [], current = {
     data: {
@@ -169,7 +201,7 @@ test('wynik publikacji Allegro aktualizuje dane i indeks kanału w centralnej ka
   const client = {
     query: async (sql, params = []) => {
       calls.push({ sql, params });
-      if (sql.startsWith('SELECT data')) return { rowCount: 1, rows: [current] };
+      if (sql.includes('SELECT data,public_data,authoritative_fields')) return { rowCount: 1, rows: [current] };
       return { rowCount: 1, rows: [] };
     },
     release() {},

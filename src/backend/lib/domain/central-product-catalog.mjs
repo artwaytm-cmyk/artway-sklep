@@ -835,9 +835,36 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const current = await client.query('SELECT data,public_data,authoritative_fields FROM artway_products WHERE namespace=$1 AND product_id=$2 AND record_status<>$3 FOR UPDATE', [ns, productId, 'removed']);
+      const durableMutationId = text(mutationId || safeFields.lastAdminMutationId || `catalog:${productId}:${Date.now().toString(36)}`, 200);
+      const current = await client.query(`
+        SELECT data,public_data,authoritative_fields,
+          EXISTS(
+            SELECT 1 FROM artway_product_mutations
+            WHERE namespace=$1 AND mutation_id=$4
+          ) mutation_exists
+        FROM artway_products
+        WHERE namespace=$1 AND product_id=$2 AND record_status<>$3
+        FOR UPDATE
+      `, [ns, productId, 'removed', durableMutationId]);
       if (!current.rowCount) { await client.query('ROLLBACK'); return { available: true, updated: false, reason: 'not_found' }; }
       const currentData = asObject(current.rows[0].data);
+      if (current.rows[0].mutation_exists === true) {
+        // Idempotencja musi być rozstrzygnięta przed UPDATE. Dawniej powtórka
+        // z tym samym mutationId zmieniała produkt, a ON CONFLICT pomijał
+        // jedynie wpis dziennika. Powstawała wtedy niewidoczna zmiana, której
+        // nie dało się odtworzyć ani wyjaśnić w audycie.
+        await client.query('COMMIT');
+        return {
+          available: true,
+          updated: true,
+          idempotent: true,
+          productId,
+          mutationId: durableMutationId,
+          authoritativeFields: asArray(current.rows[0].authoritative_fields),
+          sourceRevision: text(sourceRevision, 300),
+          product: currentData,
+        };
+      }
       const fieldConflicts = Object.entries(asObject(expectedFields)).filter(([field, expectation]) => {
         const rule = asObject(expectation), present = own(currentData, field);
         return present !== (rule.present === true)
@@ -908,7 +935,6 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
         name, searchText, category, producer, externalId, sku, ean, hasSource, !!allegroOfferId, allegroStatus,
         price, allegroPrice, promotion, newProduct, JSON.stringify(missing), missingCount, fingerprint, JSON.stringify(authoritativeFields),
       ]);
-      const durableMutationId = text(mutationId || safeFields.lastAdminMutationId || `catalog:${productId}:${Date.now().toString(36)}`, 200);
       await client.query(`
         INSERT INTO artway_product_mutations(namespace,mutation_id,product_id,area,actor,fields,remove_fields,before_fingerprint,after_fingerprint,status,created_at)
         VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,'applied',NOW())

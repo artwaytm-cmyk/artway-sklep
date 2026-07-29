@@ -506,7 +506,10 @@ export function createAllegroPreparationWorker({
           }
         : null,
     });
-    const mutationId = `allegro-preparation:${productId}:${task.id}`;
+    // task.id pozostaje ten sam podczas automatycznych ponowień. Numer próby
+    // rozdziela faktycznie różne wyniki, a jednocześnie zachowuje
+    // idempotencję ponownego wysłania dokładnie tej samej próby.
+    const mutationId = `allegro-preparation:${productId}:${task.id}:attempt-${Math.max(1, Number(task.attempt) || 1)}`;
     await progress({
       productName,
       phase: 'zapis',
