@@ -60,6 +60,7 @@ import { createInventoryDecisionService } from './domain/inventory-decisions.mjs
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { createAgentRuntime } from './domain/agent-runtime.mjs';
 import { createAgentEventSystem } from './domain/agent-event-system.mjs';
+import { createAgentProductReport } from './domain/agent-product-report.mjs';
 import { createAgentRuntimeRoute } from './agent-runtime-route.mjs';
 import { createAgentSpecialists } from './domain/agent-specialists.mjs';
 import { createAllegroPreparationRoute } from './allegro-preparation-route.mjs';
@@ -307,6 +308,7 @@ const inpostServiceShipmentRoute = createInpostServiceShipmentRoute({
   labelReady: inpostEtykietaGotowa, offerId: inpostOfertaId, infaktPublicConfig, infaktCall: infaktWywolaj, infaktReference: infaktRef,
 });
 const agentRuntime = createAgentRuntime({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const agentProductReport = createAgentProductReport({ pool: postgresPool, namespace: STORE_NAME });
 const agentEvents = createAgentEventSystem({
   pool: postgresPool,
   namespace: STORE_NAME,
@@ -506,6 +508,7 @@ const agentRuntimeRoute = createAgentRuntimeRoute({
   queue: codexAgentQueue,
   events: agentEventQueue,
   runtime: agentRuntime,
+  productReport: agentProductReport,
   isAdmin: czyAdmin,
   respond: odpowiedz,
   sessionOf: requestSession,

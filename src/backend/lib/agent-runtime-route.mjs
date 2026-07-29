@@ -7,12 +7,14 @@ const ACTIONS = new Set([
   'codex-agent-result',
   'agent-runtime-status',
   'agent-runtime-report',
+  'agent-product-report',
 ]);
 
 export function createAgentRuntimeRoute({
   queue,
   events = null,
   runtime,
+  productReport = null,
   isAdmin,
   respond,
   sessionOf,
@@ -40,6 +42,12 @@ export function createAgentRuntimeRoute({
           automationMode: 'event_driven',
         },
       });
+    }
+    if (action === 'agent-product-report') {
+      const report = productReport && typeof productReport.query === 'function'
+        ? await productReport.query(Object.fromEntries(url.searchParams.entries()))
+        : { available: false, summary: {}, items: [], total: 0, revision: '' };
+      return respond({ ok: true, report });
     }
     if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
     const body = await req.json().catch(() => ({}));

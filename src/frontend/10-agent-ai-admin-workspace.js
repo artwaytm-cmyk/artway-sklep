@@ -25,27 +25,72 @@ function agentAIPamiecPanelHTML(){
   const memory=(agentAIPamiec||[]).slice(0,100);
   return `<section class="panel agent-memory-page"><div class="order-section-head"><div><span class="order-pro-label">Procedury trwałe</span><h2>🧠 Pamięć Agenta</h2><p class="order-detail-lead">Każda reguła synchronizuje się między urządzeniami. Agent stosuje ją jako podpowiedź, ale działania zewnętrzne nadal wymagają zatwierdzenia.</p></div><a class="btn" href="#/admin/agent-ai/komendy" onclick="setTimeout(()=>agentAIWstawKomende('zapamiętaj: '),80)">＋ Naucz Agenta</a></div><div class="orders-stat-grid"><div class="order-stat-card"><span>🧠</span><b>${memory.length}</b><small>zapisanych procedur</small></div><div class="order-stat-card money"><span>☁️</span><b>${chmuraStan.admin?"TAK":"NIE"}</b><small>synchronizacja wspólna</small></div></div>${memory.length?`<div class="agent-memory-list">${memory.map(x=>`<article class="agent-memory-item"><div><b>${esc(x.wyzwalacz||"Procedura")}</b><p>${esc(x.akcja||x.tresc)}</p><small>${esc(x.dataTxt||"")} • ${esc(x.operator||"")}</small></div><button class="btn danger" type="button" onclick="agentAIUsunPamiec(${jsArg(x.id)})">Usuń</button></article>`).join("")}</div>`:`<div class="agent-ops-empty">Nie ma jeszcze zapisanych procedur. Przejdź do Komend i wpisz „zapamiętaj: …”.</div>`}</section>`;
 }
+function agentAIProductReportParams(){
+  const f=agentAIProductReportFilters||{};
+  return {
+    channel:f.channel||"all",status:f.status||"all",listing:f.listing||"all",
+    query:String(f.query||"").trim(),page:Number(f.page)||1,limit:Number(f.limit)||50
+  };
+}
+function agentAIProductReportUpdateDom(){
+  const box=$("agentAIProductReportPanel");if(!box||typeof agentAIProductReportHTML!=="function")return;
+  const focused=document.activeElement,restore=focused?.id==="agentAIProductReportSearch",start=restore?focused.selectionStart:null,end=restore?focused.selectionEnd:null;
+  box.innerHTML=agentAIProductReportHTML();
+  if(restore){const input=$("agentAIProductReportSearch");if(input){input.focus({preventScroll:true});if(Number.isInteger(start))input.setSelectionRange(start,end);}}
+}
+async function agentAIProductReportPobierz(silent=true){
+  const requestId=Number(agentAIProductReport.requestId||0)+1,params=agentAIProductReportParams();
+  agentAIProductReport={...agentAIProductReport,loading:true,error:"",requestId};
+  if(!silent)agentAIProductReportUpdateDom();
+  try{
+    const data=await chmura("agent-product-report",{params,timeout:20000});
+    if(requestId!==agentAIProductReport.requestId)return agentAIProductReport.data;
+    agentAIProductReport={...agentAIProductReport,loading:false,loaded:true,error:"",data:data.report||null,updatedAt:Date.now(),requestId};
+  }catch(error){
+    if(requestId!==agentAIProductReport.requestId)return agentAIProductReport.data;
+    agentAIProductReport={...agentAIProductReport,loading:false,loaded:true,error:String(error?.message||error),updatedAt:Date.now(),requestId};
+  }
+  agentAIProductReportUpdateDom();
+  return agentAIProductReport.data;
+}
+function agentAIProductReportFiltr(field,value){
+  if(!["channel","status","listing","page","limit"].includes(field))return;
+  agentAIProductReportFilters={...agentAIProductReportFilters,[field]:field==="page"||field==="limit"?Number(value)||1:String(value||"all"),...(field==="page"?{}:{page:1})};
+  agentAIProductReportPobierz(false);
+}
+function agentAIProductReportSzukaj(input){
+  agentAIProductReportFilters={...agentAIProductReportFilters,query:String(input?.value||""),page:1};
+  clearTimeout(agentAIProductReport.searchTimer);
+  agentAIProductReport.searchTimer=setTimeout(()=>agentAIProductReportPobierz(true),350);
+}
+function agentAIProductReportWyczysc(){
+  agentAIProductReportFilters={channel:"all",status:"all",listing:"all",query:"",page:1,limit:Number(agentAIProductReportFilters?.limit)||50};
+  agentAIProductReportPobierz(false);
+}
 async function agentAIRuntimePobierz(silent=true){
   if(agentAIRuntime.loading)return agentAIRuntime.runtime;
   agentAIRuntime={...agentAIRuntime,loading:true,error:""};
   if(!silent){const box=$("agentAIRuntimePanel");if(box)box.innerHTML=agentAIRuntimePanelHTML();}
   try{
-    const [data,preparation]=await Promise.all([
+    const [data,preparation,productReport]=await Promise.all([
       chmura("agent-runtime-status",{timeout:20000}),
-      chmura("allegro-preparation-queue-status",{timeout:20000}).catch(()=>({queue:null}))
+      chmura("allegro-preparation-queue-status",{timeout:20000}).catch(()=>({queue:null})),
+      chmura("agent-product-report",{params:agentAIProductReportParams(),timeout:20000}).catch(()=>({report:null}))
     ]);
     agentAIRuntime={...agentAIRuntime,loading:false,loaded:true,error:"",runtime:data.runtime||null,preparationQueue:preparation.queue||null,updatedAt:Date.now()};
+    if(productReport.report)agentAIProductReport={...agentAIProductReport,loading:false,loaded:true,error:"",data:productReport.report,updatedAt:Date.now()};
   }catch(error){
     agentAIRuntime={...agentAIRuntime,loading:false,loaded:true,error:String(error?.message||error),updatedAt:Date.now()};
   }
   const box=$("agentAIRuntimePanel");
   if(box)box.innerHTML=agentAIRuntimePanelHTML();
+  agentAIProductReportUpdateDom();
   return agentAIRuntime.runtime;
 }
 function agentAIRuntimePolling(){
   if(agentAIRuntime.pollTimer)clearTimeout(agentAIRuntime.pollTimer);
   if(!String(location.hash||"").startsWith("#/admin/agent-ai")){agentAIRuntime.pollTimer=null;return;}
-  agentAIRuntime.pollTimer=setTimeout(async()=>{await agentAIRuntimePobierz(true);agentAIRuntimePolling();},15000);
+  agentAIRuntime.pollTimer=setTimeout(async()=>{await agentAIRuntimePobierz(true);agentAIRuntimePolling();},10000);
 }
 function agentAIRuntimeCzas(value=""){
   const time=Date.parse(value||"");

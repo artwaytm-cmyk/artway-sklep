@@ -31,7 +31,25 @@ async function mockAdminSession(page) {
       return;
     }
     if (action === 'agent-runtime-status') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, runtime: { running: false, queue: [], history: [] } }) });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, runtime: { state: 'ready', running: false, queue: { counts: {} }, eventQueue: { active: 0, queued: 0, running: 0, recent: [] }, history: [] } }) });
+      return;
+    }
+    if (action === 'agent-product-report') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        ok: true,
+        report: {
+          available: true, total: 1, page: 1, pages: 1, limit: 50, revision: new Date().toISOString(),
+          summary: { total: 1, working: 0, ready: 1, decision: 0, needs_data: 0, not_started: 0, store_prepared: 1, store_ready: 1, allegro_prepared: 1, allegro_ready: 1, von_prepared: 1, von_ready: 1, ready_to_list: 1, needs_update: 0 },
+          items: [{
+            productId: 'E2E-AGENT-1', name: 'Gra przygotowana przez Agenta', producer: 'MultiGra', ean: '5900000000999',
+            image: '/images/placeholder-product.svg', status: 'ready', saleAvailable: true, hasAllegro: false, updatedAt: new Date().toISOString(),
+            task: { status: 'completed', missing: [] },
+            store: { prepared: true, ready: true, updatedAt: new Date().toISOString(), savedFields: ['opisKrotki', 'opis'] },
+            allegro: { prepared: true, ready: true, updatedAt: new Date().toISOString(), savedFields: ['allegroTitle'], readyToList: true, needsUpdate: false },
+            vonHalsky: { prepared: true, ready: true, updatedAt: new Date().toISOString(), savedFields: ['vonHalskyDescription'] },
+          }],
+        },
+      }) });
       return;
     }
     if (action === 'agent-specialists-status') {
@@ -325,6 +343,25 @@ async function loginAdmin(page) {
   await page.getByRole('button', { name: 'Zaloguj się' }).click();
   await expect(page).toHaveURL(/#\/admin(?:\/|$)/, { timeout: 20_000 });
 }
+
+test('raport Agenta pokazuje trwałe zapisy trzech kanałów i działa bez przeładowania panelu', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  await page.goto('/#/admin/agent-ai/raport');
+  await expect(page.getByRole('heading', { name: 'Produkty i kanały' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Produkty obsłużone przez Agenta' })).toBeVisible();
+  await expect(page.getByText('Gra przygotowana przez Agenta')).toBeVisible();
+  await expect(page.getByText('Gotowy do wystawienia na Allegro')).toBeVisible();
+  await expect(page.locator('.agent-report-channel.ready')).toHaveCount(3);
+  await page.getByLabel('Kanał').selectOption('allegro');
+  await expect(page.getByText('Gra przygotowana przez Agenta')).toBeVisible();
+  await expect(page).toHaveURL(/#\/admin\/agent-ai\/raport$/);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('.agent-report-catalog')).toBeVisible();
+  const width = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth }));
+  expect(width.document).toBeLessThanOrEqual(width.viewport + 1);
+  assertRuntime();
+});
 
 test('administrator tworzy PZ i WZ jednym kliknięciem bez dublowania żądania', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
