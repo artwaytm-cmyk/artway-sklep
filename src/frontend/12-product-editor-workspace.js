@@ -69,6 +69,7 @@ function productEditorPokazWszystkiePola(button){
 }
 function productEditorPelnaKartotekaHTML(p={}){
   const profile=p.manufacturerProfile||{},lastFields=Array.isArray(p.lastAdminMutationFields)?p.lastAdminMutationFields:[],agentEntries=Object.entries(p).filter(([field,value])=>value!==undefined&&/(agent|editorial|allegro.*(?:status|missing|error|run|prepared|checked|confirmed)|vonHalsky.*(?:status|missing|error|run|prepared|checked|confirmed)|sourceEvidence|sourceMaterial|manufacturerProfile|gpsr)/i.test(field));
+  const agentHasIssue=agentEntries.some(([field,value])=>/error|missing/i.test(field)&&((Array.isArray(value)&&value.length)||(typeof value==="string"&&value.trim())||(value&&typeof value==="object"&&Object.keys(value).length)));
   const sections=[
     {label:"Tożsamość",ok:!!(p.gtin||p.ean||p.kodProducenta||p.mpn),detail:[p.gtin||p.ean,kodKanonicznyProduktu(p)].filter(Boolean).join(" • ")||"brak kodów"},
     {label:"Producent i GPSR",ok:!!profile.id,detail:profile.displayName||profile.legalName||"profil niedopasowany"},
@@ -79,8 +80,7 @@ function productEditorPelnaKartotekaHTML(p={}){
   ];
   return `<section class="product-editor-section product-central-record" id="product-editor-record"><header class="product-editor-section-head"><div><span>Jedno źródło prawdy</span><h2>Pełna kartoteka produktu</h2><p>Edytor został otwarty z pełnego rekordu serwera. Wszystkie moduły i kanały korzystają z tych samych danych.</p></div><div class="product-record-revision"><b>${esc(p._catalog?.revision||p.lastAdminMutationId||"rekord centralny")}</b><small>${p.lastAdminMutationAt?`ostatnia zmiana ${esc(allegroDataTxt(p.lastAdminMutationAt))}`:"brak daty ostatniej zmiany"}</small></div></header>
     <div class="product-record-completeness">${sections.map(section=>`<article class="${section.ok?"is-ready":"needs-work"}"><span>${section.ok?"✓":"!"}</span><div><b>${esc(section.label)}</b><small>${esc(section.detail)}</small></div></article>`).join("")}</div>
-    <div data-product-manufacturer-card>${productEditorProducentProfilHTML(profile,{confidence:p.manufacturerProfileConfidence})}</div>
-    <details class="product-record-agent-fields" ${agentEntries.some(([field])=>/error|missing/i.test(field))?"open":""}><summary>Dane i wyniki zapisane przez Agentów (${agentEntries.length})</summary><div>${agentEntries.map(([field,value])=>`<article><b>${esc(field)}</b><span>${esc(productEditorWartoscKartoteki(value))}</span></article>`).join("")||"<p>Agent nie zapisał jeszcze dodatkowych danych.</p>"}</div></details>
+    <details class="product-record-agent-fields" ${agentHasIssue?"open":""}><summary>Dane i wyniki zapisane przez Agentów (${agentEntries.length})</summary><div>${agentEntries.map(([field,value])=>`<article><b>${esc(field)}</b><span>${esc(productEditorWartoscKartoteki(value))}</span></article>`).join("")||"<p>Agent nie zapisał jeszcze dodatkowych danych.</p>"}</div></details>
     <details class="product-record-last-write"><summary>Ostatni potwierdzony zapis (${lastFields.length} pól)</summary><p>${lastFields.length?lastFields.map(field=>`<span>${esc(field)}</span>`).join(""):"Brak historii pól dla starszej kartoteki."}</p><small>Operacja: ${esc(p.lastAdminMutationArea||"—")} • wykonawca: ${esc(p.lastAdminMutationBy||"—")}</small></details>
     <details class="product-record-all-fields" data-product-all-fields><summary>Wszystkie informacje zapisane przy produkcie (${Object.keys(p).length} pól)</summary><button class="btn ghost" type="button" onclick="productEditorPokazWszystkiePola(this)">Pokaż pełny zapis techniczny</button><div class="product-record-all-fields-list" data-product-all-fields-list hidden></div></details>
   </section>`;
@@ -176,9 +176,35 @@ function productEditorDaneWspolnePanelHTML(p={}){
   const items=productEditorDaneWspolneDefinicja(p),required=items.filter(item=>item.required),done=required.filter(item=>item.value).length,producer=items.find(item=>item.label==="Producent")?.value||"brak producenta";
   return `<section class="product-shared-data-panel" id="product-editor-shared-data"><header><div><small>JEDEN REKORD DLA 3 KANAŁÓW</small><h3>Dane wspólne produktu</h3><p>Producent, identyfikatory, GPSR i zdjęcia nie są kopiowane do trzech formularzy. Każdy kanał odczytuje je z tej kartoteki.</p></div><strong>${done}/${required.length}</strong></header><div class="product-shared-data-grid">${items.map(item=>`<article class="${item.value?"is-ready":item.required?"is-missing":"is-optional"}"><span>${item.value?"✓":item.required?"!":"○"}</span><div><small>${esc(item.label)}</small><b>${esc(item.display||item.value||(item.required?"brak — wymagane":"opcjonalne"))}</b></div></article>`).join("")}</div><footer><span>Producent używany we wszystkich kanałach</span><b>${esc(producer)}</b><a href="#product-editor-source">Edytuj dane wspólne →</a></footer></section>`;
 }
+function productEditorHostZrodla(url=""){try{return new URL(String(url)).hostname.replace(/^www\./,"");}catch(error){return "źródło pomocnicze";}}
+function productEditorZrodlaPomocnicze(p={}){
+  const primary=String(p.sourceUrl||p.producentUrl||"").trim(),items=[],add=(entry,origin="agent")=>{const source=typeof entry==="string"?{url:entry}:entry||{},url=String(source.url||source.sourceUrl||"").trim();if(!/^https?:\/\//i.test(url)||url===primary||items.some(item=>item.url===url))return;items.push({url,label:String(source.label||productEditorHostZrodla(url)).trim().slice(0,160),origin:String(source.origin||origin).trim().slice(0,80),verifiedAt:String(source.verifiedAt||source.fetchedAt||"").trim().slice(0,80)});};
+  (Array.isArray(p.auxiliarySources)?p.auxiliarySources:[]).forEach(item=>add(item));
+  add({url:p.contentSourceUrl,label:"Źródło treści",origin:"agent",verifiedAt:p.contentVerifiedAt});
+  add({url:p.agentImportUrl,label:"Źródło importu",origin:"import",verifiedAt:p.agentImportAt});
+  add({url:p.sourceEvidence?.requestedUrl,label:"Adres przekazany do analizy",origin:"weryfikacja",verifiedAt:p.sourceEvidence?.fetchedAt});
+  add({url:p.sourceEvidence?.resolvedUrl,label:"Adres po przekierowaniu",origin:"weryfikacja",verifiedAt:p.sourceEvidence?.fetchedAt});
+  add({url:p.manufacturerProfile?.sourceUrl,label:"Oficjalny profil producenta",origin:"rejestr producentów",verifiedAt:p.manufacturerProfileResolvedAt});
+  return items.slice(0,12);
+}
+function productEditorZrodloPomocniczeWierszHTML(source={}){
+  return `<article class="product-aux-source-row"><span>⌁</span><div><label>Adres pomocniczy<input name="auxiliarySourceUrl" type="url" value="${esc(source.url||"")}" placeholder="https://…"></label><label>Opis źródła<input name="auxiliarySourceLabel" value="${esc(source.label||"")}" placeholder="np. karta produktu hurtowni"></label><input type="hidden" name="auxiliarySourceOrigin" value="${esc(source.origin||"administrator")}"><input type="hidden" name="auxiliarySourceVerifiedAt" value="${esc(source.verifiedAt||"")}"></div>${source.url?`<a class="btn ghost" href="${esc(source.url)}" target="_blank" rel="noopener">Otwórz ↗</a>`:""}<button class="product-aux-source-remove" type="button" title="Usuń źródło pomocnicze" onclick="this.closest('.product-aux-source-row').remove()">×</button></article>`;
+}
+function productEditorZrodlaPomocniczeHTML(p={}){
+  const items=productEditorZrodlaPomocnicze(p);
+  return `<section class="product-source-library"><header><div><small>BIBLIOTEKA ŹRÓDEŁ</small><h3>Źródła pomocnicze Agenta</h3><p>Materiały znalezione dodatkowo podczas analizy produktu. Nie zastępują zweryfikowanego źródła głównego.</p></div><button class="btn ghost" type="button" onclick="productEditorDodajZrodloPomocnicze(this)">＋ Dodaj źródło</button></header><div class="product-aux-source-list" data-product-aux-sources>${items.length?items.map(productEditorZrodloPomocniczeWierszHTML).join(""):`<div class="product-aux-source-empty">Agent nie znalazł jeszcze drugiego wiarygodnego źródła. Pojawi się tutaj automatycznie po weryfikacji.</div>`}</div></section>`;
+}
+function productEditorDodajZrodloPomocnicze(button){
+  const list=button?.closest?.(".product-source-library")?.querySelector?.("[data-product-aux-sources]");if(!list)return;
+  list.querySelector(".product-aux-source-empty")?.remove();list.insertAdjacentHTML("beforeend",productEditorZrodloPomocniczeWierszHTML({origin:"administrator"}));list.lastElementChild?.querySelector("input")?.focus();
+}
+function productEditorZrodlaPomocniczeZFormularza(formData,primaryUrl=""){
+  const urls=formData?.getAll?.("auxiliarySourceUrl")||[],labels=formData?.getAll?.("auxiliarySourceLabel")||[],origins=formData?.getAll?.("auxiliarySourceOrigin")||[],dates=formData?.getAll?.("auxiliarySourceVerifiedAt")||[],primary=String(primaryUrl||"").trim(),seen=new Set();
+  return urls.map((raw,index)=>{const url=String(raw||"").trim();if(!/^https?:\/\//i.test(url)||url===primary||seen.has(url))return null;seen.add(url);return {url,label:String(labels[index]||productEditorHostZrodla(url)).trim().slice(0,160),origin:String(origins[index]||"administrator").trim().slice(0,80),verifiedAt:String(dates[index]||new Date().toISOString()).trim().slice(0,80)};}).filter(Boolean).slice(0,12);
+}
 function productEditorKanalyPulpitHTML(p={}){
-  const channels=[["store","🏪","Sklep","#product-editor-store"],["allegro","🟠","Allegro","#product-editor-allegro"],["vonHalsky","🐕","Von Halsky","#product-editor-von-halsky"]];
-  return `<section class="product-editor-section product-channel-dashboard" id="product-editor-channels"><header class="product-editor-section-head"><div><span>Pełna kontrola sprzedaży</span><h2>Kanały produktu</h2><p>Każdy kanał ma osobny zapis, walidację i kolejkę publikacji. Jedna kartoteka wspólna zasila trzy niezależne prezentacje, a pola i podgląd kanału są pokazane wyłącznie w jego sekcji.</p></div></header>${productEditorDaneWspolnePanelHTML(p)}<div class="product-channel-dashboard-grid">${channels.map(([key,icon,label,href])=>{const d=productEditorKanalDefinicja(p,key);return `<a href="${href}" class="${d.percent===100?"is-ready":"needs-work"}"><span>${icon}</span><div><small>${label}</small><b>${d.percent}% kompletności</b><em>${d.missing.length?`${d.missing.length} elementów do uzupełnienia`:"gotowe do kontroli kanału"}</em></div><strong>${d.done}/${d.required}</strong></a>`;}).join("")}</div></section>`;
+  const channels=[["store","🏪","Sklep"],["allegro","🟠","Allegro"],["vonHalsky","🐕","Von Halsky"]];
+  return `<section class="product-editor-section product-channel-dashboard" id="product-editor-channels"><header class="product-editor-section-head"><div><span>Pełna kontrola sprzedaży</span><h2>Prezentacja w kanałach</h2><p>Wybierz kanał, nad którym pracujesz. Na ekranie pozostaje tylko jego formularz, kontrola kompletności i rzeczywisty podgląd klienta.</p></div><span class="product-channel-dashboard-hint">1 aktywny widok • 3 kanały</span></header>${productEditorDaneWspolnePanelHTML(p)}<div class="product-channel-dashboard-grid" role="tablist" aria-label="Kanał produktu">${channels.map(([key,icon,label])=>{const d=productEditorKanalDefinicja(p,key);return `<button type="button" role="tab" data-product-channel-tab="${key}" onclick="productEditorAktywujKanal('${key}',this)" class="${d.percent===100?"is-ready":"needs-work"}"><span>${icon}</span><div><small>${label}</small><b>${d.percent}% kompletności</b><em>${d.missing.length?`${d.missing.length} elementów do uzupełnienia`:"gotowe do kontroli kanału"}</em></div><strong>${d.done}/${d.required}</strong></button>`;}).join("")}</div></section>`;
 }
 function productEditorPodgladOpisHTML(value,empty="Opis pojawi się po uzupełnieniu treści."){
   const text=String(value||"").replace(/<br\s*\/?>/gi,"\n").replace(/<\/(?:p|div|li|h[1-6])>/gi,"\n").replace(/<[^>]+>/g," ").replace(/&nbsp;/gi," ").replace(/\r/g,"").trim();
@@ -219,11 +245,34 @@ function productEditorZaplanujPodglad(form){
   requestAnimationFrame(()=>{delete form.dataset.previewFrame;productEditorOdswiezPodglady(form);});
 }
 function productEditorPodgladyPodlacz(){
-  document.querySelectorAll("form.product-editor-form").forEach(form=>{if(form.dataset.previewBound)return;form.dataset.previewBound="1";form.addEventListener("input",()=>productEditorZaplanujPodglad(form),{passive:true});form.addEventListener("change",()=>productEditorZaplanujPodglad(form),{passive:true});});
+  document.querySelectorAll("form.product-editor-form").forEach(form=>{if(form.dataset.previewBound)return;form.dataset.previewBound="1";form.addEventListener("input",()=>productEditorZaplanujPodglad(form),{passive:true});form.addEventListener("change",()=>productEditorZaplanujPodglad(form),{passive:true});productEditorAktywujKanal(form.dataset.activeChannel||"store",null,{scroll:false});});
+}
+function productEditorPoczatkowyKanal(){
+  try{const value=sessionStorage.getItem("artway_product_editor_channel");return ["store","allegro","vonHalsky"].includes(value)?value:"store";}catch(error){return "store";}
+}
+function productEditorPrzejdzDoSekcji(id,button){
+  const form=button?.closest?.("form"),target=form?.querySelector?.(`#${id}`);if(!target)return;
+  form.querySelectorAll("[data-product-section-nav]").forEach(item=>item.classList.toggle("active",item===button));
+  target.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function productEditorAktywujKanal(channel,button=null,{scroll=true}={}){
+  const form=button?.closest?.("form")||document.querySelector("form.product-editor-form");if(!form||!["store","allegro","vonHalsky"].includes(channel))return false;
+  form.dataset.activeChannel=channel;
+  try{sessionStorage.setItem("artway_product_editor_channel",channel);}catch(error){}
+  form.querySelectorAll("[data-product-channel-tab]").forEach(item=>{const active=item.dataset.productChannelTab===channel;item.classList.toggle("active",active);item.setAttribute("aria-selected",String(active));});
+  form.querySelectorAll("[data-product-channel-nav]").forEach(item=>item.classList.toggle("active",item.dataset.productChannelNav===channel));
+  const target=form.querySelector(`.product-channel-section.${channel}`);if(target?.tagName==="DETAILS")target.open=true;
+  if(scroll&&target)requestAnimationFrame(()=>target.scrollIntoView({behavior:"smooth",block:"start"}));
+  return false;
 }
 function productEditorNaglowekHTML(p={},edycja=false){
-  const state=productEditorTrescStan(p),identity=[p.gtin||p.ean,kodKanonicznyProduktu(p),p.producent||p.marka].filter(Boolean).join(" • "),store=productEditorStatusKanalu(state.store.status),vh=productEditorStatusKanalu(state.vonHalsky.status),allegro=productEditorStatusKanalu(state.allegroContent.status);
-  return `<section class="product-editor-commandbar" aria-label="Nawigacja edytora produktu"><div class="product-editor-identity"><span>${edycja?`Produkt #${esc(p.id)}`:"Nowa kartoteka"}</span><b>${esc(p.nazwa||"Uzupełnij nazwę produktu")}</b><small>${esc(identity||"EAN, kod i producent nie są jeszcze kompletne")}</small></div><nav><a href="#product-editor-record">Kartoteka</a><a href="#product-editor-basics">Dane wspólne</a><a href="#product-editor-store">Sklep</a><a href="#product-editor-allegro">Allegro</a><a href="#product-editor-von-halsky">Von Halsky</a><a href="#product-editor-media">Media</a><a href="#product-editor-source">Źródło</a><a href="#product-editor-seo">SEO</a><a href="#product-editor-stock">Magazyn</a></nav><div class="product-editor-channel-state"><span class="${store[0]}">🏪 ${store[1]}</span><span class="${allegro[0]}">🟠 ${allegro[1]}</span><span class="${vh[0]}">🐕 ${vh[1]}</span></div></section>`;
+  const state=productEditorTrescStan(p),identity=[p.gtin||p.ean,kodKanonicznyProduktu(p)].filter(Boolean).join(" • "),store=productEditorStatusKanalu(state.store.status),vh=productEditorStatusKanalu(state.vonHalsky.status),allegro=productEditorStatusKanalu(state.allegroContent.status),image=p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="">`:`<span>${esc(p.ikona||"📦")}</span>`;
+  const sectionButton=(id,icon,label)=>`<button type="button" data-product-section-nav onclick="productEditorPrzejdzDoSekcji('${id}',this)"><i>${icon}</i><span>${label}</span></button>`;
+  return `<aside class="product-editor-commandbar" aria-label="Nawigacja edytora produktu"><header><div class="product-editor-sidebar-image">${image}</div><div class="product-editor-identity"><span>${edycja?`PRODUKT #${esc(p.id)}`:"NOWA KARTOTEKA"}</span><b>${esc(p.nazwa||"Uzupełnij nazwę produktu")}</b><small>${esc(identity||"EAN i kod do uzupełnienia")}</small></div></header><div class="product-editor-sidebar-save"><span><i></i><b>Rekord serwerowy</b><small>Zmiany zapiszą się jednym zatwierdzeniem</small></span><button type="button" onclick="this.closest('form').requestSubmit()">💾 Zapisz produkt</button></div><nav><small>PRODUKT</small>${sectionButton("product-editor-record","▦","Podsumowanie")}${sectionButton("product-editor-basics","✎","Dane podstawowe")}${sectionButton("product-editor-source","⌁","Producent i kody")}${sectionButton("product-editor-media","▧","Zdjęcia i warianty")}<small>KANAŁY SPRZEDAŻY</small><button type="button" data-product-channel-nav="store" onclick="productEditorAktywujKanal('store',this)"><i>🏪</i><span>Sklep</span><em class="${store[0]}">${store[1]}</em></button><button type="button" data-product-channel-nav="allegro" onclick="productEditorAktywujKanal('allegro',this)"><i>🟠</i><span>Allegro</span><em class="${allegro[0]}">${allegro[1]}</em></button><button type="button" data-product-channel-nav="vonHalsky" onclick="productEditorAktywujKanal('vonHalsky',this)"><i>🐕</i><span>Von Halsky</span><em class="${vh[0]}">${vh[1]}</em></button><small>OPERACJE</small>${sectionButton("product-editor-costs","◒","Koszty i marża")}${sectionButton("product-editor-seo","↗","SEO")}${sectionButton("product-editor-stock","▤","Magazyn")}</nav><footer><a href="#/admin/asortyment/produkty">← Wróć do katalogu</a></footer></aside>`;
+}
+function productEditorAutomatyzacjaHTML(p={},edycja=false){
+  const state=agentAIStanWdrozeniaProduktu(p),status=String(p.agentOnboardingStatus||""),open=!edycja||status==="processing"||state.done<state.total;
+  return `<details class="product-editor-automation" ${open?"open":""}><summary><span>🤖</span><div><small>AUTOMATYCZNA KONTROLA KARTOTEKI</small><b>Agent produktu</b><em>${state.done}/${state.total} podstawowych kontroli gotowych</em></div><strong>${open?"Zwiń":"Pokaż szczegóły"}</strong></summary>${agentAIWdrozenieProduktuHTML(p,edycja)}</details>`;
 }
 function productEditorTrescHTML(p={}){
   const state=productEditorTrescStan(p);

@@ -12,7 +12,8 @@ test('edytor pokazuje niezależne pola sklepu, Allegro i Von Halsky', async () =
   assert.match(source, /name="vonHalskyTitle"/);
   assert.match(source, /name="vonHalskyShortDescription"/);
   assert.match(source, /name="vonHalskyDescription"/);
-  assert.match(source, /Każdy kanał ma osobny zapis, walidację i kolejkę publikacji/);
+  assert.match(source, /Na ekranie pozostaje tylko jego formularz, kontrola kompletności i rzeczywisty podgląd klienta/);
+  assert.match(source, /function productEditorAktywujKanal/);
   assert.match(source, /Kontakt ustawia się w profilu sklepu, nie w ofercie/);
 });
 test('ręczna zmiana sklepu nie nadpisuje opisów kanałowych', async () => {

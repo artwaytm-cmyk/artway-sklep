@@ -89,7 +89,7 @@ function centralCatalogListProduct(product = {}, catalogMeta = {}, { admin = fal
     'allegroAgentPreparationNextRetryAt',
   ];
   if (admin) fields.push(
-    'cenaZakupu',
+    'cenaZakupu', 'auxiliarySources',
     'manufacturerProfileId', 'manufacturerProfile', 'manufacturerProfileResolvedAt',
     'manufacturerProfileConfidence', 'manufacturerProfileMethod', 'manufacturerProfileEvidence',
     'vonHalskyCategoryId', 'vonHalskyAttributes', 'vonHalskyOfferId', 'vonHalskyCommandId',

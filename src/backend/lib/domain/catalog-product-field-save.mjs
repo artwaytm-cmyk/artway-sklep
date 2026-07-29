@@ -23,7 +23,7 @@ export const CATALOG_PRODUCT_PREPARATION_FIELDS = new Set([
   'manufacturerProfileId', 'manufacturerProfile', 'manufacturerProfileResolvedAt',
   'manufacturerProfileConfidence', 'manufacturerProfileMethod', 'manufacturerProfileEvidence',
   'externalId', 'sku', 'rozmiar', 'vatRate', 'badge', 'ikona', 'kolor',
-  'zdjecie', 'zdjecia', 'warianty', 'parametry', 'parameters',
+  'zdjecie', 'zdjecia', 'warianty', 'parametry', 'parameters', 'auxiliarySources',
   'aktywny', 'ukryty', 'sprzedazAktywna', 'saleAvailable',
   'profitabilityReviewed', 'profitabilityReviewedAt', 'profitabilityReviewedBy',
   'profitabilityReviewRevision', 'profitabilityReviewSignature', 'profitabilityReviewSnapshot',
@@ -122,6 +122,24 @@ export function sanitizeCatalogProductFields(fields = {}, { allowEmpty = false }
     throw error;
   }
   const clean = Object.fromEntries(entries.filter(([, value]) => value !== undefined));
+  if (Object.prototype.hasOwnProperty.call(clean, 'auxiliarySources')) {
+    const seen = new Set();
+    clean.auxiliarySources = (Array.isArray(clean.auxiliarySources) ? clean.auxiliarySources : [])
+      .map((source) => {
+        const item = source && typeof source === 'object' && !Array.isArray(source) ? source : {};
+        const url = String(item.url || '').trim().slice(0, 3000);
+        if (!/^https?:\/\//i.test(url) || seen.has(url)) return null;
+        seen.add(url);
+        return {
+          url,
+          label: String(item.label || '').trim().slice(0, 160),
+          origin: String(item.origin || 'agent').trim().slice(0, 80),
+          verifiedAt: String(item.verifiedAt || '').trim().slice(0, 80),
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 12);
+  }
   if (Buffer.byteLength(JSON.stringify(clean), 'utf8') > MAX_PAYLOAD_BYTES) {
     const error = new Error('Zmiana produktu jest zbyt duża.');
     error.status = 413;

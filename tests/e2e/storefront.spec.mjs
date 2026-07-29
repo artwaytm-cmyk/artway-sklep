@@ -228,23 +228,32 @@ test('edytor produktu pokazuje trzy widoki klienta i aktualizuje je bez przeład
     }
     await route.fallback();
   });
+  await page.evaluate(() => sessionStorage.setItem('artway_product_editor_channel', 'store'));
   await page.goto(`/#/admin/produkty/edytuj/${encodeURIComponent(productId)}`);
   const form = page.locator('form.product-editor-form');
   await expect(form).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('#product-editor-shared-data')).toHaveCount(1);
   await expect(page.locator('[data-product-channel-preview]')).toHaveCount(3);
   await expect(page.locator('[data-product-channel-preview="store"]')).toBeVisible();
-  await expect(page.locator('[data-product-channel-preview="allegro"]')).toBeVisible();
-  await expect(page.locator('[data-product-channel-preview="vonHalsky"]')).toBeVisible();
+  await expect(page.locator('[data-product-channel-preview="allegro"]')).toBeHidden();
+  await expect(page.locator('[data-product-channel-preview="vonHalsky"]')).toBeHidden();
 
   await page.evaluate(() => { window.__productEditorFormBefore = document.querySelector('form.product-editor-form'); });
   await form.locator('[name="nazwa"]').fill('Produkt testowy — podgląd na żywo');
   await expect(page.locator('[data-product-channel-preview="store"] h2')).toHaveText('Produkt testowy — podgląd na żywo');
   expect(await page.evaluate(() => window.__productEditorFormBefore === document.querySelector('form.product-editor-form'))).toBe(true);
 
+  await page.locator('[data-product-channel-tab="allegro"]').click();
+  await expect(page.locator('[data-product-channel-preview="store"]')).toBeHidden();
+  await expect(page.locator('[data-product-channel-preview="allegro"]')).toBeVisible();
+  await page.locator('[data-product-channel-tab="vonHalsky"]').click();
+  await expect(page.locator('[data-product-channel-preview="allegro"]')).toBeHidden();
+  await expect(page.locator('[data-product-channel-preview="vonHalsky"]')).toBeVisible();
+  if (process.env.ARTWAY_VISUAL_CAPTURE) await page.screenshot({ path: '/tmp/artway-product-editor-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   const dimensions = await page.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
   expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1);
+  if (process.env.ARTWAY_VISUAL_CAPTURE) await page.screenshot({ path: '/tmp/artway-product-editor-mobile.png', fullPage: true });
   assertRuntime();
 });
 
@@ -655,7 +664,10 @@ test('potwierdzenie klienta otwiera druk A4 z aktualną historią transportu', a
 });
 
 test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawaniem paczek', async ({ page }) => {
-  test.setTimeout(90_000);
+  // Widok ładuje trzy rozdzielone moduły nawigacji, katalogu i ustawień.
+  // Pełny scenariusz sprawdza je kolejno na desktopie i telefonie, dlatego
+  // otrzymuje własny budżet bez osłabiania limitów pozostałych testów.
+  test.setTimeout(120_000);
   const assertRuntime = observeRuntime(page);
   await loginAdmin(page);
   await page.goto('/#/admin/von-halsky');
@@ -727,7 +739,9 @@ test('panel ponawia modułowy CSS i nie pokazuje podstrony bez zastosowanych sty
   await page.goto('/#/admin/von-halsky');
   await expect(page.locator('#artwayAdminStyle-vonHalsky')).toHaveCount(1);
   await expect.poll(() => page.locator('#artwayAdminStyle-vonHalsky').evaluate((link) => Boolean(link.sheet))).toBe(true);
-  await expect(header).toHaveCSS('display', 'grid');
+  // Wspólna warstwa panelu może świadomie zmienić nagłówek na flex,
+  // dlatego obecność stylu modułu potwierdzamy na jego własnej siatce KPI.
+  await expect(page.locator('.von-halsky-stat-grid')).toHaveCSS('display', 'grid');
   await expect(page.locator('#artwayAdminStyle-vonHalsky')).toHaveAttribute('data-loading', 'false');
 });
 

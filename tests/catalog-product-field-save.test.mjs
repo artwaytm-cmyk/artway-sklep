@@ -89,10 +89,18 @@ test('pełny wynik przygotowania dopuszcza źródło, parametry, SEO i sygnatur�
     seoTitle: 'Gra edukacyjna',
     allegroAgentPreparationFingerprint: 'allegro-preparation-v3-a1b2c3d4',
     allegroAgentPreparationVersion: 3,
+    auxiliarySources: [
+      { url: 'https://supplier.test/product', label: 'Hurtownia', origin: 'agent', verifiedAt: '2026-07-29T10:00:00Z' },
+      { url: 'javascript:alert(1)', label: 'Błędne źródło' },
+      { url: 'https://supplier.test/product', label: 'Duplikat' },
+    ],
   });
   assert.equal(fields.sourceUrl, 'https://example.test/product');
   assert.equal(fields.parametryProducenta.wiek, '8+');
   assert.equal(fields.allegroAgentPreparationVersion, 3);
+  assert.deepEqual(fields.auxiliarySources, [
+    { url: 'https://supplier.test/product', label: 'Hurtownia', origin: 'agent', verifiedAt: '2026-07-29T10:00:00Z' },
+  ]);
 });
 
 test('rozbieżny odczyt nie może zostać zgłoszony jako udany zapis', async () => {

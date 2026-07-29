@@ -61,13 +61,14 @@ test('KSeF łączy GTIN z dodatkowego opisu z właściwym wierszem faktury', () 
   assert.equal(row.ean, '5901234123457');
 });
 
-test('cena zakupu i jej historia nie trafiają do publicznego katalogu', () => {
+test('cena zakupu, jej historia i pomocnicze źródła Agenta nie trafiają do publicznego katalogu', () => {
   const result = ustawieniaPubliczneBezDanychPrywatnych({
-    artway_produkty_dodane: [{ id: '1', nazwa: 'Gra', cena: 50, cenaZakupu: 20, cenaZakupuHistoria: [{ price: 20 }] }],
+    artway_produkty_dodane: [{ id: '1', nazwa: 'Gra', cena: 50, cenaZakupu: 20, cenaZakupuHistoria: [{ price: 20 }], auxiliarySources: [{ url: 'https://supplier.test/product' }] }],
   });
   assert.equal(result.artway_produkty_dodane[0].cena, 50);
   assert.equal('cenaZakupu' in result.artway_produkty_dodane[0], false);
   assert.equal('cenaZakupuHistoria' in result.artway_produkty_dodane[0], false);
+  assert.equal('auxiliarySources' in result.artway_produkty_dodane[0], false);
 });
 
 test('błędne dopasowanie faktury można cofnąć do dokładnej poprzedniej ceny', () => {

@@ -60,3 +60,10 @@ test("przygotowanie Von Halsky pokazuje rzeczywisty postęp i zapisuje produkty 
   assert.match(editor,/Zapisane w tej kartotece/);
   assert.match(editor,/vonHalskyAgentReadbackConfirmed/);
 });
+
+test("błąd API Von Halsky nie uruchamia nieskończonej pętli renderowania",async()=>{
+  const source=await read("src/frontend/11b-von-halsky-workspace.js");
+  assert.match(source,/catch\(error\)\{[\s\S]*?vonHalskyStan\.loaded=true;[\s\S]*?vonHalskyStan\.error=/);
+  assert.match(source,/if\(!vonHalskyStan\.loaded&&!vonHalskyStan\.loading\)setTimeout\(\(\)=>vonHalskyLaduj\(false\),0\)/);
+  assert.match(source,/onclick="vonHalskyLaduj\(true\)"/);
+});

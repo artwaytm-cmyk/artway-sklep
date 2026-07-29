@@ -33,6 +33,7 @@ export const PRYWATNE_POLA_PRODUKTU = Object.freeze([
   'sklepPriceTargetMargin',
   'allegroPriceTargetMargin',
   'sourceMaterial',
+  'auxiliarySources',
 ]);
 
 export const POLA_CENY_ZAKUPU = Object.freeze([

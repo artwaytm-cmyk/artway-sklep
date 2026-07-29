@@ -36,6 +36,44 @@ test('każdy kanał ma osobny podgląd klienta aktualizowany bez przeładowania 
   assert.match(styles, /@media\(max-width:620px\)/);
 });
 
+test('pełny edytor ma stałą nawigację roboczą i pokazuje jeden aktywny kanał zamiast trzech formularzy naraz', async () => {
+  const [editor, workspace, styles] = await Promise.all([
+    readFile('src/frontend/12-product-editor.js', 'utf8'),
+    readFile('src/frontend/12-product-editor-workspace.js', 'utf8'),
+    readFile('src/styles/32-product-editor-workspace.css', 'utf8'),
+  ]);
+  assert.match(editor, /data-active-channel=/);
+  assert.match(workspace, /class="product-editor-commandbar"/);
+  assert.match(workspace, /data-product-section-nav/);
+  assert.match(workspace, /data-product-channel-tab=/);
+  assert.match(workspace, /function productEditorAktywujKanal/);
+  assert.match(workspace, /sessionStorage\.setItem\("artway_product_editor_channel"/);
+  assert.match(workspace, /function productEditorAutomatyzacjaHTML/);
+  assert.doesNotMatch(workspace, /class="product-channel-dashboard-grid"[\s\S]{0,800}<a href="#product-editor-/);
+  assert.match(styles, /\.product-editor-form\{display:grid;grid-template-columns:264px minmax\(0,1fr\)/);
+  assert.match(styles, /data-active-channel="store"/);
+  assert.match(styles, /data-active-channel="allegro"/);
+  assert.match(styles, /data-active-channel="vonHalsky"/);
+});
+
+test('kartoteka przechowuje główne źródło osobno od pomocniczych linków znalezionych przez Agenta', async () => {
+  const [editor, workspace, saver, catalog] = await Promise.all([
+    readFile('src/frontend/12-product-editor.js', 'utf8'),
+    readFile('src/frontend/12-product-editor-workspace.js', 'utf8'),
+    readFile('src/backend/lib/domain/catalog-product-field-save.mjs', 'utf8'),
+    readFile('src/backend/lib/domain/central-product-catalog.mjs', 'utf8'),
+  ]);
+  assert.match(workspace, /function productEditorZrodlaPomocniczeHTML/);
+  assert.match(workspace, /function productEditorZrodlaPomocniczeZFormularza/);
+  assert.match(workspace, /name="auxiliarySourceUrl"/);
+  assert.match(workspace, /Źródła pomocnicze Agenta/);
+  assert.match(editor, /sameProduct=.*aEan/);
+  assert.match(editor, /auxiliarySources=productEditorZrodlaPomocnicze/);
+  assert.match(editor, /p\.auxiliarySources=auxiliarySources/);
+  assert.match(saver, /'auxiliarySources'/);
+  assert.match(catalog, /'cenaZakupu', 'auxiliarySources'/);
+});
+
 test('producent i inne dane wspólne nie są powielane w listach pól kanałów', async () => {
   const workspace = await readFile('src/frontend/12-product-editor-workspace.js', 'utf8');
   const definitionStart = workspace.indexOf('function productEditorKanalDefinicja');
