@@ -53,6 +53,9 @@ test('Service Worker nie zapisuje prywatnych danych ani odpowiedzi API',()=>{
 
 test('skaner jest małym oknem nad każdą podstroną i rozpoznaje kod automatycznie',()=>{
   assert.match(admin,/magazynGlobalnySkanerOtworz/);
+  assert.match(admin,/async function adminOtworzGlobalnySkaner/);
+  assert.match(admin,/await zaladujAdminModul\("warehouse",version\)/);
+  assert.doesNotMatch(admin,/pwaZamknijMenuAdmina\(\);magazynGlobalnySkanerOtworz\(\)/);
   assert.match(scanner,/magazynDokumentKameraDokumentyHTML/);
   assert.match(scanner,/magazynDokumentKameraPrzeciagaj/);
   assert.match(scanner,/getCapabilities\?\.\(\)\.torch/);

@@ -23,7 +23,7 @@ test('każda podstrona magazynu używa wspólnego kontekstu i stanu bazy', () =>
   for (const page of ['pulpit', 'dostawcy', 'stany', 'lokalizacje', 'etykiety-qr', 'plan', 'ruchy']) assert.match(context, new RegExp(`${page.replace('-', '\\-')}:|"${page}":`));
   assert.match(context, /warehouse-page-context/);
   assert.match(context, /Wspólna baza aktywna/);
-  assert.match(context, /magazynGlobalnySkanerOtworz/);
+  assert.match(context, /adminOtworzGlobalnySkaner/);
   assert.match(inventory, /class="warehouse-workspace"/);
 });
 
