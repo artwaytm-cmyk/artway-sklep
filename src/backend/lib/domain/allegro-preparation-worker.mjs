@@ -514,6 +514,13 @@ export function createAllegroPreparationWorker({
             createdAt: completedAt,
           }
         : null,
+      // Jawna flaga naprawy jest zdarzeniem jednorazowym. Po potwierdzonym
+      // odczycie kompletnego produktu musi zniknąć razem z technicznym błędem
+      // zgodności, inaczej selektor ponownie zleci tę samą ciężką redakcję.
+      ...(ready ? {
+        forceEditorialRefresh: false,
+        allegroComplianceError: '',
+      } : {}),
     });
     // task.id pozostaje ten sam podczas automatycznych ponowień. Numer próby
     // rozdziela faktycznie różne wyniki, a jednocześnie zachowuje

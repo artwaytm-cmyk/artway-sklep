@@ -348,7 +348,14 @@ test('serwerowy wykonawca zawsze dostaje pełny adres żądania, także bez otwa
 });
 
 test('wadliwy wynik jednego redaktora jest ponawiany przed oznaczeniem produktu jako wymagającego uwagi', async () => {
-  const product = { id: '17', nazwa: 'Gra rodzinna', opisKrotki: 'Opis', opis: 'Opis pełny' };
+  const product = {
+    id: '17',
+    nazwa: 'Gra rodzinna',
+    opisKrotki: 'Opis',
+    opis: 'Opis pełny',
+    forceEditorialRefresh: true,
+    allegroComplianceError: 'editorial_quality_gate_failed',
+  };
   let editorialCalls = 0, saved = null;
   const worker = createAllegroPreparationWorker({
     text: (value) => String(value ?? ''),
@@ -389,6 +396,8 @@ test('wadliwy wynik jednego redaktora jest ponawiany przed oznaczeniem produktu 
   assert.equal(result.ready, true);
   assert.equal(result.status, 'completed');
   assert.equal(saved.fields.allegroAgentPreparationStatus, 'ready');
+  assert.equal(saved.fields.forceEditorialRefresh, false);
+  assert.equal(saved.fields.allegroComplianceError, '');
   assert.equal(saved.fields.allegroPreparationManifest.version, 1);
   assert.equal(saved.fields.allegroPreparationManifest.operation, 'create');
   assert.equal(saved.fields.allegroPreparationManifest.descriptionSectionCount, 0);
