@@ -11,6 +11,7 @@ import {
 import { createVonHalskyApiClient } from './domain/von-halsky-api-client.mjs';
 import { buildEditorialPublicationPatch } from './domain/agent-product-editorial-state.mjs';
 import {
+  compileVonHalskyCategoryIndex,
   matchVonHalskyAttributes,
   suggestVonHalskyCategory,
   vonHalskyAgentPreparationPatch,
@@ -18,6 +19,23 @@ import {
 import { resolveVonHalskyResponsibleProducer } from './domain/von-halsky-responsible-producer.mjs';
 
 const STORE_KEY = 'inpost_von_halsky_channel';
+let cachedCategoryIndex = null;
+let cachedCategorySignature = '';
+
+function categoryIndexFor(categories = []) {
+  const rows = Array.isArray(categories) ? categories : [];
+  const signature = [
+    rows.length,
+    ...[0, Math.floor(rows.length / 3), Math.floor(rows.length * 2 / 3), rows.length - 1]
+      .filter((index) => index >= 0 && rows[index])
+      .map((index) => `${rows[index].id}:${rows[index].path}`),
+  ].join('|');
+  if (!cachedCategoryIndex || signature !== cachedCategorySignature) {
+    cachedCategoryIndex = compileVonHalskyCategoryIndex(rows);
+    cachedCategorySignature = signature;
+  }
+  return cachedCategoryIndex;
+}
 
 function initialState() {
   return {
@@ -327,8 +345,27 @@ export function createVonHalskyRoute({
       if (!productId || !/^[0-9a-f-]{36}$/i.test(categoryId)) return respond({ ok: false, error: 'Wybierz produkt i prawidłową kategorię Von Halsky.' }, 422);
       const state = cleanState((await readVersioned(STORE_KEY, initialState())).value);
       const category = state.categories.find((item) => item.id === categoryId);
+      if (state.categories.length && !category) return respond({ ok: false, error: 'Wybrana kategoria nie występuje w aktualnym drzewie Von Halsky. Odśwież katalog i wybierz ją ponownie.' }, 422);
       if (category && category.leaf !== true) return respond({ ok: false, error: 'Oferta musi być przypisana do kategorii końcowej.' }, 422);
-      const fields = { vonHalskyCategoryId: categoryId };
+      const timestamp = new Date().toISOString();
+      const fields = {
+        vonHalskyCategoryId: categoryId,
+        vonHalskyCategoryName: matchingText(category?.name, 240),
+        vonHalskyCategoryPath: matchingText(category?.path, 1000),
+        vonHalskyCategoryMatchedBy: 'admin',
+        vonHalskyCategoryMatchedAt: timestamp,
+        vonHalskyCategoryAcceptedAt: timestamp,
+        vonHalskyCategoryRejection: null,
+        vonHalskyCategoryResolution: {
+          categoryId,
+          name: matchingText(category?.name, 240),
+          path: matchingText(category?.path, 1000),
+          source: 'admin-current-api-tree',
+          confidence: 1,
+          evidence: ['Kategoria wybrana przez administratora z aktualnego drzewa API Von Halsky.'],
+          resolvedAt: timestamp,
+        },
+      };
       if (body.attributes && typeof body.attributes === 'object' && !Array.isArray(body.attributes)) fields.vonHalskyAttributes = body.attributes;
       await saveProductFields({
         productId,
@@ -418,6 +455,14 @@ export function createVonHalskyRoute({
       const loaded = await loadCatalog();
       const products = Array.isArray(loaded) ? loaded : [...(loaded?.values?.() || [])];
       const productById = new Map(products.map((product) => [String(product?.id), product]));
+      const categoryIndex = categoryIndexFor(state.categories);
+      const publishedExternalIds = new Set((state.offers || [])
+        .filter((item) => String(item?.status || item?.offer?.status || '').toUpperCase() === 'PUBLISHED')
+        .map((item) => matchingText(item?.externalId || item?.offer?.externalId, 200))
+        .filter(Boolean));
+      const trustedProductIds = new Set(products
+        .filter((item) => publishedExternalIds.has(matchingText(item?.externalId || item?.sku || item?.id, 200)))
+        .map((item) => String(item?.id)));
       const results = [];
       for (const productId of productIds) {
         const product = productById.get(productId);
@@ -434,7 +479,7 @@ export function createVonHalskyRoute({
             id: workId, productId, productName: matchingText(product.nazwa || product.name, 180),
             channel: 'vonHalsky', action: 'przygotowanie produktu', phase: 'matching', status: 'running',
             target: 'katalog InPost Von Halsky',
-            message: 'Sprawdzam tożsamość, kategorię i fakty produktu według dokumentacji InPost.',
+            message: `Dopasowuję produkt do ${categoryIndex.size} końcowych kategorii z aktualnego drzewa API Von Halsky.`,
           });
           const sourceUrl = matchingText(sourceUrlOf(product), 2000);
           if (
@@ -489,20 +534,52 @@ export function createVonHalskyRoute({
             : matchingText(workingProduct.vonHalskyCategoryId || workingProduct.inpostVonHalskyCategoryId, 100);
           categoryMatch = suggestVonHalskyCategory(workingProduct, state.categories, {
             minimumConfidence: state.settings.agentMinimumConfidence,
+            categoryIndex,
+            relatedProducts: products,
+            trustedProductIds,
           });
           let categoryId = existingCategoryId;
+          if (categoryId && categoryIndex.size && !categoryIndex.ids.has(categoryId)) {
+            categoryId = '';
+            deterministicFields.vonHalskyCategoryId = '';
+            deterministicFields.vonHalskyCategoryName = '';
+            deterministicFields.vonHalskyCategoryPath = '';
+            deterministicFields.vonHalskyCategoryRejectedAt = timestamp;
+            deterministicFields.vonHalskyCategoryRejection = {
+              rejected: true,
+              reason: 'Kategoria nie występuje w aktualnym drzewie API Von Halsky.',
+              previousCategoryId: existingCategoryId,
+            };
+          }
           if (categoryRejection.rejected) {
             deterministicFields.vonHalskyCategoryId = '';
+            deterministicFields.vonHalskyCategoryName = '';
+            deterministicFields.vonHalskyCategoryPath = '';
             deterministicFields.vonHalskyCategoryRejectedAt = timestamp;
             deterministicFields.vonHalskyCategoryRejection = categoryRejection;
           }
           if (!categoryId && categoryMatch.autoApplicable && state.settings.agentCategoryAutoMatchEnabled !== false) {
             categoryId = categoryMatch.selected.id;
             deterministicFields.vonHalskyCategoryId = categoryId;
-            deterministicFields.vonHalskyCategoryMatchedBy = 'agent-evidence';
+            deterministicFields.vonHalskyCategoryName = categoryMatch.selected.name;
+            deterministicFields.vonHalskyCategoryMatchedBy = categoryMatch.source === 'accepted_catalog_consensus'
+              ? 'accepted-catalog-consensus'
+              : 'agent-api-tree';
             deterministicFields.vonHalskyCategoryMatchedAt = timestamp;
             deterministicFields.vonHalskyCategoryPath = categoryMatch.selected.path;
             deterministicFields.vonHalskyCategoryRejection = null;
+            deterministicFields.vonHalskyCategoryResolution = {
+              categoryId,
+              name: categoryMatch.selected.name,
+              path: categoryMatch.selected.path,
+              source: categoryMatch.source,
+              confidence: categoryMatch.confidence,
+              margin: categoryMatch.margin,
+              evidence: categoryMatch.selected.evidence || [],
+              categoryTreeSize: categoryMatch.categoryTreeSize,
+              rulesVersion: categoryMatch.rulesVersion,
+              resolvedAt: timestamp,
+            };
           }
           if (categoryId && config.configured && state.settings.agentAttributeAutoMatchEnabled !== false) {
             try {
@@ -535,6 +612,8 @@ export function createVonHalskyRoute({
               area: 'von-halsky-agent-evidence',
             });
             Object.keys(deterministicFields).forEach((field) => savedFieldNames.add(field));
+            workingProduct = { ...workingProduct, ...deterministicFields };
+            Object.assign(product, deterministicFields);
           }
           await progress({
             id: workId, productId, productName: matchingText(product.nazwa || product.name, 180),
@@ -587,8 +666,16 @@ export function createVonHalskyRoute({
             score: readiness.score,
             issues: finalPatch.vonHalskyAgentIssues,
             warnings: finalPatch.vonHalskyAgentWarnings,
-            category: deterministicFields.vonHalskyCategoryId ? categoryMatch?.selected : null,
-            categorySuggestion: !deterministicFields.vonHalskyCategoryId ? categoryMatch?.selected : null,
+            category: categoryId ? {
+              id: categoryId,
+              name: deterministicFields.vonHalskyCategoryName || categoryIndex.byId.get(categoryId)?.name || '',
+              path: deterministicFields.vonHalskyCategoryPath || categoryIndex.byId.get(categoryId)?.path || '',
+              source: deterministicFields.vonHalskyCategoryResolution?.source || workingProduct.vonHalskyCategoryMatchedBy || 'existing',
+              confidence: deterministicFields.vonHalskyCategoryResolution?.confidence ?? null,
+              evidence: deterministicFields.vonHalskyCategoryResolution?.evidence || [],
+            } : null,
+            categorySuggestion: !categoryId ? categoryMatch?.selected : null,
+            categoryTreeSize: categoryIndex.size,
             responsibleProducer: responsibleProducer.ready ? {
               name: responsibleProducer.value.legalName,
               status: 'ready',

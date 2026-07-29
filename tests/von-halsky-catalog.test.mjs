@@ -15,6 +15,7 @@ import { createVonHalskyApiClient } from '../src/backend/lib/domain/von-halsky-a
 import { createVonHalskyRoute } from '../src/backend/lib/von-halsky-route.mjs';
 import { vonHalskyCheckEditorial, VON_HALSKY_CONTENT_POLICY } from '../src/backend/lib/domain/von-halsky-compliance.mjs';
 import {
+  compileVonHalskyCategoryIndex,
   matchVonHalskyAttributes,
   suggestVonHalskyCategory,
   vonHalskyAgentPreparationPatch,
@@ -160,6 +161,54 @@ test('zestaw wielu gier nie przegrywa z pojedynczym domino znalezionym w opisie 
   ], { minimumConfidence: 0.82 });
   assert.equal(result.selected.id, 'family');
   assert.equal(result.autoApplicable, true);
+});
+
+test('indeks pełnego drzewa Von Halsky jest kompilowany raz i obsługuje duży katalog bez ponownego przeliczania kategorii', () => {
+  const categories = Array.from({ length: 8076 }, (_, index) => ({
+    id: `category-${index}`,
+    name: index === 8075 ? 'Rodzinne' : `Kategoria ${index}`,
+    path: index === 8075
+      ? 'Kultura i rozrywka › Gry › Planszowe › Rodzinne'
+      : `Dział ${index % 80} › Grupa ${index % 500} › Kategoria ${index}`,
+    leaf: true,
+  }));
+  const startedAt = performance.now();
+  const categoryIndex = compileVonHalskyCategoryIndex(categories);
+  const results = Array.from({ length: 50 }, (_, index) => suggestVonHalskyCategory({
+    id: `product-${index}`,
+    nazwa: `Rodzinna gra planszowa ${index}`,
+    kategoria: 'Gry rodzinne',
+  }, categories, { categoryIndex }));
+  const duration = performance.now() - startedAt;
+  assert.equal(categoryIndex.size, 8076);
+  assert.ok(results.every((result) => result.selected?.id === 'category-8075'));
+  assert.ok(results.every((result) => result.categoryTreeSize === 8076));
+  assert.ok(duration < 2000, `dopasowanie trwało ${Math.round(duration)} ms`);
+});
+
+test('Agent może bezpiecznie odziedziczyć kategorię z zaakceptowanych ofert tej samej gałęzi sklepu', () => {
+  const categories = [
+    { id: 'family', name: 'Rodzinne', path: 'Kultura i rozrywka › Gry › Planszowe › Rodzinne', leaf: true },
+    { id: 'educational', name: 'Logiczne i edukacyjne', path: 'Kultura i rozrywka › Gry › Planszowe › Logiczne i edukacyjne', leaf: true },
+  ];
+  const relatedProducts = [
+    { id: 'accepted-1', nazwa: 'Gra A', kategoria: 'Gry familijne', vonHalskyCategoryId: 'family' },
+    { id: 'accepted-2', nazwa: 'Gra B', kategoria: 'Gry familijne', vonHalskyCategoryId: 'family' },
+    { id: 'untrusted', nazwa: 'Gra C', kategoria: 'Gry familijne', vonHalskyCategoryId: 'educational' },
+  ];
+  const result = suggestVonHalskyCategory({
+    id: 'target',
+    nazwa: 'Nowa pozycja wydawnicza',
+    kategoria: 'Gry familijne',
+  }, categories, {
+    categoryIndex: compileVonHalskyCategoryIndex(categories),
+    relatedProducts,
+    trustedProductIds: new Set(['accepted-1', 'accepted-2']),
+  });
+  assert.equal(result.selected.id, 'family');
+  assert.equal(result.source, 'accepted_catalog_consensus');
+  assert.equal(result.autoApplicable, true);
+  assert.match(result.selected.evidence.join(' '), /2 zaakceptowane oferty/);
 });
 
 test('znany producent Alexander otrzymuje kompletną, źródłową kartotekę GPSR', () => {
@@ -573,6 +622,41 @@ test('korekta dopasowania zapisuje aliasy identyfikatorów i blokuje duplikat EA
   assert.equal(duplicate.status, 409);
   assert.equal(duplicate.body.code, 'von_halsky_gtin_conflict');
   assert.equal(saves.length, 1);
+});
+
+test('ręczny wybór kategorii zapisuje pełną ścieżkę i dowód z aktualnego drzewa API', async () => {
+  const categoryId = 'd623476e-ea17-557d-8502-754a476d4c8e';
+  const state = {
+    settings: vonHalskyDefaultSettings(),
+    categories: [{
+      id: categoryId,
+      name: 'Rodzinne',
+      path: 'Kultura i rozrywka › Gry › Planszowe › Rodzinne',
+      leaf: true,
+    }],
+  };
+  let savedFields;
+  const route = createVonHalskyRoute({
+    respond: (body, status = 200) => ({ body, status }),
+    isAdmin: () => true,
+    readVersioned: async () => ({ value: state, revision: 1 }),
+    writeIfVersion: async () => ({ modified: true }),
+    saveProductFields: async ({ fields }) => {
+      savedFields = structuredClone(fields);
+      return { confirmed: true };
+    },
+  });
+  const request = new Request('https://artwaytm.pl/api?action=von-halsky-product-category', {
+    method: 'POST',
+    body: JSON.stringify({ productId: 'P-1', categoryId }),
+  });
+  const response = await route(request, new URL(request.url), 'von-halsky-product-category');
+  assert.equal(response.status, 200);
+  assert.equal(savedFields.vonHalskyCategoryId, categoryId);
+  assert.equal(savedFields.vonHalskyCategoryPath, 'Kultura i rozrywka › Gry › Planszowe › Rodzinne');
+  assert.equal(savedFields.vonHalskyCategoryMatchedBy, 'admin');
+  assert.equal(savedFields.vonHalskyCategoryResolution.source, 'admin-current-api-tree');
+  assert.equal(savedFields.vonHalskyCategoryResolution.confidence, 1);
 });
 
 test('route Agenta Von Halsky zapisuje wynik w centralnej kartotece bez publikacji', async () => {
