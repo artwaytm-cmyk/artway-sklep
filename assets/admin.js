@@ -6475,11 +6475,13 @@ const vonHalskyStan={
   loaded:false,loading:false,error:"",config:{configured:false,missingEnv:[]},
   settings:{integrationMethod:"api",integrator:"",channelAlias:"VH",merchantStoreName:"Artway-TM",notificationEmail:"",minimumStock:1,maximumStock:25,syncIntervalMinutes:15,automaticPriceSync:true,automaticStockSync:true,automaticResume:true,agentPreparationEnabled:true,agentCategoryAutoMatchEnabled:true,agentAttributeAutoMatchEnabled:true,agentMinimumConfidence:.82,newOfferPublicationMode:"manual_selection",catalogAutomationEnabled:false,customerZone:true,onboarding:{}},
   sync:{status:"not_connected",lastConnectionAt:null,lastCatalogAt:null,lastCatalogCount:0,lastOrdersAt:null,lastError:"",lastRequestId:""},
-  diagnostics:[],offers:[],orders:[],returns:[],claims:[],events:[],commands:[],categories:[],preview:null,operation:""
+  diagnostics:[],offers:[],orders:[],returns:[],claims:[],events:[],commands:[],categories:[],preview:null,operation:"",
+  preparation:{active:false,total:0,completed:0,currentIndex:0,currentProductId:"",currentName:"",startedAt:"",finishedAt:"",results:[],error:""}
 };
 let vonHalskySzukaj="",vonHalskyEtap="wszystkie",vonHalskyFiltr="wszystkie",vonHalskyAgentFiltr="wszystkie",vonHalskyStatusKanalu="wszystkie",vonHalskyDostepnosc="wszystkie",vonHalskyProducent="wszyscy",vonHalskyKategoria="wszystkie",vonHalskyProblem="wszystkie",vonHalskyCena="wszystkie",vonHalskySort="jakosc",vonHalskyStrona=1,vonHalskyNaStronie=25;
 const vonHalskyZaznaczone=new Set();
 const vonHalskyAgentWToku=new Set();
+let vonHalskyProduktyRenderCache=null,vonHalskyOcenaRenderCache=new WeakMap();
 
 async function vonHalskyLaduj(force=false){
   if(vonHalskyStan.loading||(!force&&vonHalskyStan.loaded))return;
@@ -6519,6 +6521,7 @@ function vonHalskyGpsr(product={}){
   return {required:product.vonHalskyGpsrRequired===true,ready:missing.length===0,name,address,email,phone,missing,source:String(value.source||"")};
 }
 function vonHalskyOcenaProduktu(product={}){
+  if(product&&typeof product==="object"&&vonHalskyOcenaRenderCache.has(product))return vonHalskyOcenaRenderCache.get(product);
   const presentation=vonHalskyPrezentacjaProduktu(product),nazwa=presentation.name,surowyOpis=presentation.description,opis=presentation.description,ean=vonHalskyGtin(product);
   const kod=vonHalskyKodProducenta(product),marka=String(product.marka||product.producent||"").trim(),zdjecia=[...(Array.isArray(product.zdjecia)?product.zdjecia:[]),...(Array.isArray(product.images)?product.images:[]),product.zdjecie,product.image].map(item=>String(typeof item==="object"?item?.url||"":item||"").trim()).filter(Boolean);
   const cena=[product.cenaVonHalsky,product.vonHalskyPrice,product.cenaAllegro,product.allegroPrice,product.cena,product.price].map(Number).find(value=>Number.isFinite(value)&&value>0)||0,braki=[],ostrzezenia=[];
@@ -6539,10 +6542,15 @@ function vonHalskyOcenaProduktu(product={}){
   if(!dostepny)braki.push("Sprzedaż wstrzymana");
   const remote=(vonHalskyStan.offers||[]).find(item=>String(item.externalId||"")===String(product.externalId||product.sku||product.id||""));
   const ofertaId=String(product.vonHalskyOfferId||product.inpostBuyOfferId||remote?.offerId||"");
-  return {gotowy:braki.length===0,wynik:Math.max(0,Math.round(100-braki.length*18-ostrzezenia.length*3)),braki,ostrzezenia,ean,kod,marka,opis,nazwa,cena:Number.isFinite(cena)?cena:0,dostepny,ofertaId,offerStatus:String(remote?.status||""),categoryId:String(product.vonHalskyCategoryId||""),categoryPath:String(product.vonHalskyCategoryPath||""),gpsr,zdjecie:zdjecia[0]||"",presentation};
+  const result={gotowy:braki.length===0,wynik:Math.max(0,Math.round(100-braki.length*18-ostrzezenia.length*3)),braki,ostrzezenia,ean,kod,marka,opis,nazwa,cena:Number.isFinite(cena)?cena:0,dostepny,ofertaId,offerStatus:String(remote?.status||""),categoryId:String(product.vonHalskyCategoryId||""),categoryPath:String(product.vonHalskyCategoryPath||""),gpsr,zdjecie:zdjecia[0]||"",presentation};
+  if(product&&typeof product==="object")vonHalskyOcenaRenderCache.set(product,result);
+  return result;
 }
 function vonHalskyProdukty(){
-  return produktyDoAdministracji().filter(product=>!czyProduktAdminWKoszu(product)&&!produktyDefinitywne.some(id=>String(id)===String(product.id)));
+  if(vonHalskyProduktyRenderCache)return vonHalskyProduktyRenderCache;
+  const deleted=new Set(produktyDefinitywne.map(String));
+  vonHalskyProduktyRenderCache=produktyDoAdministracji().filter(product=>!czyProduktAdminWKoszu(product)&&!deleted.has(String(product.id)));
+  return vonHalskyProduktyRenderCache;
 }
 function vonHalskyEtapOferty(product={},quality=vonHalskyOcenaProduktu(product)){
   const status=String(quality.offerStatus||"").toUpperCase();
@@ -6756,18 +6764,68 @@ async function vonHalskyWybierzKategorie(productId){
     document.body.appendChild(shell);draw();input.focus();
   }catch(error){toast("Nie pobrano kategorii Von Halsky: "+(error.message||error));}
 }
+function vonHalskyNazwyZapisanychPol(fields=[]){
+  const labels={
+    vonHalskyTitle:"nazwa kanału",vonHalskyShortDescription:"opis krótki",vonHalskyDescription:"opis pełny",
+    vonHalskyCategoryId:"kategoria",vonHalskyCategoryPath:"ścieżka kategorii",vonHalskyAttributes:"parametry",
+    vonHalskyResponsibleProducer:"GPSR",vonHalskyResponsibleProducerStatus:"status GPSR",
+    zdjecie:"zdjęcie główne",zdjecia:"galeria",contentEditorial:"stan redakcji",
+  };
+  return [...new Set((Array.isArray(fields)?fields:[]).map(field=>labels[field]||String(field||"").replace(/^vonHalsky/,"")).filter(Boolean))];
+}
+function vonHalskyPostepPrzygotowaniaHTML(){
+  const progress=vonHalskyStan.preparation||{},started=Number(progress.total)>0,active=progress.active===true;
+  const total=Math.max(0,Number(progress.total)||0),completed=Math.min(total,Math.max(0,Number(progress.completed)||0));
+  const percent=total?Math.round(completed/total*100):0,results=Array.isArray(progress.results)?progress.results:[];
+  const ready=results.filter(item=>item.status==="ready").length,attention=results.filter(item=>["requires_data","retry"].includes(String(item.status))).length,errors=results.filter(item=>item.status==="error"||item.saved===false).length;
+  const stateClass=active?"is-running":started?(errors?"has-errors":"is-complete"):"is-idle";
+  const headline=active?`Przygotowuję ${Math.min(total,Math.max(1,Number(progress.currentIndex)||1))} z ${total}`:started?`Zakończono ${completed} z ${total}`:"Proces jest gotowy";
+  const detail=active?`${progress.currentName||"Produkt"} • dopasowanie, uzupełnienie i odczyt kontrolny na serwerze`:started?`Gotowe ${ready} • wymagają danych ${attention} • błędy ${errors}`:"Zaznacz produkty i uruchom Agenta. Każdy produkt jest zapisywany i potwierdzany osobno.";
+  const recent=results.slice(-6).reverse();
+  return `<section class="von-halsky-preparation-progress ${stateClass}" data-vh-preparation-progress aria-live="polite">
+    <header><div class="von-halsky-preparation-progress-title"><span>${active?"⟳":started&&!errors?"✓":started?"!":"▶"}</span><div><small>Rzeczywisty postęp przygotowania</small><h3>${esc(headline)}</h3><p>${esc(detail)}</p></div></div><strong data-vh-progress-percent>${percent}%</strong></header>
+    <div class="von-halsky-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="${total||100}" aria-valuenow="${completed}"><i style="width:${percent}%"></i></div>
+    <div class="von-halsky-progress-stages"><div class="${active||started?"active":""}"><span>1</span><b>Dopasowanie</b><small>tożsamość, kategoria, GPSR</small></div><div class="${active||started?"active":""}"><span>2</span><b>Uzupełnienie</b><small>nazwa i oba opisy</small></div><div class="${completed?"active":""}"><span>3</span><b>Zapis centralny</b><small>potwierdzony odczytem</small></div><div class="${!active&&started&&ready?"active manual":""}"><span>4</span><b>Publikacja</b><small>osobna decyzja administratora</small></div></div>
+    ${started?`<div class="von-halsky-progress-summary"><span><b>${completed}</b> zapisanych odpowiedzi</span><span class="ok"><b>${ready}</b> gotowych</span><span class="attention"><b>${attention}</b> do uzupełnienia</span><span class="${errors?"error":""}"><b>${errors}</b> błędów</span></div>`:""}
+    ${recent.length?`<div class="von-halsky-progress-results">${recent.map(item=>{const fields=vonHalskyNazwyZapisanychPol(item.savedFields),ok=item.saved!==false&&item.status!=="error";return `<article class="${ok?"saved":"error"}"><span>${ok?"✓":"!"}</span><div><b>${esc(item.name||item.productId||"Produkt")}</b><small>${ok?`Zapis centralny potwierdzony${fields.length?` • ${fields.slice(0,6).map(esc).join(", ")}`:""}`:esc(item.error||"Nie potwierdzono zapisu")}</small>${(item.issues||[]).length?`<em>Pozostało: ${item.issues.slice(0,5).map(esc).join(" • ")}</em>`:""}</div><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(item.productId||"")}">Edytor</a></article>`;}).join("")}</div>`:""}
+  </section>`;
+}
+function vonHalskyAktualizujPostepDOM(){
+  const current=document.querySelector("[data-vh-preparation-progress]");
+  if(current)current.outerHTML=vonHalskyPostepPrzygotowaniaHTML();
+}
 async function vonHalskyPrzygotujAgentem(productIds=[]){
   const ids=[...new Set((Array.isArray(productIds)?productIds:[productIds]).map(String).filter(Boolean))].slice(0,50);
   if(!ids.length||vonHalskyStan.operation)return;
-  ids.forEach(id=>vonHalskyAgentWToku.add(id));vonHalskyStan.operation="agent";renderuj();
+  const products=new Map(vonHalskyProdukty().map(product=>[String(product.id),product]));
+  vonHalskyStan.preparation={active:true,total:ids.length,completed:0,currentIndex:0,currentProductId:"",currentName:"",startedAt:new Date().toISOString(),finishedAt:"",results:[],error:""};
+  vonHalskyStan.operation="agent";renderuj();
   try{
-    const data=await chmura("von-halsky-agent-prepare",{method:"POST",body:{productIds:ids},timeout:Math.max(120000,ids.length*45000)});
-    const errors=(data.results||[]).filter(item=>item.status==="error");
-    toast(`Agent Von Halsky: gotowe ${data.ready||0}, wymagają danych ${data.requiresData||0}${errors.length?`, błędy ${errors.length}`:""} ${errors.length?"⚠️":"✅"}`);
-    if(typeof odswiezProduktyAdmin==="function")await odswiezProduktyAdmin();
-    await vonHalskyLaduj(true);
-  }catch(error){toast("Agent Von Halsky: "+(error.message||error));}
-  finally{ids.forEach(id=>vonHalskyAgentWToku.delete(id));vonHalskyStan.operation="";renderuj();}
+    for(let index=0;index<ids.length;index+=1){
+      const productId=ids[index],product=products.get(productId)||{},progress=vonHalskyStan.preparation;
+      vonHalskyAgentWToku.clear();vonHalskyAgentWToku.add(productId);
+      Object.assign(progress,{currentIndex:index+1,currentProductId:productId,currentName:String(product.nazwa||product.name||productId)});
+      vonHalskyAktualizujPostepDOM();
+      let result;
+      try{
+        const data=await chmura("von-halsky-agent-prepare",{method:"POST",body:{productIds:[productId]},timeout:180000});
+        result=(Array.isArray(data.results)?data.results[0]:null)||{productId,name:progress.currentName,status:"error",saved:false,error:"Serwer nie zwrócił potwierdzenia produktu."};
+      }catch(error){
+        result={productId,name:progress.currentName,status:"error",saved:false,error:String(error?.message||error)};
+      }
+      progress.results.push(result);progress.completed=index+1;
+      vonHalskyAgentWToku.delete(productId);
+      vonHalskyAktualizujPostepDOM();
+    }
+    const results=vonHalskyStan.preparation.results,errors=results.filter(item=>item.status==="error"||item.saved===false),ready=results.filter(item=>item.status==="ready").length,requiresData=results.filter(item=>["requires_data","retry"].includes(String(item.status))).length;
+    toast(`Agent Von Halsky: gotowe ${ready}, wymagają danych ${requiresData}${errors.length?`, błędy ${errors.length}`:""} ${errors.length?"⚠️":"✅"}`);
+  }finally{
+    vonHalskyAgentWToku.clear();vonHalskyStan.preparation.active=false;vonHalskyStan.preparation.currentProductId="";vonHalskyStan.preparation.finishedAt=new Date().toISOString();vonHalskyStan.operation="";
+    if(typeof odswiezProduktyAdmin==="function"){
+      try{await odswiezProduktyAdmin();}catch(error){vonHalskyStan.preparation.error=String(error?.message||error);}
+    }
+    if(String(trasa()).startsWith("/admin/von-halsky"))renderuj();
+  }
 }
 function vonHalskyPrzygotujWybraneAgentem(){
   return vonHalskyPrzygotujAgentem([...vonHalskyZaznaczone]);
@@ -6830,6 +6888,7 @@ function vonHalskyWystawianieHTML(){
   const shownFrom=visible.length?start+1:0,shownTo=start+visible.length;
   return `<div class="allegro-listing-workspace von-halsky-listing-workspace"><section class="panel von-halsky-catalog-panel"><div class="order-section-head"><div><span class="order-pro-label">Jedno centrum ofert</span><h2>Przygotowanie i wystawianie produktów</h2><p class="order-detail-lead">Powiązanie, jakość danych, podgląd i publikacja są wykonywane w jednym miejscu. EAN ma pierwszeństwo; bez EAN wymagane są kod producenta i marka.</p></div><button class="btn ghost" onclick="vonHalskyLaduj(true)">↻ Odśwież status</button></div>
     <div class="von-halsky-offer-flow" aria-label="Proces wystawiania"><div><span>1</span><b>Dopasuj</b><small>EAN lub kod + marka</small></div><i>›</i><div><span>2</span><b>Uzupełnij</b><small>Treść, zdjęcia i kategorię</small></div><i>›</i><div><span>3</span><b>Sprawdź</b><small>Podgląd i kontrola jakości</small></div><i>›</i><div><span>4</span><b>Opublikuj</b><small>Wyłącznie zaznaczone</small></div></div>
+    ${vonHalskyPostepPrzygotowaniaHTML()}
     ${vonHalskyEtapySprzedazyHTML()}
     ${vonHalskyFiltryHTML(rows)}
     ${adminOperacjeWynikowHTML({id:"von-halsky-products",selected:selected.length,pageCount:visible.length,resultCount:rows.length,selectPage:"vonHalskyUstawZaznaczenieZakres('strona',true)",selectAll:"vonHalskyUstawZaznaczenieZakres('filtr',true)",clear:"vonHalskyUstawZaznaczenieZakres('filtr',false)",exportSelected:"vonHalskyEksportuj('selected')",exportAll:"vonHalskyEksportuj('all')",exportLabel:"CSV Von Halsky"})}
@@ -6960,6 +7019,7 @@ function vonHalskyUstawieniaHTML(){
   </section><div id="von-halsky-settings-diagnostics">${vonHalskyDiagnostykaHTML()}</div></div>`;
 }
 function widokAdminVonHalsky(sekcja="pulpit"){
+  vonHalskyProduktyRenderCache=null;vonHalskyOcenaRenderCache=new WeakMap();
   const alias={oferty:"wystawianie",powiazania:"wystawianie"}[sekcja]||sekcja;
   const aktywna=["wystawianie","zamowienia","ustawienia"].includes(alias)?alias:"pulpit";
   if(!vonHalskyStan.loaded&&!vonHalskyStan.loading)setTimeout(()=>vonHalskyLaduj(false),0);
@@ -9516,9 +9576,27 @@ function productEditorTrescHTML(p={}){
   const state=productEditorTrescStan(p);
   return `<section class="product-editor-section product-content-workspace" id="product-editor-content"><header class="product-editor-section-head"><div><span>Treść własnego sklepu</span><h2>🏪 Nazwa i opisy sklepu</h2><p>Źródło dostarcza fakty. Ta wersja zapisuje się niezależnie i błąd Allegro lub Von Halsky nigdy jej nie cofa.</p></div><div class="product-content-status ${productEditorStatusKanalu(state.store.status)[0]}"><b>${productEditorStatusKanalu(state.store.status)[1]}</b><small>Agent sklepu kontroluje wyłącznie te pola.</small></div></header><div class="product-content-grid"><label class="product-content-short"><span><b>Opis krótki sklepu</b><small>Karty produktu i wprowadzenie pod tytułem</small></span><textarea name="opisKrotki" rows="4" maxlength="500" placeholder="Krótki, konkretny opis w 1–3 zdaniach." oninput="productEditorTrescZmieniona(this.form,'store')">${esc(state.store.short)}</textarea><em><span data-product-short-count>${state.store.short.length}</span>/500 znaków</em></label><label class="product-content-long"><span><b>Opis długi sklepu</b><small>Pełna karta produktu w Artway-TM</small></span><textarea name="opis" rows="13" maxlength="20000" placeholder="Pełny opis produktu." oninput="productEditorTrescZmieniona(this.form,'store')">${esc(state.store.full)}</textarea><em><span data-product-full-count>${state.store.full.length}</span>/20 000 znaków</em></label></div><div class="product-content-live-note" data-product-content-note><b>✓ Każdy kanał ma osobny zapis, walidację i kolejkę publikacji.</b></div></section>`;
 }
+function productEditorVonHalskyAuditHTML(p={}){
+  const raw=String(p.vonHalskyAgentStatus||p.contentEditorial?.channelStates?.vonHalsky?.status||"oczekuje").toLowerCase();
+  const ready=["ready","confirmed"].includes(raw),failed=["error","failed"].includes(raw),preparedAt=p.vonHalskyAgentConfirmedAt||p.vonHalskyAgentPreparedAt||p.contentEditorial?.channelStates?.vonHalsky?.savedAt||"";
+  const issues=Array.isArray(p.vonHalskyAgentIssues)?p.vonHalskyAgentIssues:[],warnings=Array.isArray(p.vonHalskyAgentWarnings)?p.vonHalskyAgentWarnings:[],missing=Array.isArray(p.vonHalskyAgentMissingAttributes)?p.vonHalskyAgentMissingAttributes:[];
+  const saved=Array.isArray(p.vonHalskyAgentSavedFields)?p.vonHalskyAgentSavedFields:[];
+  const labels={vonHalskyTitle:"nazwa Von Halsky",vonHalskyShortDescription:"opis krótki",vonHalskyDescription:"opis pełny",vonHalskyCategoryId:"kategoria",vonHalskyCategoryPath:"ścieżka kategorii",vonHalskyAttributes:"parametry",vonHalskyResponsibleProducer:"dane GPSR",vonHalskyResponsibleProducerStatus:"status GPSR",zdjecie:"zdjęcie główne",zdjecia:"galeria",contentEditorial:"stan redakcji"};
+  const savedLabels=[...new Set(saved.map(field=>labels[field]||String(field||"").replace(/^vonHalsky/,"")).filter(Boolean))];
+  const category=p.vonHalskyCategoryPath||p.vonHalskyAgentCategorySuggestion?.path||p.vonHalskyCategoryId||"nieprzypisana";
+  const gpsr=p.vonHalskyResponsibleProducer||{},gpsrReady=p.vonHalskyResponsibleProducerStatus==="ready"||Boolean(gpsr.legalName||gpsr.name);
+  const coverage=p.vonHalskyAgentAttributeCoverage==null?"—":`${Math.round(Number(p.vonHalskyAgentAttributeCoverage||0)*100)}%`;
+  const statusLabel=ready?"Zapis potwierdzony":failed?"Błąd przygotowania":raw==="retry"||raw==="retry_pending"?"Zaplanowano ponowienie":issues.length?"Wymaga danych":"Jeszcze nie przygotowano";
+  return `<div class="product-vh-audit ${ready?"is-ready":failed?"is-error":"needs-work"}">
+    <header><div><small>Ostatni proces Agenta</small><b>${esc(statusLabel)}</b><span>${preparedAt?`Ostatni zapis ${esc(allegroDataTxt(preparedAt))}`:"Uruchom przygotowanie w katalogu Von Halsky."}</span></div><strong>${p.vonHalskyAgentScore!==undefined&&p.vonHalskyAgentScore!==null&&Number.isFinite(Number(p.vonHalskyAgentScore))?`${Math.round(Number(p.vonHalskyAgentScore))}%`:"—"}</strong></header>
+    <div class="product-vh-audit-grid"><article><small>Kategoria kanału</small><b>${esc(category)}</b></article><article><small>GPSR</small><b>${gpsrReady?`✓ ${esc(gpsr.legalName||gpsr.name||"kompletne")}`:"wymaga uzupełnienia"}</b></article><article><small>Parametry wymagane</small><b>${esc(coverage)}${missing.length?` • brakuje ${missing.length}`:""}</b></article><article><small>Odczyt kontrolny</small><b>${p.vonHalskyAgentReadbackConfirmed===true?"✓ potwierdzony":"— oczekuje"}</b></article></div>
+    ${savedLabels.length?`<div class="product-vh-saved-fields"><small>Zapisane w tej kartotece</small><div>${savedLabels.map(label=>`<span>✓ ${esc(label)}</span>`).join("")}</div></div>`:""}
+    ${issues.length||warnings.length||p.vonHalskyAgentError?`<div class="product-vh-audit-notes">${issues.length?`<p><b>Do uzupełnienia:</b> ${issues.map(esc).join(" • ")}</p>`:""}${warnings.length?`<p><b>Uwagi:</b> ${warnings.map(esc).join(" • ")}</p>`:""}${p.vonHalskyAgentError?`<p><b>Błąd:</b> ${esc(p.vonHalskyAgentError)}</p>`:""}</div>`:""}
+  </div>`;
+}
 function productEditorVonHalskyTrescHTML(p={}){
-  const state=productEditorTrescStan(p),vh=state.vonHalsky,al=state.allegroContent;
-  return `<section class="product-editor-section product-von-halsky-content" id="product-editor-von-halsky"><header class="product-editor-section-head"><div><span>Niezależne wersje kanałów</span><h2>🐕 Von Halsky i 🟠 Allegro</h2><p>Możesz edytować każdą wersję oddzielnie. Agent zapisuje i publikuje poprawny kanał nawet wtedy, gdy drugi wymaga naprawy.</p></div><div class="product-content-status is-ready"><b>Rozdzielone bezpiecznie</b><small>Wspólne pozostają tylko fakty: EAN, kod, marka, parametry, zdjęcia i źródło.</small></div></header><input type="hidden" name="vonHalskyContentMode" value="custom"><div class="product-channel-editor-grid"><article><h3>🐕 InPost Von Halsky</h3><p class="muted">Oficjalnie: nazwa 7–150 znaków, opis min. 100 znaków, bez linków i zdjęć w treści. Kontakt ustawia się w profilu sklepu, nie w ofercie.</p><label class="f-group"><span>Nazwa Von Halsky</span><input name="vonHalskyTitle" maxlength="150" value="${esc(vh.title)}" oninput="productEditorTrescZmieniona(this.form,'vonHalsky')"></label><label class="f-group"><span>Opis krótki Von Halsky</span><textarea name="vonHalskyShortDescription" rows="4" maxlength="2000" oninput="productEditorTrescZmieniona(this.form,'vonHalsky')">${esc(vh.short)}</textarea></label><label class="f-group"><span>Opis pełny Von Halsky</span><textarea name="vonHalskyDescription" rows="11" maxlength="20000" oninput="productEditorTrescZmieniona(this.form,'vonHalsky')">${esc(vh.full)}</textarea></label></article><article><h3>🟠 Allegro</h3><p class="muted">Opis wyłącznie o produkcie: bez kontaktu, linków, sprzedaży poza Allegro oraz informacji o dostawie i płatności.</p><label class="f-group"><span>Opis krótki Allegro</span><textarea name="allegroShortDescription" rows="4" maxlength="2000" oninput="productEditorTrescZmieniona(this.form,'allegro')">${esc(al.short)}</textarea></label><label class="f-group"><span>Opis pełny Allegro</span><textarea name="allegroDescription" rows="11" maxlength="20000" oninput="productEditorTrescZmieniona(this.form,'allegro')">${esc(al.full)}</textarea></label></article></div></section>`;
+  const state=productEditorTrescStan(p),vh=state.vonHalsky,al=state.allegroContent,vhStatus=productEditorStatusKanalu(vh.status);
+  return `<section class="product-editor-section product-von-halsky-content" id="product-editor-von-halsky"><header class="product-editor-section-head"><div><span>Niezależne wersje kanałów</span><h2>🐕 Von Halsky i 🟠 Allegro</h2><p>Każda zmiana Agenta trafia do tej samej centralnej kartoteki. Poniżej widać treść, wynik kontroli, braki i pola potwierdzone po zapisie.</p></div><div class="product-content-status ${vhStatus[0]}"><b>${vhStatus[1]}</b><small>Stan pochodzi z ostatniego potwierdzonego zapisu serwera.</small></div></header>${productEditorVonHalskyAuditHTML(p)}<input type="hidden" name="vonHalskyContentMode" value="custom"><div class="product-channel-editor-grid"><article><h3>🐕 InPost Von Halsky</h3><p class="muted">Oficjalnie: nazwa 7–150 znaków, opis min. 100 znaków, bez linków i zdjęć w treści. Kontakt ustawia się w profilu sklepu, nie w ofercie.</p><label class="f-group"><span>Nazwa Von Halsky</span><input name="vonHalskyTitle" maxlength="150" value="${esc(vh.title)}" oninput="productEditorTrescZmieniona(this.form,'vonHalsky')"></label><label class="f-group"><span>Opis krótki Von Halsky</span><textarea name="vonHalskyShortDescription" rows="4" maxlength="2000" oninput="productEditorTrescZmieniona(this.form,'vonHalsky')">${esc(vh.short)}</textarea></label><label class="f-group"><span>Opis pełny Von Halsky</span><textarea name="vonHalskyDescription" rows="11" maxlength="20000" oninput="productEditorTrescZmieniona(this.form,'vonHalsky')">${esc(vh.full)}</textarea></label></article><article><h3>🟠 Allegro</h3><p class="muted">Opis wyłącznie o produkcie: bez kontaktu, linków, sprzedaży poza Allegro oraz informacji o dostawie i płatności.</p><label class="f-group"><span>Opis krótki Allegro</span><textarea name="allegroShortDescription" rows="4" maxlength="2000" oninput="productEditorTrescZmieniona(this.form,'allegro')">${esc(al.short)}</textarea></label><label class="f-group"><span>Opis pełny Allegro</span><textarea name="allegroDescription" rows="11" maxlength="20000" oninput="productEditorTrescZmieniona(this.form,'allegro')">${esc(al.full)}</textarea></label></article></div></section>`;
 }
 function productEditorTrescZmieniona(form,channel="store"){
   if(!form)return;

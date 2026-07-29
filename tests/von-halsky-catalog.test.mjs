@@ -230,11 +230,16 @@ test('wynik Agenta Von Halsky zapisuje dowody, braki i wersję reguł', () => {
     categoryMatch: { selected: { id: 'games', name: 'Gry', path: 'Zabawki › Gry', evidence: ['zgodność 100%'] }, confidence: 0.91, autoApplicable: true },
     attributeMatch: { coverage: 0.5, missingRequired: ['Wiek'], evidence: [{ attributeId: 'players' }] },
     timestamp: '2026-07-29T10:00:00.000Z',
+    savedFields: ['vonHalskyTitle', 'vonHalskyDescription'],
+    runId: 'run-vh-1',
   });
   assert.equal(patch.vonHalskyAgentStatus, 'requires_data');
   assert.equal(patch.vonHalskyAgentEvidence.identity, 'gtin');
   assert.equal(patch.vonHalskyAgentEvidence.attributesMapped, 1);
   assert.deepEqual(patch.vonHalskyAgentMissingAttributes, ['Wiek']);
+  assert.deepEqual(patch.vonHalskyAgentSavedFields, ['vonHalskyTitle', 'vonHalskyDescription']);
+  assert.equal(patch.vonHalskyAgentReadbackConfirmed, true);
+  assert.equal(patch.vonHalskyAgentPreparationRunId, 'run-vh-1');
   assert.match(patch.vonHalskyAgentRulesVersion, /^2026-07-29/);
 });
 
@@ -617,6 +622,8 @@ test('route Agenta Von Halsky zapisuje wynik w centralnej kartotece bez publikac
   assert.equal(response.status, 200);
   assert.equal(response.body.published, false);
   assert.equal(response.body.ready, 1);
+  assert.equal(response.body.results[0].readbackConfirmed, true);
+  assert.ok(response.body.results[0].savedFields.includes('vonHalskyTitle'));
   assert.equal(product.vonHalskyAgentStatus, 'ready');
   assert.equal(product.vonHalskyAgentError, '');
   assert.ok(savedAreas.includes('von-halsky-agent-preparation'));

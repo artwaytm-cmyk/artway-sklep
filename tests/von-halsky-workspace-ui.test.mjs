@@ -42,3 +42,21 @@ test("tabela Von Halsky przestrzega standardu desktop i mobile",async()=>{
   assert.doesNotMatch(style,/\.von-halsky-stage-filters\{display:flex;overflow-x:auto/);
   assert.match(style,/\.von-halsky-stage-filters\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)!important\}/);
 });
+
+test("przygotowanie Von Halsky pokazuje rzeczywisty postęp i zapisuje produkty pojedynczo",async()=>{
+  const [source,editor,style]=await Promise.all([
+    read("src/frontend/11b-von-halsky-workspace.js"),
+    read("src/frontend/12-product-editor-workspace.js"),
+    read("src/styles/37-von-halsky-workspace.css"),
+  ]);
+  assert.match(source,/Rzeczywisty postęp przygotowania/);
+  assert.match(source,/for\(let index=0;index<ids\.length;index\+=1\)/);
+  assert.match(source,/body:\{productIds:\[productId\]\}/);
+  assert.match(source,/vonHalskyAktualizujPostepDOM/);
+  assert.match(source,/Zapis centralny potwierdzony/);
+  assert.match(source,/href="#\/admin\/produkty\/edytuj\//);
+  assert.match(style,/\.von-halsky-progress-track/);
+  assert.match(editor,/productEditorVonHalskyAuditHTML/);
+  assert.match(editor,/Zapisane w tej kartotece/);
+  assert.match(editor,/vonHalskyAgentReadbackConfirmed/);
+});

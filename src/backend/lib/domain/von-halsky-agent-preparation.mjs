@@ -243,12 +243,23 @@ export function vonHalskyAgentPreparationPatch({
   timestamp = new Date().toISOString(),
   status = '',
   error = '',
+  savedFields = [],
+  runId = '',
 } = {}) {
   const issues = [...(readiness.issues || []), ...(readiness.publicationIssues || [])];
   const agentStatus = status || (readiness.publishable ? 'ready' : issues.length ? 'requires_data' : 'review');
+  const confirmedFields = [...new Set((Array.isArray(savedFields) ? savedFields : [])
+    .map((item) => text(item, 120))
+    .filter(Boolean))].slice(0, 120);
   return {
     vonHalskyAgentStatus: agentStatus,
     vonHalskyAgentPreparedAt: timestamp,
+    vonHalskyAgentConfirmedAt: timestamp,
+    vonHalskyAgentPreparationRunId: text(runId, 160),
+    vonHalskyAgentPreparationSource: 'agent-serwerowy',
+    vonHalskyAgentSaveState: 'confirmed',
+    vonHalskyAgentReadbackConfirmed: true,
+    vonHalskyAgentSavedFields: confirmedFields,
     vonHalskyAgentRulesVersion: VON_HALSKY_AGENT_RULES_VERSION,
     vonHalskyAgentDocumentation: PUBLIC_GUIDE,
     vonHalskyAgentScore: Number(readiness.score || 0),

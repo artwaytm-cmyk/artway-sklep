@@ -428,6 +428,7 @@ export function createVonHalskyRoute({
         const timestamp = new Date().toISOString();
         const workId = `von-halsky-agent:${productId}:${Date.now().toString(36)}`;
         let categoryMatch = null, attributeMatch = null, deterministicFields = {}, workingProduct = product;
+        const savedFieldNames = new Set();
         try {
           await progress({
             id: workId, productId, productName: matchingText(product.nazwa || product.name, 180),
@@ -458,6 +459,7 @@ export function createVonHalskyRoute({
                   actor: matchingText(actor?.email || actor?.name || actor?.source || 'von-halsky-agent', 200),
                   area: 'von-halsky-source-images',
                 });
+                Object.keys(imageFields).forEach((field) => savedFieldNames.add(field));
                 workingProduct = { ...workingProduct, ...imageFields };
               } else {
                 deterministicFields.vonHalskySourceImageStatus = 'requires_data';
@@ -532,6 +534,7 @@ export function createVonHalskyRoute({
               actor: matchingText(actor?.email || actor?.name || actor?.source || 'von-halsky-agent', 200),
               area: 'von-halsky-agent-evidence',
             });
+            Object.keys(deterministicFields).forEach((field) => savedFieldNames.add(field));
           }
           await progress({
             id: workId, productId, productName: matchingText(product.nazwa || product.name, 180),
@@ -541,6 +544,8 @@ export function createVonHalskyRoute({
             message: 'Agent redaguje kartę kanału i przekazuje ją do deterministycznej kontroli zgodności.',
           });
           const agent = await prepareProductWithAgent(productId, actor, { source: body.source === 'automatic' ? 'automatic' : 'manual' });
+          Object.keys(agent?.applied?.persistedPatch || agent?.applied?.patch || {})
+            .forEach((field) => savedFieldNames.add(field));
           const merged = {
             ...workingProduct,
             ...deterministicFields,
@@ -555,8 +560,10 @@ export function createVonHalskyRoute({
             attributeMatch,
             timestamp: new Date().toISOString(),
             status: agent?.retryScheduled ? 'retry' : readiness.publishable ? 'ready' : 'requires_data',
+            savedFields: [...savedFieldNames],
+            runId: agent?.run?.id || workId,
           });
-          await saveProductFields({
+          const finalSave = await saveProductFields({
             productId,
             fields: finalPatch,
             mutationId: `von-halsky-agent-result:${productId}:${Date.now()}`,
@@ -593,6 +600,12 @@ export function createVonHalskyRoute({
             },
             attributeCoverage: attributeMatch?.coverage ?? null,
             saved: true,
+            readbackConfirmed: finalSave?.publication?.readbackConfirmed === true
+              || finalSave?.confirmed === true
+              || Boolean(finalSave?.product),
+            confirmedAt: finalSave?.confirmedAt || finalPatch.vonHalskyAgentConfirmedAt,
+            revision: finalSave?.publication?.revision || finalSave?.rev || '',
+            savedFields: finalPatch.vonHalskyAgentSavedFields,
             runId: agent?.run?.id || '',
           });
         } catch (error) {
@@ -606,6 +619,8 @@ export function createVonHalskyRoute({
             timestamp: new Date().toISOString(),
             status: 'error',
             error: safe.message,
+            savedFields: [...savedFieldNames],
+            runId: workId,
           });
           await saveProductFields({
             productId,
