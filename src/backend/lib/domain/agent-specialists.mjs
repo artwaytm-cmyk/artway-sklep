@@ -364,6 +364,25 @@ export function createAgentSpecialists({
     // sieci ani nie próbuje użyć prawdziwego klucza.
     const dedicatedVonHalskyRuntime = ['von_halsky_offer', 'von_halsky_compliance'].includes(specialist)
       && fetchImpl === globalThis.fetch;
+    const semanticValidator = ['product_content', 'allegro_offer', 'von_halsky_offer'].includes(specialist)
+      ? (parsed) => {
+          try {
+            const normalized = normalizeResult(parsed, specialist);
+            const title = clean(normalized.title, 300);
+            const content = clean(normalized.content, 30_000);
+            const fields = Array.isArray(normalized.fields) ? normalized.fields : [];
+            // Transport odrzuca wyłącznie ewidentnie uszkodzoną odpowiedź
+            // (np. tytuł ":{"). Pełną kompletność i zgodność ocenia później
+            // bramka właściwego kanału, dzięki czemu wynik „brakuje faktów”
+            // pozostaje prawidłowym, audytowalnym rezultatem pracy.
+            return /\p{L}{2}/u.test(title)
+              && !/^(?:[:;,.!?'"`~*#_[\]{}()<>/\\|\s-]|null|undefined){1,30}$/i.test(title)
+              && (fields.length > 0 || content.length >= 20);
+          } catch {
+            return false;
+          }
+        }
+      : null;
     const executeRequest = () => dedicatedVonHalskyRuntime
       ? requestVonHalskyAgentResponse({
         model: executionPolicy.model,
@@ -385,6 +404,7 @@ export function createAgentSpecialists({
         instructions,
         input: JSON.stringify(dynamicInput),
         resultSchema: RESULT_SCHEMA,
+        semanticValidator,
       });
     const request = platformAgentsEnabled && platformTracingEnabled ? await withTrace(
       `Artway — ${definition.label}`,

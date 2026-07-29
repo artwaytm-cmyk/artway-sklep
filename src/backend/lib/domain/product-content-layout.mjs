@@ -54,14 +54,42 @@ function sentences(value = '') {
   return [...new Set(parts.map((item) => item.replace(/\s+/g, ' ')))].slice(0, 12);
 }
 
+const PARAMETER_LABELS = Object.freeze({
+  wiek: 'Wiek',
+  age: 'Wiek',
+  liczbagraczy: 'Liczba graczy',
+  gracze: 'Liczba graczy',
+  players: 'Liczba graczy',
+  playercount: 'Liczba graczy',
+  material: 'Materiał',
+  rozmiar: 'Rozmiar',
+  size: 'Rozmiar',
+  liczbaelementow: 'Liczba elementów',
+  elementcount: 'Liczba elementów',
+  elements: 'Liczba elementów',
+});
+
+function humanParameterLabel(value = '') {
+  const expanded = String(value || '')
+    .replace(/([a-ząćęłńóśźż\d])([A-ZĄĆĘŁŃÓŚŹŻ])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const key = expanded.toLocaleLowerCase('pl-PL')
+    .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/ł/g, 'l').replace(/[^a-z0-9]+/g, '');
+  return { key, label: PARAMETER_LABELS[key] || (expanded.charAt(0).toLocaleUpperCase('pl-PL') + expanded.slice(1)) };
+}
+
 function parameterEntries(product = {}) {
   const output = new Map();
   const add = (label, value) => {
-    const name = clean(String(label || '').replace(/[_-]+/g, ' '), 100).replace(/\s+/g, ' ').trim();
+    const normalizedLabel = humanParameterLabel(label);
+    const name = clean(normalizedLabel.label, 100);
     const textValue = Array.isArray(value) ? value.map((item) => clean(item, 200)).filter(Boolean).join(', ') : clean(value, 400);
     if (!name || !textValue || /^(?:id|url|link|source|źr[oó]d[łl]o)$/i.test(name)) return;
-    const key = name.toLocaleLowerCase('pl-PL');
-    if (!output.has(key)) output.set(key, { label: name.charAt(0).toLocaleUpperCase('pl-PL') + name.slice(1), value: textValue });
+    const key = normalizedLabel.key || name.toLocaleLowerCase('pl-PL');
+    if (!output.has(key)) output.set(key, { label: name, value: textValue });
   };
   for (const source of [product.parametryProducenta, product.parametryZrodla, product.parametry, product.parameters]) {
     if (Array.isArray(source)) {

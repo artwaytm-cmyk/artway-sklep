@@ -41,6 +41,28 @@ test('niekompletny wynik GPT-5 nano jest ponawiany jeden raz na GPT-5.4 nano', a
   assert.equal(result.localFallbackApplied, false);
 });
 
+test('poprawny JSON o błędnej treści nie jest uznawany za sukces specjalisty', async () => {
+  const calls = [];
+  const result = await requestSpecialistResponse({
+    apiKey: 'test',
+    model: 'gpt-5-nano',
+    qualityFallbackModel: 'gpt-5.4-nano',
+    instructions: 'Zwróć JSON.',
+    input: '{}',
+    resultSchema: schema,
+    semanticValidator: (value) => value.status === 'ready',
+    fetchImpl: async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      const output = calls.length < 3 ? '{"status":"empty"}' : '{"status":"ready"}';
+      return new Response(JSON.stringify(responsePayload(output, calls.at(-1).body.model)), { status: 200 });
+    },
+  });
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls.map((item) => item.body.model), ['gpt-5-nano', 'gpt-5-nano', 'gpt-5.4-nano']);
+  assert.equal(result.qualityFallback, true);
+  assert.equal(JSON.parse(result.payload.output[0].content[0].text).status, 'ready');
+});
+
 test('brak środków przełącza specjalistę na lokalny model bez płatnego API', async () => {
   const calls = [];
   const result = await requestSpecialistResponse({

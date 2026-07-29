@@ -16,6 +16,7 @@
     "check:legacy": "node scripts/check-artway.mjs",
     "audit:architecture": "node scripts/report-architecture-budgets.mjs",
     "audit:functional": "node scripts/audit-functional-consistency.mjs",
+    "audit:agent-persistence": "node scripts/audit-agent-product-persistence.mjs",
     "deploy:atomic": "node scripts/deploy-atomic-release.mjs",
     "benchmark:setup": "sudo -n /bin/bash ops/postgres/setup-isolated-benchmark.sh",
     "benchmark:catalog": "node scripts/run-isolated-catalog-benchmark.mjs --rows=100000",

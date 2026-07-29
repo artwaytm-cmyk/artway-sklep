@@ -553,7 +553,7 @@ test('poprawiona treść nie zmienia odcisku źródła i kolejny cykl nie redagu
   const vonHalskyFields = [
     { key: 'von_halsky_title', label: 'Nazwa', value: 'Alexander Licz na Siebie gra edukacyjna' },
     { key: 'von_halsky_short_description', label: 'Opis krótki', value: 'Gra liczbowa dla dzieci od 8 lat.' },
-    { key: 'von_halsky_description', label: 'Opis pełny', value: '<h2>Gra liczbowa</h2><p>Zestaw pozwala ćwiczyć działania matematyczne podczas rozgrywki.</p><ul><li>Plansza</li><li>Pionki</li></ul>' },
+    { key: 'von_halsky_description', label: 'Opis pełny', value: '<h2>Gra liczbowa</h2><p>Zestaw pozwala ćwiczyć działania matematyczne podczas rozgrywki. Produkt marki Alexander wspiera naukę przez zabawę.</p><ul><li>Plansza</li><li>Pionki</li></ul>' },
   ];
   const calls = [];
   const service = createAgentSpecialists({

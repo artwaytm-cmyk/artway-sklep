@@ -51,12 +51,18 @@ function cachedInput(staticInstructions = '', input = '') {
   ];
 }
 
-function structuredOutputReady(payload = {}) {
+function structuredOutputReady(payload = {}, semanticValidator = null) {
   const parts = (Array.isArray(payload.output) ? payload.output : []).flatMap((item) => Array.isArray(item?.content) ? item.content : []);
-  if (parts.some((part) => part?.type === 'refusal')) return true;
+  if (parts.some((part) => part?.type === 'refusal')) return false;
   const value = parts.find((part) => part?.type === 'output_text' && String(part?.text || '').trim())?.text || payload.output_text;
   if (!String(value || '').trim()) return false;
-  try { return !!JSON.parse(String(value)); } catch { return false; }
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object'
+      && (typeof semanticValidator !== 'function' || semanticValidator(parsed) === true);
+  } catch {
+    return false;
+  }
 }
 
 function openAiUnavailable(response, payload = {}) {
@@ -149,6 +155,7 @@ export async function requestSpecialistResponse({
   instructions,
   input,
   resultSchema,
+  semanticValidator = null,
 }) {
   const useAutomaticCache = supportsAutomaticPromptCache(model);
   const useExplicitCache = supportsExplicitPromptCache(model) && clean(promptCacheKey, 200);
@@ -198,7 +205,7 @@ export async function requestSpecialistResponse({
     promptFallback = true;
     promptError = safeError(primary.payload?.error?.message || 'Profil promptu OpenAI jest chwilowo niedostępny.');
   }
-  if (selected.response.ok && !structuredOutputReady(selected.payload)) {
+  if (selected.response.ok && !structuredOutputReady(selected.payload, semanticValidator)) {
     // Odpowiedź 200 może być niepełna (np. model zużył budżet na rozumowanie)
     // albo opublikowany prompt może zwrócić tekst poza ścisłym JSON-em.
     // Jedna kontrolowana próba korzysta z reguł serwera, niskiego rozumowania
@@ -209,7 +216,7 @@ export async function requestSpecialistResponse({
     outputRetry = true;
     promptError ||= 'Pierwsza odpowiedź nie zawierała kompletnego wyniku strukturalnego; użyto bezpiecznej ponownej próby.';
   }
-  if (selected.response.ok && !structuredOutputReady(selected.payload) && clean(qualityFallbackModel, 100) && clean(qualityFallbackModel, 100) !== clean(model, 100)) {
+  if (selected.response.ok && !structuredOutputReady(selected.payload, semanticValidator) && clean(qualityFallbackModel, 100) && clean(qualityFallbackModel, 100) !== clean(model, 100)) {
     selected = await call(false, false, {
       model: clean(qualityFallbackModel, 100),
       reasoning: { effort: 'low' },
@@ -222,7 +229,7 @@ export async function requestSpecialistResponse({
   }
   const localReason = !selected.response.ok
     ? openAiUnavailable(selected.response, selected.payload)
-    : !structuredOutputReady(selected.payload);
+    : !structuredOutputReady(selected.payload, semanticValidator);
   if (localReason && localFallback?.enabled === true) {
     const local = await requestLocalResponse({
       fetchImpl,
@@ -232,7 +239,7 @@ export async function requestSpecialistResponse({
       resultSchema,
       maxOutputTokens,
     });
-    if (local) {
+    if (local && structuredOutputReady(local.payload, semanticValidator)) {
       selected = local;
       promptApplied = false;
       promptFallback = !!promptProfile;

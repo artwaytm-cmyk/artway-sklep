@@ -67,6 +67,15 @@ test('lekka kartoteka zachowuje serwerowe potwierdzenie przygotowania po odświe
   const reordered = { ...prepared, sourceEvidence: { z: 1, a: 2 } };
   const reorderedAgain = { ...prepared, sourceEvidence: { a: 2, z: 1 } };
   assert.equal(centralAllegroPreparationFingerprint(reordered), centralAllegroPreparationFingerprint(reorderedAgain));
+  const refreshedEvidence = {
+    ...reordered,
+    sourceEvidence: { ...reordered.sourceEvidence, fetchedAt: '2026-07-29T12:00:00.000Z', requestTimestamp: '2026-07-29T12:00:01.000Z' },
+  };
+  assert.equal(
+    centralAllegroPreparationFingerprint(reordered),
+    centralAllegroPreparationFingerprint(refreshedEvidence),
+    'techniczny czas ponownego odczytu źródła nie może uruchamiać redakcji produktu',
+  );
   reordered.allegroAgentPreparationFingerprint = centralAllegroPreparationFingerprint(reordered);
   reordered.opis = 'Treść zmieniona po przygotowaniu';
   assert.equal(centralAllegroPreparationCurrent(reordered), false);
@@ -156,12 +165,14 @@ test('pojedyncza cena aktualizuje centralną kartotekę bez pełnej synchronizac
   assert.ok(calls.some((entry) => entry.sql.startsWith('UPDATE artway_product_catalog_meta')));
 });
 
-test('ponowienie tego samego mutationId nie tworzy niewidocznej zmiany produktu', async () => {
+test('ponowienie mutationId z innym payloadem jest odrzucane zamiast tworzyć niewidoczną zmianę', async () => {
   const calls = [], current = {
     data: { id: '17', nazwa: 'Wersja potwierdzona', cena: 20 },
     public_data: { id: '17', nazwa: 'Wersja potwierdzona', cena: 20 },
     authoritative_fields: ['nazwa'],
     mutation_exists: true,
+    mutation_fields: { nazwa: 'Wersja potwierdzona' },
+    mutation_remove_fields: [],
   };
   const client = {
     query: async (sql) => {
@@ -175,15 +186,15 @@ test('ponowienie tego samego mutationId nie tworzy niewidocznej zmiany produktu'
   };
   const pool = { query: async () => ({ rowCount: 0, rows: [] }), connect: async () => client };
   const catalog = createCentralProductCatalog({ pool, namespace: 'test' });
-  const result = await catalog.patchProductFields(
-    '17',
-    { nazwa: 'Niewidoczna druga wersja' },
-    [],
-    { mutationId: 'agent:17:run-1' },
+  await assert.rejects(
+    catalog.patchProductFields(
+      '17',
+      { nazwa: 'Niewidoczna druga wersja' },
+      [],
+      { mutationId: 'agent:17:run-1' },
+    ),
+    (error) => error?.code === 'catalog_mutation_payload_conflict',
   );
-  assert.equal(result.updated, true);
-  assert.equal(result.idempotent, true);
-  assert.equal(result.product.nazwa, 'Wersja potwierdzona');
   assert.equal(calls.some((sql) => sql.startsWith('UPDATE artway_products SET')), false);
   assert.equal(calls.some((sql) => sql.includes('INSERT INTO artway_product_mutations')), false);
 });

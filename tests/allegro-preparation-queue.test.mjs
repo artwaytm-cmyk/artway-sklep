@@ -437,6 +437,58 @@ test('brak dostępu do redaktora AI nie odkłada produktu, gdy potwierdzone źr�
   assert.doesNotMatch(preparedProduct.allegroDescription, /dostaw|kontakt/i);
 });
 
+test('worker nie oznacza produktu jako gotowy, gdy fallback zawiera urwany tekst strony źródłowej', async () => {
+  const product = {
+    id: '17c',
+    nazwa: ':{',
+    opisKrotki: 'Produkt [...]Read More...',
+    opis: '5.00/5.00 Opinie (1) Produkt [...]Read More...',
+    sourceMaterial: {
+      title: ':{',
+      shortDescription: 'Produkt [...]Read More...',
+      longDescription: '5.00/5.00 Opinie (1) Produkt [...]Read More...',
+    },
+  };
+  let saved = null;
+  const worker = createAllegroPreparationWorker({
+    text: (value) => String(value ?? ''),
+    readSettings: async () => ({ data: {} }),
+    loadProducts: async () => new Map([['17c', product]]),
+    getCatalogProduct: async () => product,
+    sourceUrlOf: () => '',
+    inspectSource: async () => ({}),
+    sourceImages: () => ({ ok: false }),
+    editorialize: async (value) => ({
+      product: {
+        ...value,
+        contentEditorial: {
+          channelStates: {
+            store: { status: 'needs_review' },
+            allegro: { status: 'needs_review' },
+            vonHalsky: { status: 'needs_review' },
+          },
+        },
+      },
+      warnings: ['niepełny wynik'],
+    }),
+    prepareDraft: async () => ({ missing: [], payload: { description: { sections: [] } }, autoFilled: {}, existingOffer: null }),
+    enforceDraft: (draft) => ({ draft, compliance: { ok: true, policyId: 'test' } }),
+    verifyIdentity: async () => ({ ok: true }),
+    preparationCurrent: () => false,
+    preparationFingerprint: () => 'fingerprint',
+    saveProduct: async (input) => {
+      saved = input;
+      return { product: { ...product, ...input.fields } };
+    },
+    requestFactory: () => new Request('https://artwaytm.pl/api/store?action=allegro-preparation-worker'),
+  });
+  const result = await worker({ id: 'task-17c', productId: '17c', requestedBy: 'admin@example.test', attempt: 1 });
+  assert.equal(result.ready, false);
+  assert.notEqual(saved.fields.allegroAgentPreparationStatus, 'ready');
+  assert.ok(result.missing.some((item) => /redakcja opisu sklepu/i.test(item)));
+  assert.ok(result.missing.some((item) => /redakcja opisu Allegro/i.test(item)));
+});
+
 test('worker wykorzystuje potwierdzone GPSR tego samego producenta i ostrzeżenie ze źródła', async () => {
   const product = {
     id: '18',

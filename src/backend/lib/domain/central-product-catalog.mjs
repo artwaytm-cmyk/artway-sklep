@@ -36,6 +36,29 @@ function stableJson(value) {
   return JSON.stringify(value);
 }
 
+function stablePreparationValue(value) {
+  if (Array.isArray(value)) return value.map(stablePreparationValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !/(?:at|date|time|timestamp)$/i.test(key))
+    .map(([key, entry]) => [key, stablePreparationValue(entry)]));
+}
+
+function preparationHash(product = {}, { stableEvidence = true } = {}) {
+  const raw = stableJson(CENTRAL_ALLEGRO_PREPARATION_FIELDS.map((key) => [
+    key,
+    key === 'sourceEvidence' && stableEvidence
+      ? stablePreparationValue(product[key] ?? null)
+      : product[key] ?? null,
+  ]));
+  let hash = 2166136261;
+  for (const byte of Buffer.from(raw, 'utf8')) {
+    hash ^= byte;
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
 export function centralCatalogApplyAuthority(product = {}, authority = {}) {
   const source = { ...asObject(product) };
   const saved = asObject(authority?.data);
@@ -50,13 +73,7 @@ export function centralCatalogApplyAuthority(product = {}, authority = {}) {
 }
 
 export function centralAllegroPreparationFingerprint(product = {}) {
-  const raw = stableJson(CENTRAL_ALLEGRO_PREPARATION_FIELDS.map((key) => [key, product[key] ?? null]));
-  let hash = 2166136261;
-  for (const byte of Buffer.from(raw, 'utf8')) {
-    hash ^= byte;
-    hash = Math.imul(hash, 16777619);
-  }
-  return `allegro-preparation-v4-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+  return `allegro-preparation-v5-${preparationHash(product)}`;
 }
 
 export function centralAllegroPreparationCurrent(product = {}) {
@@ -65,7 +82,16 @@ export function centralAllegroPreparationCurrent(product = {}) {
   if (!['ready', 'published'].includes(status) || missing.length) return false;
   if (status === 'published' && text(product.allegroOfferId, 120)) return true;
   const version = Number(product.allegroAgentPreparationVersion) || 0;
-  if (version >= 4) return text(product.allegroAgentPreparationFingerprint, 120) === centralAllegroPreparationFingerprint(product);
+  const savedFingerprint = text(product.allegroAgentPreparationFingerprint, 120);
+  if (version >= 4 && savedFingerprint.startsWith('allegro-preparation-v5-')) {
+    return savedFingerprint === centralAllegroPreparationFingerprint(product);
+  }
+  // Bezpieczna zgodność podczas migracji: stare podpisy v4 nadal są
+  // weryfikowane dawnym algorytmem. Każdy następny potwierdzony zapis
+  // przechodzi już na v5, który pomija daty technicznego odczytu źródła.
+  if (version >= 4 && savedFingerprint.startsWith('allegro-preparation-v4-')) {
+    return savedFingerprint === `allegro-preparation-v4-${preparationHash(product, { stableEvidence: false })}`;
+  }
   // Rekordy v3 były zapisywane przed wprowadzeniem kanonicznego JSON. Ich
   // kolejność kluczy zmieniała się po przejściu przez JSONB, dlatego zamiast
   // ponownie liczyć niestabilny skrót uznajemy wyłącznie ostatni, potwierdzony
@@ -841,7 +867,15 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
           EXISTS(
             SELECT 1 FROM artway_product_mutations
             WHERE namespace=$1 AND mutation_id=$4
-          ) mutation_exists
+          ) mutation_exists,
+          (
+            SELECT fields FROM artway_product_mutations
+            WHERE namespace=$1 AND mutation_id=$4
+          ) mutation_fields,
+          (
+            SELECT remove_fields FROM artway_product_mutations
+            WHERE namespace=$1 AND mutation_id=$4
+          ) mutation_remove_fields
         FROM artway_products
         WHERE namespace=$1 AND product_id=$2 AND record_status<>$3
         FOR UPDATE
@@ -853,6 +887,25 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
         // z tym samym mutationId zmieniała produkt, a ON CONFLICT pomijał
         // jedynie wpis dziennika. Powstawała wtedy niewidoczna zmiana, której
         // nie dało się odtworzyć ani wyjaśnić w audycie.
+        const receiptFields = new Set([
+          'lastAdminMutationId', 'lastAdminMutationAt', 'lastAdminMutationBy',
+          'lastAdminMutationArea', 'lastAdminMutationFields',
+        ]);
+        const businessPayload = (value) => Object.fromEntries(
+          Object.entries(asObject(value)).filter(([field]) => !receiptFields.has(field)),
+        );
+        const storedFields = businessPayload(current.rows[0].mutation_fields);
+        const requestedFields = businessPayload(safeFields);
+        const storedRemove = [...new Set(asArray(current.rows[0].mutation_remove_fields).map((field) => text(field, 120)).filter(Boolean))].sort();
+        const requestedRemove = [...removeFields].sort();
+        if (stableJson(storedFields) !== stableJson(requestedFields)
+          || stableJson(storedRemove) !== stableJson(requestedRemove)) {
+          await client.query('ROLLBACK');
+          const error = new Error('Ten identyfikator operacji został już użyty z innym zestawem zmian.');
+          error.status = 409;
+          error.code = 'catalog_mutation_payload_conflict';
+          throw error;
+        }
         await client.query('COMMIT');
         return {
           available: true,

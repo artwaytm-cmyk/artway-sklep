@@ -10,6 +10,10 @@ const HARD_SOURCE_PAGE_NOISE = [
   /sprawdź,\s*w którym sklepie obejrzysz/i,
   /rozmiar\s+uniwersalny[^.!?]{0,100}\d[\d\s]*\s*szt\.[^.!?]{0,100}\d+[,.]\d{2}\s*zł brutto/i,
   /cena regularna:\s*\/\s*1\s*szt\.?\s*(?:infinity)?%?/i,
+  /\[\s*\.{3}\s*\]\s*read\s+more(?:\s*\.{3})?/i,
+  /\bread\s+more(?:\s*\.{3})?(?:\s|$)/i,
+  /\b\d(?:[,.]\d{1,2})?\s*\/\s*5(?:[,.]0{1,2})?\s*(?:opinie?|ocen(?:a|y))\b/i,
+  /\bopinie?\s*\(\s*\d+\s*\)/i,
 ];
 
 const SOFT_SOURCE_PAGE_NOISE = [
@@ -24,7 +28,63 @@ const SOFT_SOURCE_PAGE_NOISE = [
   /skontaktuj się z obsługą sklepu/i,
   /rozmiar\s+uniwersalny/i,
   /zł brutto\s*\/\s*1\s*szt/i,
+  /\bczytaj wi[eę]cej\b/i,
+  /\bpoka[żz]\s+pe[łl]ny opis\b/i,
 ];
+
+const MALFORMED_EDITORIAL_TEXT = /^(?:[:;,.!?'"`~*#_[\]{}()<>/\\|\s-]|null|undefined|n\/a){1,30}$/i;
+
+export function editorialTextLooksValid(value = '', minimum = 1) {
+  const source = text(value).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return source.length >= Math.max(1, Number(minimum) || 1)
+    && !MALFORMED_EDITORIAL_TEXT.test(source)
+    && editorialSourceTextIsSafe(source);
+}
+
+/**
+ * Wspólna bramka jakości dla danych, które mają dostać trwały status
+ * „ready”. Sam poprawny JSON nie jest dowodem, że model przygotował treść.
+ */
+export function editorialProductContentReport(product = {}, channel = 'store') {
+  const source = product && typeof product === 'object' ? product : {};
+  const normalizedChannel = String(channel || 'store').trim();
+  const title = normalizedChannel === 'allegro'
+    ? source.allegroTitle
+    : normalizedChannel === 'vonHalsky'
+      ? source.vonHalskyTitle
+      : source.nazwa || source.name;
+  const shortDescription = normalizedChannel === 'vonHalsky'
+    ? source.vonHalskyShortDescription
+    : normalizedChannel === 'allegro'
+      ? source.allegroShortDescription || source.opisKrotki || source.krotkiOpis
+      : source.opisKrotki || source.krotkiOpis;
+  const longDescription = normalizedChannel === 'allegro'
+    ? source.allegroDescription
+    : normalizedChannel === 'vonHalsky'
+      ? source.vonHalskyDescription
+      : source.opis || source.description;
+  const minimumLong = 100;
+  const titleReady = editorialTextLooksValid(title, 5);
+  const shortReady = normalizedChannel === 'allegro' || editorialTextLooksValid(shortDescription, 20);
+  const longReady = editorialTextLooksValid(longDescription, minimumLong);
+  const report = editorialSourceNoiseReport(`${shortDescription || ''}\n${longDescription || ''}`);
+  const issues = [
+    ...(titleReady ? [] : ['invalid_title']),
+    ...(shortReady ? [] : ['invalid_short_description']),
+    ...(longReady ? [] : ['invalid_long_description']),
+    ...report.hard.map((pattern) => `source_noise:${pattern}`),
+    ...(report.soft.length >= 3 ? report.soft.map((pattern) => `source_noise:${pattern}`) : []),
+  ];
+  return {
+    ready: issues.length === 0,
+    channel: normalizedChannel,
+    title: text(title),
+    shortDescription: text(shortDescription),
+    longDescription: text(longDescription),
+    issues: [...new Set(issues)],
+    sourceNoise: report,
+  };
+}
 
 export function editorialSourceNoiseReport(value = '') {
   const source = text(value);

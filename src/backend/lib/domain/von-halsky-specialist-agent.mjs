@@ -6,6 +6,7 @@ import {
   VON_HALSKY_AGENT_VERSION,
   VON_HALSKY_DOCUMENTATION,
 } from './von-halsky-agent-instructions.mjs';
+import { editorialProductContentReport } from './product-editorial-safety.mjs';
 
 const technicalSentinelPattern = /^(?:undefined|null|nan|infinity|\[object object\])$/i;
 const technicalPayloadPattern = /"(?:title|content|value)"\s*:|^\s*```(?:json)?/i;
@@ -78,13 +79,19 @@ function validateEditorialOutput(output = {}) {
     vonHalskyShortDescription: shortDescription,
     vonHalskyDescription: description,
   });
+  const quality = editorialProductContentReport({
+    vonHalskyTitle: title,
+    vonHalskyShortDescription: shortDescription,
+    vonHalskyDescription: description,
+  }, 'vonHalsky');
   return {
-    ok: sentinels.length === 0 && compliance.ok,
+    ok: sentinels.length === 0 && compliance.ok && quality.ready,
     title,
     shortDescription,
     description,
     sentinels,
     compliance,
+    quality,
   };
 }
 
@@ -200,6 +207,7 @@ function resultForGenericPipeline(output = {}, product = {}, identity = {}) {
     const issues = [
       ...checked.sentinels.map((field) => `${field}: techniczna albo pusta wartość`),
       ...checked.compliance.violations.map((item) => item.label),
+      ...checked.quality.issues,
     ];
     throw Object.assign(new Error(`Agent Von Halsky nie przeszedł bramki treści: ${issues.join(', ') || 'nieznany błąd'}.`), {
       code: 'von_halsky_agent_invalid_output',

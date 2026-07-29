@@ -4,6 +4,7 @@ import { allegroContentCompliance, vonHalskyContentCompliance } from './channel-
 import { AGENT_ACTION_POLICY, NEVER_AUTOMATIC } from './agent-action-policy.mjs';
 import { decisionFingerprint, decisionSubjectKey, normalizeDecisionReceipt } from './agent-decision-state.mjs';
 import { professionalDescriptionQuality } from './product-content-layout.mjs';
+import { editorialProductContentReport, editorialSourceNoiseReport } from './product-editorial-safety.mjs';
 import { SPECIALISTS } from './agent-specialist-definitions.mjs';
 import { SPECIALIST_PLAYBOOK_VERSION } from './agent-specialist-playbooks.mjs';
 
@@ -453,9 +454,13 @@ function productEditorialTextQuality(product = {}) {
   const shortDescription = clean(product.opisKrotki || product.krotkiOpis || product.short_description, 4000);
   const longDescription = clean(product.opis || product.long_description, 30_000);
   const text = `${shortDescription}\n${longDescription}`;
-  const issues = SOURCE_PAGE_NOISE.filter((rule) => rule.pattern.test(text)).map((rule) => rule.id);
+  const sharedNoise = editorialSourceNoiseReport(text);
+  const issues = [
+    ...SOURCE_PAGE_NOISE.filter((rule) => rule.pattern.test(text)).map((rule) => rule.id),
+    ...sharedNoise.hard.map((pattern) => `source_noise:${pattern}`),
+  ];
   const structure = professionalDescriptionQuality(longDescription);
-  return { clean: issues.length === 0 && !structure.placeholder, issues: structure.placeholder ? [...issues, 'placeholder_copy'] : issues, shortDescription, longDescription, structure };
+  return { clean: issues.length === 0 && !structure.placeholder, issues: [...new Set(structure.placeholder ? [...issues, 'placeholder_copy'] : issues)], shortDescription, longDescription, structure };
 }
 
 function productEditorialQuality(product = {}) {
@@ -480,6 +485,14 @@ function automaticEditorialAssessment(run = {}, settings = DEFAULT_CONFIG) {
       ? clean(patch.vonHalskyTitle, 300) && clean(patch.vonHalskyShortDescription, 2000) && clean(patch.vonHalskyDescription, 30_000).length >= 100
       : clean(patch.nazwa, 300) && clean(patch.opisKrotki, 2000) && clean(patch.opis, 30_000).length >= 150 && clean(patch.seoTitle, 180) && clean(patch.seoDescription, 300);
   if (!coreComplete) return { eligible: false, reason: 'incomplete_editorial', fields };
+  const contentQuality = editorialProductContentReport(patch, channel);
+  if (!contentQuality.ready) return {
+    eligible: false,
+    reason: 'invalid_editorial_output',
+    fields,
+    violations: contentQuality.issues,
+    channel,
+  };
   if (Number(assessedResult?.confidence || 0) < 0.25) return { eligible: false, reason: 'invalid_editorial_output', fields };
   if (editorialIdentityConflict(assessedResult)) return { eligible: false, reason: 'product_identity_conflict', fields };
   const compliance = channel === 'allegro' ? allegroContentCompliance(patch) : channel === 'vonHalsky' ? vonHalskyContentCompliance(patch) : { ok: true, violations: [], policyId: 'artway-store-editorial-v1' };

@@ -1,5 +1,6 @@
 import { automaticEditorialAssessment, normalizeChannelEditorialResult, PROMPT_VERSION, productEditorialFingerprint, productEditorialSourceFingerprint, productPatch } from './agent-specialists.mjs';
 import { buildProfessionalProductDescription, buildSharedProductDescriptionSections } from './product-content-layout.mjs';
+import { editorialProductContentReport } from './product-editorial-safety.mjs';
 
 const clean = (value = '', limit = 30_000) => String(value ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, limit);
 let editorialProviderUnavailableUntil = 0;
@@ -102,9 +103,7 @@ export async function prepareLinkedProductEditorial(product = {}, {
     } catch (error) { warnings.push(`Redakcja sklepu: ${clean(error?.message || error, 500)}`); }
   }
   const storePatch = productPatch(storeRun?.result || {});
-  const existingStoreReady = clean(product.nazwa || product.name, 300).length >= 5
-    && clean(product.opisKrotki || product.krotkiOpis, 1000).length >= 20
-    && clean(product.opis, 20_000).length >= 80;
+  const existingStoreReady = editorialProductContentReport(product, 'store').ready;
   const storeAssessment = storeRun ? automaticEditorialAssessment(storeRun) : existingContentAssessment(existingStoreReady);
   const title = sharedTitle(storePatch.nazwa || product.nazwa || product.name);
   const storeRawDescription = editorialStructuredText(storePatch.opis || product.opis, 20_000);
@@ -138,8 +137,8 @@ export async function prepareLinkedProductEditorial(product = {}, {
   const allegroPatch = productPatch(normalizeChannelEditorialResult(allegroRun?.result || {}, 'allegro_offer')), vonHalskyPatch = productPatch(normalizeChannelEditorialResult(vonHalskyRun?.result || {}, 'von_halsky_offer'));
   const existingAllegroTitle = clean(product.allegroTitle, 75), existingAllegroDescription = clean(product.allegroDescription, 30_000);
   const existingVonHalskyTitle = clean(product.vonHalskyTitle, 150), existingVonHalskyShort = clean(product.vonHalskyShortDescription, 2000), existingVonHalskyDescription = clean(product.vonHalskyDescription, 30_000);
-  const allegroAssessment = allegroRun ? automaticEditorialAssessment(allegroRun) : existingContentAssessment(existingAllegroTitle.length >= 5 && existingAllegroDescription.length >= 80);
-  const vonHalskyAssessment = vonHalskyRun ? automaticEditorialAssessment(vonHalskyRun) : existingContentAssessment(existingVonHalskyTitle.length >= 5 && existingVonHalskyShort.length >= 20 && existingVonHalskyDescription.length >= 100);
+  const allegroAssessment = allegroRun ? automaticEditorialAssessment(allegroRun) : existingContentAssessment(editorialProductContentReport(product, 'allegro').ready);
+  const vonHalskyAssessment = vonHalskyRun ? automaticEditorialAssessment(vonHalskyRun) : existingContentAssessment(editorialProductContentReport(product, 'vonHalsky').ready);
   const allegroLongDescription = allegroRun && allegroPatch.allegroDescription
     ? buildProfessionalProductDescription(storeProduct, allegroPatch.allegroDescription)
     : existingAllegroDescription;

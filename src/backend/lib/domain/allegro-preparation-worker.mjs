@@ -6,7 +6,7 @@ import {
 } from './agent-specialists-support.mjs';
 import { enrichAllegroProductEvidence } from './allegro-parameter-enrichment.mjs';
 import { buildProfessionalProductDescription, professionalDescriptionQuality } from './product-content-layout.mjs';
-import { editorialSourceTextIsSafe } from './product-editorial-safety.mjs';
+import { editorialProductContentReport, editorialSourceTextIsSafe } from './product-editorial-safety.mjs';
 import {
   ALLEGRO_PREPARATION_VERSION,
   allegroAutomaticPreparationDisposition,
@@ -19,16 +19,21 @@ const asObject = (value) => value && typeof value === 'object' && !Array.isArray
 
 function editorialReady(product = {}) {
   const editorial = asObject(product.contentEditorial), channels = asObject(editorial.channelStates);
-  return channels.store?.status === 'ready' && channels.allegro?.status === 'ready';
+  return channels.store?.status === 'ready'
+    && channels.allegro?.status === 'ready'
+    && editorialProductContentReport(product, 'store').ready
+    && editorialProductContentReport(product, 'allegro').ready;
 }
 
 function editorialCurrent(product = {}) {
   const editorial = asObject(product.contentEditorial), channels = asObject(editorial.channelStates);
   const fingerprint = productEditorialFingerprint(product);
-  return ['store', 'allegro', 'vonHalsky'].every((channel) => (
+  return editorialProductContentReport(product, 'store').ready
+    && editorialProductContentReport(product, 'allegro').ready
+    && ['store', 'allegro', 'vonHalsky'].every((channel) => (
     channels[channel]?.status === 'ready'
     && channels[channel]?.inputFingerprint === fingerprint
-  ));
+    ));
 }
 
 function changedFields(before = {}, after = {}, fields = []) {
@@ -98,6 +103,9 @@ function deterministicEditorialFallback(product = {}) {
     seoTitle: deterministicEditorialText(product.seoTitle || title, 70).replace(/\n+/g, ' ').trim(),
     seoDescription: deterministicEditorialText(product.seoDescription || shortDescription, 160).replace(/\n+/g, ' ').trim(),
   };
+  const storeQuality = editorialProductContentReport(base, 'store');
+  const allegroQuality = editorialProductContentReport(base, 'allegro');
+  if (!storeQuality.ready || !allegroQuality.ready) return null;
   const fingerprint = productEditorialFingerprint(base);
   const sourceFingerprint = productEditorialSourceFingerprint(base);
   const previous = asObject(product.contentEditorial), previousChannels = asObject(previous.channelStates);
@@ -108,6 +116,7 @@ function deterministicEditorialFallback(product = {}) {
     inputFingerprint: fingerprint,
     preparedAt: timestamp,
     source: 'deterministic-source-policy',
+    qualityConfirmed: true,
   });
   return {
     ...base,
