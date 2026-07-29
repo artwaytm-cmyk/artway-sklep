@@ -52,7 +52,9 @@ test('synchronizacja zapisuje osobne wersje kanałów i pełny stan redakcji', a
     readFile('src/frontend/12-product-editor-workspace.js', 'utf8'),
     readFile('src/frontend/03-cloud-sync.js', 'utf8'),
   ]);
-  assert.match(editor, /fields:produktPolaDoCentralnegoZapisu\(product\)/);
+  assert.match(editor, /const change=produktRoznicaCentralnegoZapisu\(product,previous\)/);
+  assert.match(editor, /fields:change\.fields/);
+  assert.match(editor, /remove:change\.remove/);
   assert.match(editor, /result\?\.confirmed!==true/);
   assert.match(workspace, /p\.contentEditorial=\{\.\.\.\(p\.contentEditorial\|\|\{\}\)/);
   assert.match(editor, /allegroShortDescription/);

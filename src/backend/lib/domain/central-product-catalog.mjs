@@ -86,6 +86,8 @@ function centralCatalogListProduct(product = {}, catalogMeta = {}, { admin = fal
   ];
   if (admin) fields.push(
     'cenaZakupu',
+    'manufacturerProfileId', 'manufacturerProfile', 'manufacturerProfileResolvedAt',
+    'manufacturerProfileConfidence', 'manufacturerProfileMethod', 'manufacturerProfileEvidence',
     'vonHalskyCategoryId', 'vonHalskyAttributes', 'vonHalskyOfferId', 'vonHalskyCommandId',
     'vonHalskyMatchingMethod', 'vonHalskyMatchingVerifiedAt', 'vonHalskyCategoryMatchedBy', 'vonHalskyCategoryMatchedAt',
     'vonHalskyCategoryPath', 'vonHalskyCategoryRejectedAt', 'vonHalskyCategoryRejection',

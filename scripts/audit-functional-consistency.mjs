@@ -15,8 +15,15 @@ const allowedMaintenanceReloads = new Map([
 const reloadCounts = frontendReloads.reduce((map, name) => map.set(name, (map.get(name) || 0) + 1), new Map());
 const maintenanceReloadsOnly = frontendReloads.length === [...allowedMaintenanceReloads.values()].reduce((sum, count) => sum + count, 0)
   && [...reloadCounts].every(([name, count]) => allowedMaintenanceReloads.get(name) === count);
+const productEditorSource = [
+  read('src/frontend/12-product-editor.js'),
+  read('src/frontend/12-product-editor-workspace.js'),
+].join('\n');
 const checks = [
-  ['Edytor wymaga tekstowej nazwy producenta', /required name="producent"[\s\S]*?walidujPoleProducenta/.test(read('src/frontend/12-product-editor.js'))],
+  ['Edytor wymaga tekstowej nazwy producenta', /<input required[\s\S]{0,300}?name="producent"[\s\S]{0,500}?walidujPoleProducenta/.test(productEditorSource)],
+  ['Edytor pobiera pełną kartotekę przed modyfikacją', /detailLevel!=="full"[\s\S]{0,500}?productEditorPobierzPelnaKartoteke/.test(productEditorSource)],
+  ['Producent, GPSR i kanały korzystają ze wspólnego profilu', /catalog-product-manufacturer-resolve/.test(productEditorSource)
+    && /manufacturerProfileId/.test(read('src/backend/lib/domain/catalog-product-field-save.mjs'))],
   ['Gotowość Allegro sprawdza nazwę producenta', /poprawnaNazwaProducenta\(p\.producent\|\|p\.marka\)/.test(read('src/frontend/11-allegro-operations.js'))],
   ['Import CSV odrzuca liczbowego producenta', /producent musi być nazwą, a nie samym numerem/.test(read('src/frontend/13a-product-import-export.js'))],
   ['Backend oczyszcza producenta w ustawieniach', /sanitizeManufacturerFieldsInSettings\(filterKnownSettingsDomains\(obj\)\)/.test(read('src/backend/lib/store-app.mjs'))],

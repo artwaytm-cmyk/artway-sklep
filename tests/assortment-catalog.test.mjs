@@ -136,7 +136,9 @@ test("katalog rozdziela zarządzanie produktami od tworzenia nowych ofert Allegr
   assert.match(actions,/if\(!preparation\.ready\)throw new Error/);
   assert.match(actions,/readbackConfirmed:true/);
   assert.match(actions,/Konkretny zapis Agenta/);
-  assert.match(catalog,/Przygotuj i zapisz dane do Allegro/);
+  assert.doesNotMatch(catalog,/Przygotuj i zapisz dane do Allegro/);
+  assert.match(catalog,/automatyczne przygotowanie trafi do serwerowej kolejki/i);
+  assert.match(catalog,/Pełna kartoteka produktu/);
   assert.match(css,/\.product-action-center/);
   assert.match(css,/\.product-agent-results/);
   assert.match(css,/\.product-allegro-preparation/);

@@ -1,3 +1,8 @@
+import {
+  VERIFIED_MANUFACTURER_PROFILES,
+  resolveManufacturerProfile,
+} from './manufacturer-profile-registry.mjs';
+
 const text = (value, max = 1000) => String(value ?? '')
   .replace(/\u0000/g, '')
   .replace(/\s+/g, ' ')
@@ -104,37 +109,11 @@ export function responsibleProducerFromSourceText(value = '', {
  * Nie jest słownikiem marketingowym ani wynikiem generowania AI. Kolejnych
  * producentów dodajemy dopiero z kompletnym źródłem i kompletem GPSR.
  */
-export const VON_HALSKY_VERIFIED_RESPONSIBLE_PRODUCERS = Object.freeze([
-  Object.freeze({
-    sourceHosts: Object.freeze([
-      'sklep.alexander.com.pl',
-    ]),
-    aliases: Object.freeze([
-      'Alexander',
-      'Z.P. Alexander',
-      'Zakład Produkcyjny Alexander',
-      'Zakład Produkcyjny "Alexander" Piotr Pundzis',
-      'Alexander Piotr Pundzis',
-    ]),
-    legalName: 'Zakład Produkcyjny "Alexander" Piotr Pundzis',
-    displayName: 'Alexander',
-    address: 'ul. Telewizyjna 19, 80-209 Chwaszczyno, Polska',
-    street: 'ul. Telewizyjna 19',
-    postalCode: '80-209',
-    city: 'Chwaszczyno',
-    country: 'Polska',
-    countryCode: 'PL',
-    email: 'alexander@alexander.com.pl',
-    phone: '+48 58 552 83 70',
-    sourceUrl: 'https://www.sklep.alexander.com.pl/',
-    sourceProductUrl: 'https://www.sklep.alexander.com.pl/product-pol-2443-Matgram.html',
-    source: 'verified-manufacturer-source',
-    verifiedAt: '2026-07-29',
-  }),
-]);
+export const VON_HALSKY_VERIFIED_RESPONSIBLE_PRODUCERS = VERIFIED_MANUFACTURER_PROFILES;
 
 function directCandidates(product = {}) {
   return [
+    product.manufacturerProfile,
     product.vonHalskyResponsibleProducer,
     product.gpsrResponsibleProducer,
     product.responsibleProducer,
@@ -175,36 +154,22 @@ function targetSourceHosts(product = {}) {
 }
 
 function registryMatch(product = {}) {
-  const targets = targetNames(product);
-  const sourceHosts = targetSourceHosts(product);
-  if (!targets.length && !sourceHosts.length) return null;
-  const matches = VON_HALSKY_VERIFIED_RESPONSIBLE_PRODUCERS.map((profile) => {
-    const aliases = profile.aliases.map(key);
-    const officialHosts = (profile.sourceHosts || []).map((host) => text(host, 300).toLowerCase().replace(/^www\./, ''));
-    let score = 0, method = '';
-    for (const target of targets) for (const alias of aliases) {
-      if (target === alias && score < 100) {
-        score = 100;
-        method = 'verified-producer-alias';
-      } else if (target.length >= 5 && alias.length >= 5 && (target.includes(alias) || alias.includes(target)) && score < 94) {
-        score = 94;
-        method = 'verified-producer-alias';
-      }
-    }
-    for (const sourceHost of sourceHosts) {
-      if (officialHosts.includes(sourceHost) && score < 99) {
-        score = 99;
-        method = 'verified-manufacturer-product-domain';
-      }
-    }
-    return { profile, score, method };
-  }).filter((item) => item.score >= 94).sort((left, right) => right.score - left.score);
-  if (!matches.length || (matches[1] && matches[1].score === matches[0].score)) return null;
+  const match = resolveManufacturerProfile(product);
+  if (!match.ready || !match.profile) return null;
+  const matchedSourceHost = targetSourceHosts(product).find((host) => (
+    match.profile.trustedSourceHosts || []
+  ).some((officialHost) => host === officialHost || host.endsWith(`.${officialHost}`))) || '';
+  const method = matchedSourceHost
+    ? 'verified-manufacturer-product-domain'
+    : ['verified-manufacturer-alias', 'verified-manufacturer-fuzzy', 'verified-brand-owner', 'verified-brand-owner-fuzzy']
+        .includes(match.method)
+      ? 'verified-producer-alias'
+      : match.method;
   return {
-    ...matches[0].profile,
-    matchConfidence: matches[0].score / 100,
-    matchMethod: matches[0].method,
-    matchedSourceHost: sourceHosts.find((host) => (matches[0].profile.sourceHosts || []).includes(host)) || '',
+    ...match.profile,
+    matchConfidence: match.confidence,
+    matchMethod: method,
+    matchedSourceHost,
   };
 }
 

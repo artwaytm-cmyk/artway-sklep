@@ -1,4 +1,9 @@
 import { isDeepStrictEqual } from 'node:util';
+import {
+  manufacturerProfileProductPatch,
+  resolveManufacturerProfile,
+} from './manufacturer-profile-registry.mjs';
+import { synchronizeProductIdentifierAliases } from './product-identifiers.mjs';
 
 const MAX_FIELDS = 180;
 const MAX_PAYLOAD_BYTES = 750_000;
@@ -15,6 +20,8 @@ export const CATALOG_PRODUCT_PREPARATION_FIELDS = new Set([
   'cenaZakupuNetto', 'cenaZakupuVat', 'cenaZakupuWaluta', 'cenaZakupuDokument',
   'cenaZakupuKsef', 'cenaZakupuDostawca', 'cenaZakupuDataDokumentu', 'cenaZakupuDopasowanie',
   'producent', 'marka', 'gtin', 'ean', 'kodProducenta', 'mpn', 'numerReferencyjny',
+  'manufacturerProfileId', 'manufacturerProfile', 'manufacturerProfileResolvedAt',
+  'manufacturerProfileConfidence', 'manufacturerProfileMethod', 'manufacturerProfileEvidence',
   'externalId', 'sku', 'rozmiar', 'vatRate', 'badge', 'ikona', 'kolor',
   'zdjecie', 'zdjecia', 'warianty', 'parametry', 'parameters',
   'aktywny', 'ukryty', 'sprzedazAktywna', 'saleAvailable',
@@ -142,7 +149,52 @@ export function createCatalogProductFieldSaver({
       throw error;
     }
     const rawRemove = Array.isArray(remove) ? remove : [];
-    const changedAt = now(), clean = sanitizeCatalogProductFields(fields, { allowEmpty: rawRemove.length > 0 });
+    const changedAt = now();
+    const requested = sanitizeCatalogProductFields(fields, { allowEmpty: rawRemove.length > 0 });
+    let currentProduct = null;
+    try {
+      currentProduct = await readProduct(id);
+    } catch {
+      currentProduct = null;
+    }
+    const candidate = { ...(currentProduct || {}), ...requested };
+    const producerChanged = own(requested, 'producent')
+      && String(requested.producent || '').trim() !== String(currentProduct?.producent || '').trim();
+    const producerProfileFields = [
+      'manufacturerProfileId', 'manufacturerProfile', 'manufacturerProfileResolvedAt',
+      'manufacturerProfileConfidence', 'manufacturerProfileMethod', 'manufacturerProfileEvidence',
+    ];
+    const profileWasRemoved = rawRemove.some((field) => producerProfileFields.includes(String(field || '').trim()));
+    if ((producerChanged && !own(requested, 'manufacturerProfileId')) || profileWasRemoved) {
+      for (const field of producerProfileFields) delete candidate[field];
+    }
+    const codeFields = ['kodProducenta', 'numerReferencyjny', 'mpn', 'externalId', 'sku'];
+    const codeWasChanged = codeFields.some((field) => own(requested, field));
+    const requestedCode = codeFields.map((field) => requested[field]).find((value) => String(value ?? '').trim()) || '';
+    const identifiers = synchronizeProductIdentifierAliases(candidate, {
+      code: requestedCode,
+      overwrite: codeWasChanged,
+    });
+    const identifierPatch = Object.fromEntries(
+      [...codeFields, 'gtin', 'ean']
+        .filter((field) => own(identifiers, field) && (!own(candidate, field) || !same(candidate[field], identifiers[field])))
+        .map((field) => [field, identifiers[field]]),
+    );
+    const producerResolution = resolveManufacturerProfile(candidate, {
+      profileId: own(requested, 'manufacturerProfileId')
+        ? requested.manufacturerProfileId
+        : candidate.manufacturerProfileId || '',
+    });
+    const resolvedAt = currentProduct?.manufacturerProfileId === producerResolution?.profile?.id
+      ? currentProduct.manufacturerProfileResolvedAt || changedAt
+      : changedAt;
+    const resolvedPatch = manufacturerProfileProductPatch(candidate, producerResolution, resolvedAt);
+    const changedResolvedPatch = Object.fromEntries(Object.entries(resolvedPatch)
+      .filter(([field, value]) => !own(candidate, field) || !same(candidate[field], value)));
+    const clean = sanitizeCatalogProductFields(
+      { ...requested, ...identifierPatch, ...changedResolvedPatch },
+      { allowEmpty: rawRemove.length > 0 },
+    );
     const removeFields = [...new Set(rawRemove
       .map((field) => String(field || '').trim())
       .filter((field) => allowedProductField(field) && !Object.prototype.hasOwnProperty.call(clean, field)))];

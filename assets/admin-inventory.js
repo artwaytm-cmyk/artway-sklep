@@ -1335,6 +1335,93 @@ function widokAdminProdukty(){
     </div>`);
 }
 
+let productEditorProducentRejestr={loaded:false,loading:false,profiles:[],error:""};
+async function productEditorLadujProducentow(){
+  if(productEditorProducentRejestr.loaded||productEditorProducentRejestr.loading)return productEditorProducentRejestr.profiles;
+  productEditorProducentRejestr.loading=true;
+  try{
+    const data=await chmura("catalog-manufacturer-directory",{params:{limit:100},timeout:20000});
+    productEditorProducentRejestr={loaded:true,loading:false,profiles:Array.isArray(data.profiles)?data.profiles:[],error:""};
+  }catch(error){productEditorProducentRejestr={loaded:false,loading:false,profiles:[],error:String(error?.message||error)};}
+  return productEditorProducentRejestr.profiles;
+}
+function productEditorProducentProfilHTML(profile={},matching={}){
+  if(!profile?.id)return `<div class="product-manufacturer-empty"><b>Profil nie jest jeszcze dopasowany</b><small>Wpisz producenta. System sprawdzi nazwę, markę, domenę źródła i EAN, a następnie zapisze jeden zweryfikowany profil w kartotece.</small></div>`;
+  const confidence=Number(matching.confidence??profile.confidence);
+  return `<article class="product-manufacturer-profile" data-product-manufacturer-preview>
+    <header><div><span>✓ Zweryfikowana firma</span><h3>${esc(profile.displayName||profile.manufacturerName||profile.legalName)}</h3><small>${esc(profile.legalName||"")}</small></div>${Number.isFinite(confidence)?`<strong>${Math.round(confidence*100)}%</strong>`:""}</header>
+    <dl><div><dt>Adres</dt><dd>${esc(profile.address||"—")}</dd></div><div><dt>E-mail</dt><dd>${profile.email?`<a href="mailto:${esc(profile.email)}">${esc(profile.email)}</a>`:"—"}</dd></div><div><dt>Telefon</dt><dd>${profile.phone?`<a href="tel:${esc(profile.phone)}">${esc(profile.phone)}</a>`:"—"}</dd></div><div><dt>Strona</dt><dd>${profile.website?`<a href="${esc(profile.website)}" target="_blank" rel="noopener">${esc(profile.website)} ↗</a>`:"—"}</dd></div></dl>
+    <footer><span>Źródło oficjalne • weryfikacja ${esc(profile.verifiedAt||"—")}</span>${profile.sourceUrl?`<a href="${esc(profile.sourceUrl)}" target="_blank" rel="noopener">Sprawdź źródło ↗</a>`:""}</footer>
+  </article>`;
+}
+function productEditorProducentPoleHTML(p={}){
+  const profile=p.manufacturerProfile||{},producer=normalizujNazweProducenta(allegroProducentKanoniczny(p)||p.producent||p.marka||"");
+  setTimeout(()=>void productEditorLadujProducentow(),0);
+  return `<div class="f-group product-manufacturer-picker" data-product-manufacturer-picker>
+    <label>Producent *</label>
+    <div class="product-manufacturer-search"><span>⌕</span><input required autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" name="producent" value="${esc(producer)}" placeholder="Wpisz nazwę, markę lub firmę…" onfocus="productEditorProducentSzukaj(this)" oninput="walidujPoleProducenta(this);productEditorProducentWpisany(this)" pattern=".*[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż].*" title="Podaj nazwę zawierającą co najmniej jedną literę"><i>${profile.id?"zweryfikowany":"wyszukaj"}</i></div>
+    <input type="hidden" name="manufacturerProfileId" value="${esc(p.manufacturerProfileId||profile.id||"")}">
+    <div class="product-manufacturer-results" data-product-manufacturer-results hidden></div>
+    <small>Jedno pole producenta dla sklepu, GPSR, Allegro i Von Halsky. Marka pozostaje osobnym polem.</small>
+  </div>`;
+}
+function productEditorProducentWpisany(input){
+  const form=input?.form,picker=input?.closest?.("[data-product-manufacturer-picker]"),profileId=form?.elements?.manufacturerProfileId;
+  if(profileId)profileId.value="";
+  const badge=picker?.querySelector?.(".product-manufacturer-search i");if(badge)badge.textContent="wyszukaj";
+  const preview=form?.querySelector?.("[data-product-manufacturer-card]");if(preview)preview.innerHTML=productEditorProducentProfilHTML();
+  void productEditorProducentSzukaj(input);
+}
+async function productEditorProducentSzukaj(input){
+  const picker=input?.closest?.("[data-product-manufacturer-picker]"),box=picker?.querySelector?.("[data-product-manufacturer-results]");if(!box)return;
+  const profiles=await productEditorLadujProducentow(),query=String(input.value||"").trim().toLocaleLowerCase("pl-PL").normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+  const score=profile=>{
+    const values=[profile.displayName,profile.manufacturerName,profile.legalName,...(profile.aliases||[]),...(profile.brandAliases||[])].map(value=>String(value||"").toLocaleLowerCase("pl-PL").normalize("NFD").replace(/[\u0300-\u036f]/g,""));
+    return values.some(value=>value===query)?100:values.some(value=>value.startsWith(query))?90:values.some(value=>value.includes(query))?80:0;
+  };
+  const visible=profiles.map(profile=>({profile,score:query?score(profile):1})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score).slice(0,8);
+  box.hidden=false;input.setAttribute("aria-expanded","true");
+  box.innerHTML=visible.length?visible.map(({profile})=>`<button type="button" onclick="productEditorWybierzProducent(this,${jsArg(profile.id)})"><b>${esc(profile.displayName||profile.manufacturerName)}</b><span>${esc(profile.legalName||"")}</span><small>${esc(profile.address||"")} • ${esc(profile.email||"")}</small></button>`).join(""):`<div class="product-manufacturer-no-result"><b>Brak pewnego profilu</b><small>Nie zgadujemy kontaktów. Pozostaw nazwę — Agent oznaczy firmę do późniejszej weryfikacji.</small></div>`;
+}
+function productEditorWybierzProducent(button,profileId){
+  const profile=productEditorProducentRejestr.profiles.find(item=>String(item.id)===String(profileId)),form=button?.closest?.("form"),picker=button?.closest?.("[data-product-manufacturer-picker]");if(!profile||!form||!picker)return;
+  form.elements.producent.value=profile.manufacturerName||profile.displayName||"";form.elements.manufacturerProfileId.value=profile.id;
+  const brand=form.elements.marka;if(brand&&!String(brand.value||"").trim())brand.value=profile.displayName||profile.manufacturerName||"";
+  const box=picker.querySelector("[data-product-manufacturer-results]");if(box)box.hidden=true;form.elements.producent.setAttribute("aria-expanded","false");
+  const preview=form.querySelector("[data-product-manufacturer-card]");if(preview)preview.innerHTML=productEditorProducentProfilHTML(profile,{confidence:1});
+  toast(`✓ Dopasowano oficjalny profil: ${profile.displayName||profile.manufacturerName}`);
+}
+function productEditorWartoscKartoteki(value){
+  if(value===null||value===undefined||value==="")return "—";
+  if(typeof value==="boolean")return value?"tak":"nie";
+  if(Array.isArray(value))return value.length?value.map(item=>typeof item==="object"?JSON.stringify(item):String(item)).join(" • "):"—";
+  if(typeof value==="object")return JSON.stringify(value);
+  return String(value);
+}
+function productEditorPokazWszystkiePola(button){
+  const form=button?.closest?.("form"),id=String(form?.dataset?.productId||""),product=pobierzProduktAdmin(id),box=button?.closest?.("[data-product-all-fields]")?.querySelector?.("[data-product-all-fields-list]");if(!product||!box)return;
+  const entries=Object.entries(product).sort(([left],[right])=>left.localeCompare(right,"pl"));
+  box.innerHTML=entries.map(([field,value])=>`<article><b>${esc(field)}</b><span>${esc(productEditorWartoscKartoteki(value))}</span></article>`).join("");
+  box.hidden=false;button.remove();
+}
+function productEditorPelnaKartotekaHTML(p={}){
+  const profile=p.manufacturerProfile||{},lastFields=Array.isArray(p.lastAdminMutationFields)?p.lastAdminMutationFields:[],agentEntries=Object.entries(p).filter(([field,value])=>value!==undefined&&/(agent|editorial|allegro.*(?:status|missing|error|run|prepared|checked|confirmed)|vonHalsky.*(?:status|missing|error|run|prepared|checked|confirmed)|sourceEvidence|sourceMaterial|manufacturerProfile|gpsr)/i.test(field));
+  const sections=[
+    {label:"Tożsamość",ok:!!(p.gtin||p.ean||p.kodProducenta||p.mpn),detail:[p.gtin||p.ean,kodKanonicznyProduktu(p)].filter(Boolean).join(" • ")||"brak kodów"},
+    {label:"Producent i GPSR",ok:!!profile.id,detail:profile.displayName||profile.legalName||"profil niedopasowany"},
+    {label:"Treści",ok:!!(p.nazwa&&p.opisKrotki&&p.opis),detail:`sklep ${p.opisKrotki&&p.opis?"gotowy":"niepełny"} • Allegro ${p.allegroDescription?"gotowe":"oczekuje"} • Von Halsky ${p.vonHalskyDescription?"gotowe":"oczekuje"}`},
+    {label:"Media",ok:!!p.zdjecie,detail:`${p.zdjecie?"zdjęcie główne":"brak zdjęcia"} • ${(p.zdjecia||[]).length} w galerii`},
+    {label:"Źródło",ok:!!(p.sourceUrl||p.producentUrl),detail:p.sourceEvidence?.host||p.sourceUrl||p.producentUrl||"brak źródła"},
+    {label:"Kanały",ok:!!(p.allegroAgentPreparationStatus||p.vonHalskyAgentStatus),detail:`Allegro ${p.allegroAgentPreparationStatus||"oczekuje"} • Von Halsky ${p.vonHalskyAgentStatus||"oczekuje"}`},
+  ];
+  return `<section class="product-editor-section product-central-record" id="product-editor-record"><header class="product-editor-section-head"><div><span>Jedno źródło prawdy</span><h2>Pełna kartoteka produktu</h2><p>Edytor został otwarty z pełnego rekordu serwera. Wszystkie moduły i kanały korzystają z tych samych danych.</p></div><div class="product-record-revision"><b>${esc(p._catalog?.revision||p.lastAdminMutationId||"rekord centralny")}</b><small>${p.lastAdminMutationAt?`ostatnia zmiana ${esc(allegroDataTxt(p.lastAdminMutationAt))}`:"brak daty ostatniej zmiany"}</small></div></header>
+    <div class="product-record-completeness">${sections.map(section=>`<article class="${section.ok?"is-ready":"needs-work"}"><span>${section.ok?"✓":"!"}</span><div><b>${esc(section.label)}</b><small>${esc(section.detail)}</small></div></article>`).join("")}</div>
+    <div data-product-manufacturer-card>${productEditorProducentProfilHTML(profile,{confidence:p.manufacturerProfileConfidence})}</div>
+    <details class="product-record-agent-fields" ${agentEntries.some(([field])=>/error|missing/i.test(field))?"open":""}><summary>Dane i wyniki zapisane przez Agentów (${agentEntries.length})</summary><div>${agentEntries.map(([field,value])=>`<article><b>${esc(field)}</b><span>${esc(productEditorWartoscKartoteki(value))}</span></article>`).join("")||"<p>Agent nie zapisał jeszcze dodatkowych danych.</p>"}</div></details>
+    <details class="product-record-last-write"><summary>Ostatni potwierdzony zapis (${lastFields.length} pól)</summary><p>${lastFields.length?lastFields.map(field=>`<span>${esc(field)}</span>`).join(""):"Brak historii pól dla starszej kartoteki."}</p><small>Operacja: ${esc(p.lastAdminMutationArea||"—")} • wykonawca: ${esc(p.lastAdminMutationBy||"—")}</small></details>
+    <details class="product-record-all-fields" data-product-all-fields><summary>Wszystkie informacje zapisane przy produkcie (${Object.keys(p).length} pól)</summary><button class="btn ghost" type="button" onclick="productEditorPokazWszystkiePola(this)">Pokaż pełny zapis techniczny</button><div class="product-record-all-fields-list" data-product-all-fields-list hidden></div></details>
+  </section>`;
+}
 function productEditorCzyAllegroWybrane(p={}){
   let linked=false;
   try{linked=!!allegroOfertaDlaProduktuSklepu(p);}catch(error){linked=false;}
@@ -1373,7 +1460,7 @@ function productEditorStatusKanalu(status="needs_review"){
 }
 function productEditorNaglowekHTML(p={},edycja=false){
   const state=productEditorTrescStan(p),identity=[p.gtin||p.ean,kodKanonicznyProduktu(p),p.producent||p.marka].filter(Boolean).join(" • "),store=productEditorStatusKanalu(state.store.status),vh=productEditorStatusKanalu(state.vonHalsky.status),allegro=productEditorStatusKanalu(state.allegroContent.status);
-  return `<section class="product-editor-commandbar" aria-label="Nawigacja edytora produktu"><div class="product-editor-identity"><span>${edycja?`Produkt #${esc(p.id)}`:"Nowa kartoteka"}</span><b>${esc(p.nazwa||"Uzupełnij nazwę produktu")}</b><small>${esc(identity||"EAN, kod i producent nie są jeszcze kompletne")}</small></div><nav><a href="#product-editor-basics">Podstawowe</a><a href="#product-editor-content">Treść sklepu</a><a href="#product-editor-von-halsky">Treści kanałów</a><a href="#product-editor-prices">Ceny</a><a href="#product-editor-media">Media</a><a href="#product-editor-source">Źródło</a><a href="#product-editor-allegro">Allegro</a><a href="#product-editor-seo">SEO</a><a href="#product-editor-stock">Magazyn</a></nav><div class="product-editor-channel-state"><span class="${store[0]}">🏪 ${store[1]}</span><span class="${vh[0]}">🐕 ${vh[1]}</span>${state.allegro?`<span class="${allegro[0]}">🟠 ${allegro[1]}</span>`:""}</div></section>`;
+  return `<section class="product-editor-commandbar" aria-label="Nawigacja edytora produktu"><div class="product-editor-identity"><span>${edycja?`Produkt #${esc(p.id)}`:"Nowa kartoteka"}</span><b>${esc(p.nazwa||"Uzupełnij nazwę produktu")}</b><small>${esc(identity||"EAN, kod i producent nie są jeszcze kompletne")}</small></div><nav><a href="#product-editor-record">Kartoteka</a><a href="#product-editor-basics">Podstawowe</a><a href="#product-editor-content">Treść sklepu</a><a href="#product-editor-von-halsky">Treści kanałów</a><a href="#product-editor-prices">Ceny</a><a href="#product-editor-media">Media</a><a href="#product-editor-source">Źródło</a><a href="#product-editor-allegro">Allegro</a><a href="#product-editor-seo">SEO</a><a href="#product-editor-stock">Magazyn</a></nav><div class="product-editor-channel-state"><span class="${store[0]}">🏪 ${store[1]}</span><span class="${vh[0]}">🐕 ${vh[1]}</span>${state.allegro?`<span class="${allegro[0]}">🟠 ${allegro[1]}</span>`:""}</div></section>`;
 }
 function productEditorTrescHTML(p={}){
   const state=productEditorTrescStan(p);
@@ -1391,7 +1478,7 @@ function productEditorVonHalskyAuditHTML(p={}){
   const coverage=p.vonHalskyAgentAttributeCoverage==null?"—":`${Math.round(Number(p.vonHalskyAgentAttributeCoverage||0)*100)}%`;
   const statusLabel=ready?"Zapis potwierdzony":failed?"Błąd przygotowania":raw==="retry"||raw==="retry_pending"?"Zaplanowano ponowienie":issues.length?"Wymaga danych":"Jeszcze nie przygotowano";
   return `<div class="product-vh-audit ${ready?"is-ready":failed?"is-error":"needs-work"}">
-    <header><div><small>Ostatni proces Agenta</small><b>${esc(statusLabel)}</b><span>${preparedAt?`Ostatni zapis ${esc(allegroDataTxt(preparedAt))}`:"Uruchom przygotowanie w katalogu Von Halsky."}</span></div><strong>${p.vonHalskyAgentScore!==undefined&&p.vonHalskyAgentScore!==null&&Number.isFinite(Number(p.vonHalskyAgentScore))?`${Math.round(Number(p.vonHalskyAgentScore))}%`:"—"}</strong></header>
+    <header><div><small>Ostatni proces Agenta</small><b>${esc(statusLabel)}</b><span>${preparedAt?`Ostatni zapis ${esc(allegroDataTxt(preparedAt))}`:"Automatyczne przygotowanie oczekuje w kolejce serwera."}</span></div><strong>${p.vonHalskyAgentScore!==undefined&&p.vonHalskyAgentScore!==null&&Number.isFinite(Number(p.vonHalskyAgentScore))?`${Math.round(Number(p.vonHalskyAgentScore))}%`:"—"}</strong></header>
     <div class="product-vh-audit-grid"><article><small>Kategoria kanału</small><b>${esc(category)}</b></article><article><small>GPSR</small><b>${gpsrReady?`✓ ${esc(gpsr.legalName||gpsr.name||"kompletne")}`:"wymaga uzupełnienia"}</b></article><article><small>Parametry wymagane</small><b>${esc(coverage)}${missing.length?` • brakuje ${missing.length}`:""}</b></article><article><small>Odczyt kontrolny</small><b>${p.vonHalskyAgentReadbackConfirmed===true?"✓ potwierdzony":"— oczekuje"}</b></article></div>
     ${savedLabels.length?`<div class="product-vh-saved-fields"><small>Zapisane w tej kartotece</small><div>${savedLabels.map(label=>`<span>✓ ${esc(label)}</span>`).join("")}</div></div>`:""}
     ${issues.length||warnings.length||p.vonHalskyAgentError?`<div class="product-vh-audit-notes">${issues.length?`<p><b>Do uzupełnienia:</b> ${issues.map(esc).join(" • ")}</p>`:""}${warnings.length?`<p><b>Uwagi:</b> ${warnings.map(esc).join(" • ")}</p>`:""}${p.vonHalskyAgentError?`<p><b>Błąd:</b> ${esc(p.vonHalskyAgentError)}</p>`:""}</div>`:""}
@@ -1412,6 +1499,23 @@ function productEditorTrescZmieniona(form,channel="store"){
 }
 
 const ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI=3;
+const productEditorPelnaKartotekaWToku=new Set(),productEditorProducentRozwiazany=new Set(),productEditorPelnaKartotekaBledy=new Map();
+async function productEditorPobierzPelnaKartoteke(id,{force=false}={}){
+  const key=String(id??"").trim();if(!key||productEditorPelnaKartotekaWToku.has(key))return;
+  if(force)productEditorPelnaKartotekaBledy.delete(key);
+  productEditorPelnaKartotekaWToku.add(key);
+  try{
+    const product=await asortymentPobierzPelnyProdukt(key,{force});
+    productEditorPelnaKartotekaBledy.delete(key);
+    if(product&&!product.manufacturerProfileId&&!productEditorProducentRozwiazany.has(key)){
+      productEditorProducentRozwiazany.add(key);
+      await chmura("catalog-product-manufacturer-resolve",{method:"POST",body:{productId:key},timeout:30000}).then(result=>{
+        if(result?.product&&typeof podmienProduktAdminBezRenderu==="function")podmienProduktAdminBezRenderu(key,{...result.product,_catalog:{...(result.product._catalog||{}),detailLevel:"full"}});
+      }).catch(()=>null);
+    }
+  }catch(error){productEditorPelnaKartotekaBledy.set(key,String(error?.message||error));toast("Nie udało się pobrać pełnej kartoteki produktu: "+(error.message||error));}
+  finally{productEditorPelnaKartotekaWToku.delete(key);if(String(trasa())===`/admin/produkty/edytuj/${key}`)renderuj();}
+}
 function kodKanonicznyProduktu(p={}){return String(p.kodProducenta||p.numerReferencyjny||p.mpn||p.externalId||p.sku||"").trim();}
 function domyslneUstawieniaRentownosci(){
   const raw=ustawienia.domyslneKosztyRentownosci&&typeof ustawienia.domyslneKosztyRentownosci==="object"?ustawienia.domyslneKosztyRentownosci:{};
@@ -1493,7 +1597,7 @@ function agentAIStanWdrozeniaProduktu(p={}){
 function agentAIWdrozenieProduktuHTML(p={},edycja=false){
   const state=agentAIStanWdrozeniaProduktu(p),specialists=typeof agentAISpecjalisci!=="undefined"?(agentAISpecjalisci.data||{}):{},history=Array.isArray(specialists.history)?specialists.history:[],pending=null,latest=history.find(x=>x.target?.type==="product"&&String(x.target?.productId)===String(p.id)),learning=specialists.learning?.productContent||{},status=p.agentOnboardingStatus||(!p.id?"new":"not_started"),busy=status==="processing",editorial=p.contentEditorial||{};
   const activity=pending?`Starszy wyjątek jest automatycznie przenoszony do ponownej redakcji — niczego nie musisz zatwierdzać.`:editorial.status==="retry_pending"?`Agent odrzucił niepoprawny wynik i sam ponowi redakcję ${editorial.retryAt?agentAIRuntimeCzas(editorial.retryAt):"w następnym cyklu"}.`:editorial.status==="ready"?`Redakcja została automatycznie zapisana ${editorial.preparedAt?agentAIRuntimeCzas(editorial.preparedAt):"wcześniej"}${p.allegroEditorialSyncState==="synced"?" i zsynchronizowana z Allegro":p.allegroEditorialSyncPending?"; aktualizacja istniejącej oferty Allegro czeka w kolejce":""}.`:(specialists.updatedAt?"Agent kontroluje katalog co 15 minut i sam zapisuje kompletne, bezpieczne opisy.":"Łączę kartę produktu z rejestrem pracy Agenta…");
-  return `<section class="product-agent-onboarding ${pending?"needs-decision":state.ready?"is-ready":busy?"is-busy":"needs-work"}" data-product-agent-card="${esc(p.id||"")}"><header><div><span class="order-pro-label">Najwyższy priorytet przy dodawaniu • Agent redakcji • cykl 15 min</span><h3>${pending?"✨ Agent pyta o Twoją decyzję":"🤖 Agent wdrożenia produktu"}</h3><p>${esc(activity)}</p></div><strong>${pending?"?":`${state.done}/${state.total}`}</strong></header><div class="product-agent-checks">${state.checks.map(x=>`<span class="${x.ok?"done":"wait"}">${x.ok?"✓":"○"} ${esc(x.label)}</span>`).join("")}</div><div class="product-agent-learning"><span>🧠</span><div><b>Automatyczna redakcja jest aktywna</b><small>Nie wymaga zatwierdzeń; Twoje późniejsze korekty uczą Agenta wyłącznie preferowanego stylu.</small></div><a href="#/admin/agent-ai/specjalisci">Pełna pamięć i historia →</a></div>${pending?`<div class="product-agent-pending">${agentAISpecjalistaDecyzjaHTML(pending)}</div>`:""}<footer><small>${pending?"Starszy wyjątek zostanie zamknięty automatycznie.":state.ready?"Kompletność podstawowa jest prawidłowa; Agent nadal ocenia jakość tekstu.":"Brakujące pola pozostają widoczne, a redakcja działa w tle."}</small>${edycja&&!pending?`<button class="btn" type="button" onclick="agentAIUruchomWdrozenieProduktu(${jsArg(p.id)},this)" ${busy?"disabled":""}>${busy?"⏳ Przygotowuję…":"✨ Przygotuj teraz"}</button>`:""}</footer></section>`;
+  return `<section class="product-agent-onboarding ${pending?"needs-decision":state.ready?"is-ready":busy?"is-busy":"needs-work"}" data-product-agent-card="${esc(p.id||"")}"><header><div><span class="order-pro-label">Automatyczny Agent kartoteki • praca serwerowa</span><h3>${pending?"✨ Agent pyta o Twoją decyzję":"🤖 Automatyczne uzupełnianie produktu"}</h3><p>${esc(activity)}</p></div><strong>${pending?"?":`${state.done}/${state.total}`}</strong></header><div class="product-agent-checks">${state.checks.map(x=>`<span class="${x.ok?"done":"wait"}">${x.ok?"✓":"○"} ${esc(x.label)}</span>`).join("")}</div><div class="product-agent-learning"><span>🧠</span><div><b>Redakcja, producent i dane kanałów uzupełniają się automatycznie</b><small>Wynik jest zapisywany bezpośrednio do tej pełnej kartoteki. Ręczne przygotowanie nie jest wymagane.</small></div><a href="#/admin/agent-ai/specjalisci">Historia pracy →</a></div>${pending?`<div class="product-agent-pending">${agentAISpecjalistaDecyzjaHTML(pending)}</div>`:""}<footer><small>${pending?"Wyjątek wymaga decyzji administratora.":state.ready?"Kartoteka podstawowa jest kompletna; Agent wykonuje dalszą kontrolę w tle.":"Brakujące pola są widoczne poniżej i trafiły do kolejki automatycznej."}</small></footer></section>`;
 }
 async function agentAIUruchomWdrozenieProduktu(id,button=null){
   const product=pobierzProduktAdmin(id);if(!product)return null;
@@ -1515,6 +1619,7 @@ function formularzProduktu(p, tryb){
     <form class="product-editor-form" data-product-id="${esc(p.id||0)}" ${!edycja?`data-product-add-form data-product-duplicate-fingerprint="${esc(kontrolaDodawania.fingerprint)}" oninput="produktDodawanieZmienione(event,this)" onchange="produktDodawanieZmienione(event,this)"`:""} onsubmit="${edycja?`zapiszProduktAdmin(event,${jsArg(p.id)})`:"dodajProdukt(event)"}">
       ${productEditorNaglowekHTML(p,edycja)}
       ${agentAIWdrozenieProduktuHTML(p,edycja)}
+      ${productEditorPelnaKartotekaHTML(p)}
       ${!edycja?`<section class="product-add-control" data-product-add-control>${produktDodawanieKontrolaHTML(p,{})}</section>`:""}
       ${!edycja?`<section class="product-link-one-workspace product-link-inline-workspace"><div class="order-section-head"><div><span class="order-pro-label">Opcjonalne automatyczne uzupełnienie</span><h3>🔗 Pobierz dane z linku produktu</h3><p class="order-detail-lead">Wklej adres konkretnego produktu albo od razu wypełnij formularz ręcznie. Agent jedynie uzupełni pola — nic nie zostanie dodane bez Twojego zatwierdzenia na dole formularza.</p></div><span class="lvl lvl-ok">bez automatycznego zapisu</span></div><label for="oneProductUrl">Adres konkretnego produktu</label><div class="product-link-one-input"><input id="oneProductUrl" data-one-link-url name="producentUrl" type="url" value="${esc(p.producentUrl||p.sourceUrl||"")}" placeholder="https://strona-producenta.pl/konkretny-produkt"><button class="btn" type="button" onclick="pobierzDaneProduktuZUrl(this)">🤖 Pobierz i uzupełnij formularz</button></div><label class="check product-link-overwrite"><input type="checkbox" name="nadpiszImportUrl"> Nadpisz również pola wpisane przeze mnie</label><small>Po pobraniu sprawdź nazwę, cenę, opis, zdjęcia i kody. Dopiero przycisk „Zatwierdź i dodaj produkt” zapisze kartotekę.</small><div data-product-link-agent-result></div></section>`:""}
       <section class="product-editor-section product-editor-basics" id="product-editor-basics"><header class="product-editor-section-head"><div><span>Tożsamość produktu</span><h2>Podstawowe informacje</h2><p>Nazwa i kategoria są wspólnym punktem odniesienia dla sklepu, wyszukiwania, magazynu i integracji.</p></div></header><div class="f-row">
@@ -1563,7 +1668,7 @@ function formularzProduktu(p, tryb){
           <div class="f-group"><label>Kod produktu / producenta</label><input name="kodProducenta" value="${esc(kodKanonicznyProduktu(p))}" placeholder="np. 0006 lub kod katalogowy" maxlength="160"><small>Jedno pole kanoniczne. System przekazuje tę samą wartość jako SKU, EXTERNAL_ID i MPN do starszych importów oraz Allegro.</small></div>
         </div>
         <div class="f-row">
-          <div class="f-group"><label>Producent *</label><input required name="producent" list="allegroProducerList" value="${esc(normalizujNazweProducenta(allegroProducentKanoniczny(p)||p.producent||p.marka||""))}" placeholder="np. Alexander" oninput="walidujPoleProducenta(this)" pattern=".*[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż].*" title="Podaj nazwę zawierającą co najmniej jedną literę"><datalist id="allegroProducerList">${allegroListaProducentow().filter(poprawnaNazwaProducenta).map(name=>`<option value="${esc(name)}">`).join("")}</datalist><small>Wpisz rzeczywistą nazwę, np. Alexander. Numer referencyjny należy do pola kodu produktu.</small></div>
+          ${productEditorProducentPoleHTML(p)}
           <div class="f-group"><label>Marka / BRAND</label><input name="marka" value="${esc(normalizujNazweProducenta(p.marka||""))}" oninput="walidujPoleProducenta(this)" pattern=".*[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż].*" title="Marka musi zawierać co najmniej jedną literę"></div>
           <div class="f-group"><label>Kolor produktu / COLOR</label><input name="kolorProduktu" value="${esc(p.kolorProduktu||"")}" placeholder="np. Czarny matowy"></div>
         </div>
@@ -1600,8 +1705,7 @@ function formularzProduktu(p, tryb){
           <div class="f-group"><label>Co zrobić na Allegro</label><select id="allegroPublicationAction"><option value="activate" ${domyslnaPublikacjaAllegro==="activate"?"selected":""}>Zapisz i aktywuj sprzedaż</option><option value="keep" ${domyslnaPublikacjaAllegro==="keep"?"selected":""}>Tylko zaktualizuj — zachowaj obecny status</option><option value="deactivate">Zapisz i wyłącz sprzedaż</option></select><small>${ofertaAllegroId?`Obecny status Allegro: <b>${esc(ofertaAllegroStatus||"nieznany")}</b>.`:"Produkt nie ma jeszcze oferty — domyślnie zostanie wystawiony aktywnie."} Wynik zostanie ponownie odczytany bezpośrednio z Allegro.</small></div>
         </div>
         <div class="diag-actions">
-          ${edycja?`<button class="btn ghost" type="button" onclick="allegroPrzygotujSzkicProduktu(${jsArg(p.id)})">🤖 Przygotuj i zapisz dane do Allegro</button>
-          <button class="btn" type="button" onclick="allegroWystawProdukt(${jsArg(p.id)})">${ofertaAllegroStatus==="ACTIVE"?"🟠 Zapisz i zaktualizuj aktywną ofertę":ofertaAllegroId?"🚀 Zapisz i aktywuj ofertę":"🚀 Przygotuj i wystaw produkt"}</button>${ofertaAllegroId?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(ofertaAllegroId)}" target="_blank" rel="noopener">↗ Otwórz istniejącą ofertę</a>`:""}`:`<span style="color:var(--muted2);font-size:.85rem">Najpierw zapisz produkt, potem Agent przygotuje i trwale zapisze komplet danych Allegro.</span>`}
+          ${edycja?`<button class="btn" type="button" onclick="allegroWystawProdukt(${jsArg(p.id)})">${ofertaAllegroStatus==="ACTIVE"?"🟠 Zapisz i zaktualizuj aktywną ofertę":ofertaAllegroId?"🚀 Zapisz i aktywuj ofertę":"🚀 Wystaw produkt"}</button>${ofertaAllegroId?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(ofertaAllegroId)}" target="_blank" rel="noopener">↗ Otwórz istniejącą ofertę</a>`:""}`:`<span style="color:var(--muted2);font-size:.85rem">Po zapisaniu produktu automatyczne przygotowanie trafi do serwerowej kolejki.</span>`}
         </div>
         <div id="allegroDraftPreview"></div>
         <div id="allegroDescriptionPreview"></div>
@@ -1649,6 +1753,15 @@ function widokAdminProduktyZLinku(){
 function widokAdminProduktEdytuj(id){
   const p = pobierzProduktAdmin(id);
   if(!p) return asortymentSzkielet("produkty", `<div class="panel"><h1>Nie znaleziono produktu</h1><p><a href="#/admin/produkty">← Wróć do produktów</a></p></div>`);
+  if(p?._catalog?.detailLevel!=="full"){
+    const loadError=productEditorPelnaKartotekaBledy.get(String(id));
+    if(loadError)return asortymentSzkielet("produkty", `<div class="panel product-editor-loading"><div class="crumb"><a href="#/admin/produkty">Produkty</a> › Pełna kartoteka</div><h2>Nie otwarto skróconej kopii produktu</h2><p>${esc(loadError)}</p><button class="btn" type="button" onclick="productEditorPobierzPelnaKartoteke(${jsArg(id)},{force:true})">↻ Ponów pobranie pełnej kartoteki</button></div>`);
+    setTimeout(()=>void productEditorPobierzPelnaKartoteke(id),0);
+    return asortymentSzkielet("produkty", `<div class="panel product-editor-loading"><div class="crumb"><a href="#/admin/produkty">Produkty</a> › Pełna kartoteka</div><div class="loading">⏳ Pobieram wszystkie dane produktu #${esc(id)} z centralnej kartoteki…</div><p>Edytor otworzy się dopiero po pobraniu opisów, źródeł, danych Agenta, producenta, GPSR i informacji kanałów. Dzięki temu zapis nie pracuje na skróconym rekordzie listy.</p></div>`);
+  }
+  if(!p.manufacturerProfileId&&!productEditorProducentRozwiazany.has(String(id))){
+    productEditorProducentRozwiazany.add(String(id));setTimeout(()=>void chmura("catalog-product-manufacturer-resolve",{method:"POST",body:{productId:String(id)},timeout:30000}).then(async result=>{if(result?.product){if(typeof asortymentPelneProduktyCache!=="undefined")asortymentPelneProduktyCache.set(String(id),{at:Date.now(),product:{...result.product,_catalog:{...(result.product._catalog||{}),detailLevel:"full"}}});renderuj();}}).catch(()=>null),0);
+  }
   return asortymentSzkielet("produkty", `
     <div class="panel">
       <div class="crumb"><a href="#/admin/produkty">Produkty</a> › Edycja › ${esc(p.nazwa)}</div>
@@ -1718,6 +1831,9 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
   }
   p.producent=producerName;
   p.marka=normalizujNazweProducenta(f.get("marka"))||producerName;
+  const manufacturerProfileId=String(f.get("manufacturerProfileId")||"").trim();
+  if(manufacturerProfileId)p.manufacturerProfileId=manufacturerProfileId;
+  else for(const field of ["manufacturerProfileId","manufacturerProfile","manufacturerProfileResolvedAt","manufacturerProfileConfidence","manufacturerProfileMethod","manufacturerProfileEvidence"])delete p[field];
   const canonicalCode=String(f.get("kodProducenta")||"").trim();
   for(const pole of ["kodProducenta","numerReferencyjny","mpn","externalId","sku"]){if(canonicalCode)p[pole]=canonicalCode;else delete p[pole];}
   if(p.producentUrl)p.sourceUrl=p.producentUrl;
@@ -1761,6 +1877,13 @@ function produktPolaDoCentralnegoZapisu(product={}){
     !["id","_catalog","stan","dostepny"].includes(key)&&value!==undefined
   ));
 }
+function produktRoznicaCentralnegoZapisu(product={},previous={}){
+  const next=produktPolaDoCentralnegoZapisu(product),before=produktPolaDoCentralnegoZapisu(previous);
+  const equal=(left,right)=>{if(left===right)return true;try{return JSON.stringify(left)===JSON.stringify(right);}catch(error){return false;}};
+  const fields=Object.fromEntries(Object.entries(next).filter(([key,value])=>!Object.hasOwn(before,key)||!equal(value,before[key])));
+  const remove=Object.keys(before).filter(key=>!Object.hasOwn(next,key));
+  return {fields,remove};
+}
 async function utworzProduktCentralnie(product={}){
   const result=await chmura("catalog-product-create",{method:"POST",body:{
     product,
@@ -1770,11 +1893,14 @@ async function utworzProduktCentralnie(product={}){
   if(!result?.ok||String(result.productId)!==String(product.id))throw new Error(result?.error||"Serwer nie potwierdził utworzenia produktu.");
   return result.product&&String(result.product.id)===String(product.id)?result.product:product;
 }
-async function zapiszProduktCentralnie(product={}){
+async function zapiszProduktCentralnie(product={},previous={}){
   const productId=String(product.id??"").trim();
+  const change=produktRoznicaCentralnegoZapisu(product,previous);
+  if(!Object.keys(change.fields).length&&!change.remove.length)return product;
   const result=await chmura("catalog-product-fields-update",{method:"POST",body:{
     productId,
-    fields:produktPolaDoCentralnegoZapisu(product),
+    fields:change.fields,
+    remove:change.remove,
     mutationId:`product-editor:${productId}:${Date.now().toString(36)}`,
     area:"admin-product-editor"
   },timeout:60000});
@@ -1877,7 +2003,7 @@ async function zapiszProduktAdmin(e,id){
   const p = daneProduktuZFormularza(f, id, poprzedni||{});
   if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę i nazwę producenta"); return; }
   try{
-    const saved=await zapiszProduktCentralnie(p);
+    const saved=await zapiszProduktCentralnie(p,poprzedni);
     Object.assign(p,saved);
   }catch(error){
     if(submit)submit.disabled=false;
@@ -1990,14 +2116,20 @@ let asortymentSerwerowaKolejka={batchId:"",checking:false,timer:null,lastCheck:0
 const ASORTYMENT_PELNY_PRODUKT_CACHE_MS=15*60*1000;
 
 function asortymentProduktPoId(rawId){return pobierzProduktAdmin(rawId)||produktyDoAdministracji().find(p=>String(p.id)===String(rawId))||null;}
+function asortymentPelnyProduktPoId(rawId){
+  const cached=asortymentPelneProduktyCache.get(String(rawId??""));
+  return cached?.product||null;
+}
 async function asortymentPobierzPelnyProdukt(rawId,{force=false}={}){
   const id=String(rawId??"").trim(),cached=asortymentPelneProduktyCache.get(id);
   if(!force&&cached&&Date.now()-cached.at<ASORTYMENT_PELNY_PRODUKT_CACHE_MS)return cached.product;
   const result=await chmura("product-catalog-item",{params:{id},timeout:30000}),product=result?.product;
   if(!product||String(product.id)!==id)throw new Error(`Nie udało się pobrać pełnej kartoteki produktu ${id}.`);
-  asortymentPelneProduktyCache.delete(id);asortymentPelneProduktyCache.set(id,{at:Date.now(),product});
+  const fullProduct={...product,_catalog:{...(product._catalog||{}),detailLevel:"full"}};
+  asortymentPelneProduktyCache.delete(id);asortymentPelneProduktyCache.set(id,{at:Date.now(),product:fullProduct});
+  if(typeof podmienProduktAdminBezRenderu==="function")podmienProduktAdminBezRenderu(id,fullProduct);
   while(asortymentPelneProduktyCache.size>250)asortymentPelneProduktyCache.delete(asortymentPelneProduktyCache.keys().next().value);
-  return product;
+  return fullProduct;
 }
 function asortymentOfertaProduktu(p={}){return allegroOfertaDlaProduktuSklepu(p)||(p.allegroOfferId?allegroOfertaPoId(String(p.allegroOfferId)):null);}
 function asortymentProduktyZId(ids=[]){return [...new Set(ids.map(String))].map(asortymentProduktPoId).filter(p=>p&&!czyProduktAdminWKoszu(p));}

@@ -1,4 +1,21 @@
 const ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI=3;
+const productEditorPelnaKartotekaWToku=new Set(),productEditorProducentRozwiazany=new Set(),productEditorPelnaKartotekaBledy=new Map();
+async function productEditorPobierzPelnaKartoteke(id,{force=false}={}){
+  const key=String(id??"").trim();if(!key||productEditorPelnaKartotekaWToku.has(key))return;
+  if(force)productEditorPelnaKartotekaBledy.delete(key);
+  productEditorPelnaKartotekaWToku.add(key);
+  try{
+    const product=await asortymentPobierzPelnyProdukt(key,{force});
+    productEditorPelnaKartotekaBledy.delete(key);
+    if(product&&!product.manufacturerProfileId&&!productEditorProducentRozwiazany.has(key)){
+      productEditorProducentRozwiazany.add(key);
+      await chmura("catalog-product-manufacturer-resolve",{method:"POST",body:{productId:key},timeout:30000}).then(result=>{
+        if(result?.product&&typeof podmienProduktAdminBezRenderu==="function")podmienProduktAdminBezRenderu(key,{...result.product,_catalog:{...(result.product._catalog||{}),detailLevel:"full"}});
+      }).catch(()=>null);
+    }
+  }catch(error){productEditorPelnaKartotekaBledy.set(key,String(error?.message||error));toast("Nie udało się pobrać pełnej kartoteki produktu: "+(error.message||error));}
+  finally{productEditorPelnaKartotekaWToku.delete(key);if(String(trasa())===`/admin/produkty/edytuj/${key}`)renderuj();}
+}
 function kodKanonicznyProduktu(p={}){return String(p.kodProducenta||p.numerReferencyjny||p.mpn||p.externalId||p.sku||"").trim();}
 function domyslneUstawieniaRentownosci(){
   const raw=ustawienia.domyslneKosztyRentownosci&&typeof ustawienia.domyslneKosztyRentownosci==="object"?ustawienia.domyslneKosztyRentownosci:{};
@@ -80,7 +97,7 @@ function agentAIStanWdrozeniaProduktu(p={}){
 function agentAIWdrozenieProduktuHTML(p={},edycja=false){
   const state=agentAIStanWdrozeniaProduktu(p),specialists=typeof agentAISpecjalisci!=="undefined"?(agentAISpecjalisci.data||{}):{},history=Array.isArray(specialists.history)?specialists.history:[],pending=null,latest=history.find(x=>x.target?.type==="product"&&String(x.target?.productId)===String(p.id)),learning=specialists.learning?.productContent||{},status=p.agentOnboardingStatus||(!p.id?"new":"not_started"),busy=status==="processing",editorial=p.contentEditorial||{};
   const activity=pending?`Starszy wyjątek jest automatycznie przenoszony do ponownej redakcji — niczego nie musisz zatwierdzać.`:editorial.status==="retry_pending"?`Agent odrzucił niepoprawny wynik i sam ponowi redakcję ${editorial.retryAt?agentAIRuntimeCzas(editorial.retryAt):"w następnym cyklu"}.`:editorial.status==="ready"?`Redakcja została automatycznie zapisana ${editorial.preparedAt?agentAIRuntimeCzas(editorial.preparedAt):"wcześniej"}${p.allegroEditorialSyncState==="synced"?" i zsynchronizowana z Allegro":p.allegroEditorialSyncPending?"; aktualizacja istniejącej oferty Allegro czeka w kolejce":""}.`:(specialists.updatedAt?"Agent kontroluje katalog co 15 minut i sam zapisuje kompletne, bezpieczne opisy.":"Łączę kartę produktu z rejestrem pracy Agenta…");
-  return `<section class="product-agent-onboarding ${pending?"needs-decision":state.ready?"is-ready":busy?"is-busy":"needs-work"}" data-product-agent-card="${esc(p.id||"")}"><header><div><span class="order-pro-label">Najwyższy priorytet przy dodawaniu • Agent redakcji • cykl 15 min</span><h3>${pending?"✨ Agent pyta o Twoją decyzję":"🤖 Agent wdrożenia produktu"}</h3><p>${esc(activity)}</p></div><strong>${pending?"?":`${state.done}/${state.total}`}</strong></header><div class="product-agent-checks">${state.checks.map(x=>`<span class="${x.ok?"done":"wait"}">${x.ok?"✓":"○"} ${esc(x.label)}</span>`).join("")}</div><div class="product-agent-learning"><span>🧠</span><div><b>Automatyczna redakcja jest aktywna</b><small>Nie wymaga zatwierdzeń; Twoje późniejsze korekty uczą Agenta wyłącznie preferowanego stylu.</small></div><a href="#/admin/agent-ai/specjalisci">Pełna pamięć i historia →</a></div>${pending?`<div class="product-agent-pending">${agentAISpecjalistaDecyzjaHTML(pending)}</div>`:""}<footer><small>${pending?"Starszy wyjątek zostanie zamknięty automatycznie.":state.ready?"Kompletność podstawowa jest prawidłowa; Agent nadal ocenia jakość tekstu.":"Brakujące pola pozostają widoczne, a redakcja działa w tle."}</small>${edycja&&!pending?`<button class="btn" type="button" onclick="agentAIUruchomWdrozenieProduktu(${jsArg(p.id)},this)" ${busy?"disabled":""}>${busy?"⏳ Przygotowuję…":"✨ Przygotuj teraz"}</button>`:""}</footer></section>`;
+  return `<section class="product-agent-onboarding ${pending?"needs-decision":state.ready?"is-ready":busy?"is-busy":"needs-work"}" data-product-agent-card="${esc(p.id||"")}"><header><div><span class="order-pro-label">Automatyczny Agent kartoteki • praca serwerowa</span><h3>${pending?"✨ Agent pyta o Twoją decyzję":"🤖 Automatyczne uzupełnianie produktu"}</h3><p>${esc(activity)}</p></div><strong>${pending?"?":`${state.done}/${state.total}`}</strong></header><div class="product-agent-checks">${state.checks.map(x=>`<span class="${x.ok?"done":"wait"}">${x.ok?"✓":"○"} ${esc(x.label)}</span>`).join("")}</div><div class="product-agent-learning"><span>🧠</span><div><b>Redakcja, producent i dane kanałów uzupełniają się automatycznie</b><small>Wynik jest zapisywany bezpośrednio do tej pełnej kartoteki. Ręczne przygotowanie nie jest wymagane.</small></div><a href="#/admin/agent-ai/specjalisci">Historia pracy →</a></div>${pending?`<div class="product-agent-pending">${agentAISpecjalistaDecyzjaHTML(pending)}</div>`:""}<footer><small>${pending?"Wyjątek wymaga decyzji administratora.":state.ready?"Kartoteka podstawowa jest kompletna; Agent wykonuje dalszą kontrolę w tle.":"Brakujące pola są widoczne poniżej i trafiły do kolejki automatycznej."}</small></footer></section>`;
 }
 async function agentAIUruchomWdrozenieProduktu(id,button=null){
   const product=pobierzProduktAdmin(id);if(!product)return null;
@@ -102,6 +119,7 @@ function formularzProduktu(p, tryb){
     <form class="product-editor-form" data-product-id="${esc(p.id||0)}" ${!edycja?`data-product-add-form data-product-duplicate-fingerprint="${esc(kontrolaDodawania.fingerprint)}" oninput="produktDodawanieZmienione(event,this)" onchange="produktDodawanieZmienione(event,this)"`:""} onsubmit="${edycja?`zapiszProduktAdmin(event,${jsArg(p.id)})`:"dodajProdukt(event)"}">
       ${productEditorNaglowekHTML(p,edycja)}
       ${agentAIWdrozenieProduktuHTML(p,edycja)}
+      ${productEditorPelnaKartotekaHTML(p)}
       ${!edycja?`<section class="product-add-control" data-product-add-control>${produktDodawanieKontrolaHTML(p,{})}</section>`:""}
       ${!edycja?`<section class="product-link-one-workspace product-link-inline-workspace"><div class="order-section-head"><div><span class="order-pro-label">Opcjonalne automatyczne uzupełnienie</span><h3>🔗 Pobierz dane z linku produktu</h3><p class="order-detail-lead">Wklej adres konkretnego produktu albo od razu wypełnij formularz ręcznie. Agent jedynie uzupełni pola — nic nie zostanie dodane bez Twojego zatwierdzenia na dole formularza.</p></div><span class="lvl lvl-ok">bez automatycznego zapisu</span></div><label for="oneProductUrl">Adres konkretnego produktu</label><div class="product-link-one-input"><input id="oneProductUrl" data-one-link-url name="producentUrl" type="url" value="${esc(p.producentUrl||p.sourceUrl||"")}" placeholder="https://strona-producenta.pl/konkretny-produkt"><button class="btn" type="button" onclick="pobierzDaneProduktuZUrl(this)">🤖 Pobierz i uzupełnij formularz</button></div><label class="check product-link-overwrite"><input type="checkbox" name="nadpiszImportUrl"> Nadpisz również pola wpisane przeze mnie</label><small>Po pobraniu sprawdź nazwę, cenę, opis, zdjęcia i kody. Dopiero przycisk „Zatwierdź i dodaj produkt” zapisze kartotekę.</small><div data-product-link-agent-result></div></section>`:""}
       <section class="product-editor-section product-editor-basics" id="product-editor-basics"><header class="product-editor-section-head"><div><span>Tożsamość produktu</span><h2>Podstawowe informacje</h2><p>Nazwa i kategoria są wspólnym punktem odniesienia dla sklepu, wyszukiwania, magazynu i integracji.</p></div></header><div class="f-row">
@@ -150,7 +168,7 @@ function formularzProduktu(p, tryb){
           <div class="f-group"><label>Kod produktu / producenta</label><input name="kodProducenta" value="${esc(kodKanonicznyProduktu(p))}" placeholder="np. 0006 lub kod katalogowy" maxlength="160"><small>Jedno pole kanoniczne. System przekazuje tę samą wartość jako SKU, EXTERNAL_ID i MPN do starszych importów oraz Allegro.</small></div>
         </div>
         <div class="f-row">
-          <div class="f-group"><label>Producent *</label><input required name="producent" list="allegroProducerList" value="${esc(normalizujNazweProducenta(allegroProducentKanoniczny(p)||p.producent||p.marka||""))}" placeholder="np. Alexander" oninput="walidujPoleProducenta(this)" pattern=".*[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż].*" title="Podaj nazwę zawierającą co najmniej jedną literę"><datalist id="allegroProducerList">${allegroListaProducentow().filter(poprawnaNazwaProducenta).map(name=>`<option value="${esc(name)}">`).join("")}</datalist><small>Wpisz rzeczywistą nazwę, np. Alexander. Numer referencyjny należy do pola kodu produktu.</small></div>
+          ${productEditorProducentPoleHTML(p)}
           <div class="f-group"><label>Marka / BRAND</label><input name="marka" value="${esc(normalizujNazweProducenta(p.marka||""))}" oninput="walidujPoleProducenta(this)" pattern=".*[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż].*" title="Marka musi zawierać co najmniej jedną literę"></div>
           <div class="f-group"><label>Kolor produktu / COLOR</label><input name="kolorProduktu" value="${esc(p.kolorProduktu||"")}" placeholder="np. Czarny matowy"></div>
         </div>
@@ -187,8 +205,7 @@ function formularzProduktu(p, tryb){
           <div class="f-group"><label>Co zrobić na Allegro</label><select id="allegroPublicationAction"><option value="activate" ${domyslnaPublikacjaAllegro==="activate"?"selected":""}>Zapisz i aktywuj sprzedaż</option><option value="keep" ${domyslnaPublikacjaAllegro==="keep"?"selected":""}>Tylko zaktualizuj — zachowaj obecny status</option><option value="deactivate">Zapisz i wyłącz sprzedaż</option></select><small>${ofertaAllegroId?`Obecny status Allegro: <b>${esc(ofertaAllegroStatus||"nieznany")}</b>.`:"Produkt nie ma jeszcze oferty — domyślnie zostanie wystawiony aktywnie."} Wynik zostanie ponownie odczytany bezpośrednio z Allegro.</small></div>
         </div>
         <div class="diag-actions">
-          ${edycja?`<button class="btn ghost" type="button" onclick="allegroPrzygotujSzkicProduktu(${jsArg(p.id)})">🤖 Przygotuj i zapisz dane do Allegro</button>
-          <button class="btn" type="button" onclick="allegroWystawProdukt(${jsArg(p.id)})">${ofertaAllegroStatus==="ACTIVE"?"🟠 Zapisz i zaktualizuj aktywną ofertę":ofertaAllegroId?"🚀 Zapisz i aktywuj ofertę":"🚀 Przygotuj i wystaw produkt"}</button>${ofertaAllegroId?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(ofertaAllegroId)}" target="_blank" rel="noopener">↗ Otwórz istniejącą ofertę</a>`:""}`:`<span style="color:var(--muted2);font-size:.85rem">Najpierw zapisz produkt, potem Agent przygotuje i trwale zapisze komplet danych Allegro.</span>`}
+          ${edycja?`<button class="btn" type="button" onclick="allegroWystawProdukt(${jsArg(p.id)})">${ofertaAllegroStatus==="ACTIVE"?"🟠 Zapisz i zaktualizuj aktywną ofertę":ofertaAllegroId?"🚀 Zapisz i aktywuj ofertę":"🚀 Wystaw produkt"}</button>${ofertaAllegroId?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(ofertaAllegroId)}" target="_blank" rel="noopener">↗ Otwórz istniejącą ofertę</a>`:""}`:`<span style="color:var(--muted2);font-size:.85rem">Po zapisaniu produktu automatyczne przygotowanie trafi do serwerowej kolejki.</span>`}
         </div>
         <div id="allegroDraftPreview"></div>
         <div id="allegroDescriptionPreview"></div>
@@ -236,6 +253,15 @@ function widokAdminProduktyZLinku(){
 function widokAdminProduktEdytuj(id){
   const p = pobierzProduktAdmin(id);
   if(!p) return asortymentSzkielet("produkty", `<div class="panel"><h1>Nie znaleziono produktu</h1><p><a href="#/admin/produkty">← Wróć do produktów</a></p></div>`);
+  if(p?._catalog?.detailLevel!=="full"){
+    const loadError=productEditorPelnaKartotekaBledy.get(String(id));
+    if(loadError)return asortymentSzkielet("produkty", `<div class="panel product-editor-loading"><div class="crumb"><a href="#/admin/produkty">Produkty</a> › Pełna kartoteka</div><h2>Nie otwarto skróconej kopii produktu</h2><p>${esc(loadError)}</p><button class="btn" type="button" onclick="productEditorPobierzPelnaKartoteke(${jsArg(id)},{force:true})">↻ Ponów pobranie pełnej kartoteki</button></div>`);
+    setTimeout(()=>void productEditorPobierzPelnaKartoteke(id),0);
+    return asortymentSzkielet("produkty", `<div class="panel product-editor-loading"><div class="crumb"><a href="#/admin/produkty">Produkty</a> › Pełna kartoteka</div><div class="loading">⏳ Pobieram wszystkie dane produktu #${esc(id)} z centralnej kartoteki…</div><p>Edytor otworzy się dopiero po pobraniu opisów, źródeł, danych Agenta, producenta, GPSR i informacji kanałów. Dzięki temu zapis nie pracuje na skróconym rekordzie listy.</p></div>`);
+  }
+  if(!p.manufacturerProfileId&&!productEditorProducentRozwiazany.has(String(id))){
+    productEditorProducentRozwiazany.add(String(id));setTimeout(()=>void chmura("catalog-product-manufacturer-resolve",{method:"POST",body:{productId:String(id)},timeout:30000}).then(async result=>{if(result?.product){if(typeof asortymentPelneProduktyCache!=="undefined")asortymentPelneProduktyCache.set(String(id),{at:Date.now(),product:{...result.product,_catalog:{...(result.product._catalog||{}),detailLevel:"full"}}});renderuj();}}).catch(()=>null),0);
+  }
   return asortymentSzkielet("produkty", `
     <div class="panel">
       <div class="crumb"><a href="#/admin/produkty">Produkty</a> › Edycja › ${esc(p.nazwa)}</div>
@@ -305,6 +331,9 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
   }
   p.producent=producerName;
   p.marka=normalizujNazweProducenta(f.get("marka"))||producerName;
+  const manufacturerProfileId=String(f.get("manufacturerProfileId")||"").trim();
+  if(manufacturerProfileId)p.manufacturerProfileId=manufacturerProfileId;
+  else for(const field of ["manufacturerProfileId","manufacturerProfile","manufacturerProfileResolvedAt","manufacturerProfileConfidence","manufacturerProfileMethod","manufacturerProfileEvidence"])delete p[field];
   const canonicalCode=String(f.get("kodProducenta")||"").trim();
   for(const pole of ["kodProducenta","numerReferencyjny","mpn","externalId","sku"]){if(canonicalCode)p[pole]=canonicalCode;else delete p[pole];}
   if(p.producentUrl)p.sourceUrl=p.producentUrl;
@@ -348,6 +377,13 @@ function produktPolaDoCentralnegoZapisu(product={}){
     !["id","_catalog","stan","dostepny"].includes(key)&&value!==undefined
   ));
 }
+function produktRoznicaCentralnegoZapisu(product={},previous={}){
+  const next=produktPolaDoCentralnegoZapisu(product),before=produktPolaDoCentralnegoZapisu(previous);
+  const equal=(left,right)=>{if(left===right)return true;try{return JSON.stringify(left)===JSON.stringify(right);}catch(error){return false;}};
+  const fields=Object.fromEntries(Object.entries(next).filter(([key,value])=>!Object.hasOwn(before,key)||!equal(value,before[key])));
+  const remove=Object.keys(before).filter(key=>!Object.hasOwn(next,key));
+  return {fields,remove};
+}
 async function utworzProduktCentralnie(product={}){
   const result=await chmura("catalog-product-create",{method:"POST",body:{
     product,
@@ -357,11 +393,14 @@ async function utworzProduktCentralnie(product={}){
   if(!result?.ok||String(result.productId)!==String(product.id))throw new Error(result?.error||"Serwer nie potwierdził utworzenia produktu.");
   return result.product&&String(result.product.id)===String(product.id)?result.product:product;
 }
-async function zapiszProduktCentralnie(product={}){
+async function zapiszProduktCentralnie(product={},previous={}){
   const productId=String(product.id??"").trim();
+  const change=produktRoznicaCentralnegoZapisu(product,previous);
+  if(!Object.keys(change.fields).length&&!change.remove.length)return product;
   const result=await chmura("catalog-product-fields-update",{method:"POST",body:{
     productId,
-    fields:produktPolaDoCentralnegoZapisu(product),
+    fields:change.fields,
+    remove:change.remove,
     mutationId:`product-editor:${productId}:${Date.now().toString(36)}`,
     area:"admin-product-editor"
   },timeout:60000});
@@ -464,7 +503,7 @@ async function zapiszProduktAdmin(e,id){
   const p = daneProduktuZFormularza(f, id, poprzedni||{});
   if(!p){ if(submit)submit.disabled=false;toast("⚠️ Podaj poprawną cenę i nazwę producenta"); return; }
   try{
-    const saved=await zapiszProduktCentralnie(p);
+    const saved=await zapiszProduktCentralnie(p,poprzedni);
     Object.assign(p,saved);
   }catch(error){
     if(submit)submit.disabled=false;

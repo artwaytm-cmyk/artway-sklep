@@ -3,6 +3,12 @@ import {
   createPublishedCatalogProductFieldSaver,
   sanitizeCatalogProductFields,
 } from './catalog-product-field-save.mjs';
+import {
+  manufacturerProfileById,
+  manufacturerProfileProductPatch,
+  resolveManufacturerProfile,
+  searchManufacturerProfiles,
+} from './manufacturer-profile-registry.mjs';
 
 export function createCatalogProductAdminRoute(deps = {}) {
   const {
@@ -31,6 +37,74 @@ export function createCatalogProductAdminRoute(deps = {}) {
   });
 
   return async function catalogProductAdminRoute(req, url, action) {
+    if (action === 'catalog-manufacturer-directory') {
+      if (req.method !== 'GET') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const query = text(url.searchParams.get('q'), 200);
+      const profiles = searchManufacturerProfiles(query, { limit: Number(url.searchParams.get('limit')) || 30 });
+      return respond({
+        ok: true,
+        query,
+        profiles,
+        count: profiles.length,
+        source: 'central-verified-manufacturer-registry',
+      });
+    }
+
+    if (action === 'catalog-product-manufacturer-resolve') {
+      if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      if (typeof readProduct !== 'function' || typeof saveAndPublishFields !== 'function') {
+        return respond({ ok: false, error: 'Centralna kartoteka producentów nie jest dostępna.' }, 503);
+      }
+      const body = await req.json().catch(() => ({}));
+      const productId = text(body.productId, 100).trim();
+      const profileId = text(body.profileId, 100).trim();
+      const producer = text(body.producer, 300).trim();
+      if (!productId) return respond({ ok: false, error: 'Nie wskazano produktu.' }, 422);
+      const product = await readProduct(productId);
+      if (!product) return respond({ ok: false, error: 'Produkt nie istnieje w centralnej kartotece.' }, 404);
+      if (profileId && !manufacturerProfileById(profileId)) {
+        return respond({ ok: false, error: 'Wybrany profil producenta nie istnieje w zweryfikowanym rejestrze.' }, 422);
+      }
+      const candidate = { ...product, ...(producer ? { producent: producer } : {}) };
+      const resolution = resolveManufacturerProfile(candidate, { profileId });
+      if (!resolution.ready) {
+        return respond({
+          ok: false,
+          error: resolution.ambiguous
+            ? 'Dopasowanie jest niejednoznaczne. Wybierz producenta z listy.'
+            : 'Nie znaleziono zweryfikowanego profilu producenta.',
+          code: resolution.ambiguous ? 'manufacturer_ambiguous' : 'manufacturer_not_found',
+          alternatives: resolution.alternatives,
+        }, 422);
+      }
+      const timestamp = new Date().toISOString();
+      const fields = manufacturerProfileProductPatch(candidate, resolution, timestamp);
+      const saved = await saveAndPublishFields({
+        productId,
+        fields,
+        mutationId: `manufacturer-profile:${productId}:${resolution.profile.id}:${Date.now().toString(36)}`,
+        actor: text(sessionOf(req)?.email || 'manufacturer-agent', 200),
+        area: 'manufacturer-profile',
+      });
+      return respond({
+        ok: true,
+        confirmed: true,
+        productId,
+        profile: resolution.profile,
+        matching: {
+          method: resolution.method,
+          confidence: resolution.confidence,
+          matchedValue: resolution.matchedValue,
+          matchedBrand: resolution.matchedBrand,
+        },
+        fields: saved.fields || fields,
+        product: saved.product,
+        publication: saved.publication,
+      });
+    }
+
     if (action === 'catalog-product-price-update') {
       if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);

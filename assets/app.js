@@ -2546,6 +2546,8 @@ function produktyDoAdministracji(){
   produktyAdminCache={bazowe,dodane:produktyDodane,edytowane:produktyEdytowane,definitywne:produktyDefinitywne,items,byId:new Map(items.map(p=>[String(p.id),p]))};return items;
 }
 function pobierzProduktAdmin(id){
+  const full=typeof asortymentPelnyProduktPoId==="function"?asortymentPelnyProduktPoId(id):null;
+  if(full)return full;
   const central=typeof asortymentCentralnyProduktPoId==="function"?asortymentCentralnyProduktPoId(id):null;
   if(central)return central;
   produktyDoAdministracji();return produktyAdminCache.byId.get(String(id));

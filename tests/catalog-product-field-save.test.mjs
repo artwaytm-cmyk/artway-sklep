@@ -27,6 +27,60 @@ test('zapis pól produktu kończy się dopiero po zgodnym odczycie centralnej ka
   assert.equal(result.product.allegroDescription, 'Potwierdzony opis');
 });
 
+test('każda ścieżka zapisu synchronizuje kod produktu, EAN i zweryfikowany profil producenta', async () => {
+  let stored = { id: '18', nazwa: 'Gra', producent: 'MilliWOOD', marka: 'MilliWOOD' };
+  const save = createCatalogProductFieldSaver({
+    now: () => '2026-07-29T12:00:00.000Z',
+    writeOperations: async ([operation]) => {
+      stored = { ...stored, ...operation.fields };
+      return { modified: true, value: { rev: 92, data: {} }, skippedProductIds: [] };
+    },
+    readProduct: () => stored,
+  });
+  const result = await save({
+    productId: '18',
+    fields: { kodProducenta: '00123', gtin: '5906018023456' },
+    mutationId: 'identity-18',
+  });
+  assert.equal(result.product.kodProducenta, '00123');
+  assert.equal(result.product.numerReferencyjny, '00123');
+  assert.equal(result.product.mpn, '00123');
+  assert.equal(result.product.externalId, '00123');
+  assert.equal(result.product.sku, '00123');
+  assert.equal(result.product.ean, '5906018023456');
+  assert.equal(result.product.producent, 'Alexander');
+  assert.equal(result.product.marka, 'MilliWOOD');
+  assert.equal(result.product.manufacturerProfileId, 'alexander');
+  assert.ok(result.product.manufacturerProfile.address);
+});
+
+test('zmiana producenta nie może zachować starego profilu GPSR', async () => {
+  let stored = {
+    id: '19',
+    producent: 'Alexander',
+    manufacturerProfileId: 'alexander',
+    manufacturerProfile: { id: 'alexander', legalName: 'Zakład Produkcyjny "Alexander" Piotr Pundzis' },
+  };
+  const save = createCatalogProductFieldSaver({
+    now: () => '2026-07-29T12:30:00.000Z',
+    writeOperations: async ([operation]) => {
+      for (const field of operation.remove) delete stored[field];
+      stored = { ...stored, ...operation.fields };
+      return { modified: true, value: { rev: 93, data: {} }, skippedProductIds: [] };
+    },
+    readProduct: async () => stored,
+  });
+  const result = await save({
+    productId: '19',
+    fields: { producent: 'Multigra', marka: 'Multigra' },
+    remove: ['manufacturerProfileId', 'manufacturerProfile'],
+    mutationId: 'manufacturer-change-19',
+  });
+  assert.equal(result.product.producent, 'Multigra');
+  assert.equal(result.product.manufacturerProfileId, 'multigra');
+  assert.equal(result.product.manufacturerProfile.legalName, 'MultiGra Sp. z o.o.');
+});
+
 test('pełny wynik przygotowania dopuszcza źródło, parametry, SEO i sygnaturę wersji', () => {
   const fields = sanitizeCatalogProductFields({
     sourceUrl: 'https://example.test/product',

@@ -6,14 +6,20 @@ let asortymentSerwerowaKolejka={batchId:"",checking:false,timer:null,lastCheck:0
 const ASORTYMENT_PELNY_PRODUKT_CACHE_MS=15*60*1000;
 
 function asortymentProduktPoId(rawId){return pobierzProduktAdmin(rawId)||produktyDoAdministracji().find(p=>String(p.id)===String(rawId))||null;}
+function asortymentPelnyProduktPoId(rawId){
+  const cached=asortymentPelneProduktyCache.get(String(rawId??""));
+  return cached?.product||null;
+}
 async function asortymentPobierzPelnyProdukt(rawId,{force=false}={}){
   const id=String(rawId??"").trim(),cached=asortymentPelneProduktyCache.get(id);
   if(!force&&cached&&Date.now()-cached.at<ASORTYMENT_PELNY_PRODUKT_CACHE_MS)return cached.product;
   const result=await chmura("product-catalog-item",{params:{id},timeout:30000}),product=result?.product;
   if(!product||String(product.id)!==id)throw new Error(`Nie udało się pobrać pełnej kartoteki produktu ${id}.`);
-  asortymentPelneProduktyCache.delete(id);asortymentPelneProduktyCache.set(id,{at:Date.now(),product});
+  const fullProduct={...product,_catalog:{...(product._catalog||{}),detailLevel:"full"}};
+  asortymentPelneProduktyCache.delete(id);asortymentPelneProduktyCache.set(id,{at:Date.now(),product:fullProduct});
+  if(typeof podmienProduktAdminBezRenderu==="function")podmienProduktAdminBezRenderu(id,fullProduct);
   while(asortymentPelneProduktyCache.size>250)asortymentPelneProduktyCache.delete(asortymentPelneProduktyCache.keys().next().value);
-  return product;
+  return fullProduct;
 }
 function asortymentOfertaProduktu(p={}){return allegroOfertaDlaProduktuSklepu(p)||(p.allegroOfferId?allegroOfertaPoId(String(p.allegroOfferId)):null);}
 function asortymentProduktyZId(ids=[]){return [...new Set(ids.map(String))].map(asortymentProduktPoId).filter(p=>p&&!czyProduktAdminWKoszu(p));}
