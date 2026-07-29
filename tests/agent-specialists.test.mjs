@@ -522,6 +522,17 @@ test('poprawiona treść nie zmienia odcisku źródła i kolejny cykl nie redagu
     opis: '<h2>Nauka przez zabawę</h2><p>Gra wspiera ćwiczenie działań matematycznych podczas rodzinnej rozgrywki.</p><ul><li>Plansza</li><li>Pionki i żetony</li></ul>',
   };
   assert.equal(productEditorialFingerprint(original), productEditorialFingerprint(edited));
+  assert.equal(
+    productEditorialFingerprint({
+      ...original,
+      sourceEvidence: { canonicalUrl: 'https://producer.test/game', fetchedAt: '2026-07-28T08:00:00Z' },
+    }),
+    productEditorialFingerprint({
+      ...original,
+      sourceEvidence: { canonicalUrl: 'https://producer.test/game', fetchedAt: '2026-07-29T08:00:00Z' },
+    }),
+    'sam czas ponownego sprawdzenia źródła nie może uruchamiać redaktorów AI',
+  );
 
   const repo = memoryRepository({ settings: { data: { artway_produkty_dodane: [original] }, rev: 1 } });
   const storeFields = [

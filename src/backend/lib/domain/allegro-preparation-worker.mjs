@@ -20,6 +20,15 @@ function editorialReady(product = {}) {
   return channels.store?.status === 'ready' && channels.allegro?.status === 'ready';
 }
 
+function editorialCurrent(product = {}) {
+  const editorial = asObject(product.contentEditorial), channels = asObject(editorial.channelStates);
+  const fingerprint = productEditorialFingerprint(product);
+  return ['store', 'allegro', 'vonHalsky'].every((channel) => (
+    channels[channel]?.status === 'ready'
+    && channels[channel]?.inputFingerprint === fingerprint
+  ));
+}
+
 function changedFields(before = {}, after = {}, fields = []) {
   return fields.filter((field) => JSON.stringify(before?.[field] ?? null) !== JSON.stringify(after?.[field] ?? null));
 }
@@ -309,7 +318,13 @@ export function createAllegroPreparationWorker({
         ? 'Redakcja AI jest chwilowo odłożona; zapisuję teraz wszystkie pewne dane deterministyczne.'
         : 'Agent poprawia nazwę, opis krótki i długi oraz niezależnie kontroluje treść zgodną z zasadami Allegro.',
     });
-    let editorial = task.skipEditorial === true
+    let editorial = editorialCurrent(product)
+      ? {
+          product,
+          warnings: [],
+          editorialReused: true,
+        }
+      : task.skipEditorial === true
       ? {
           product,
           warnings: ['Redakcja AI oczekuje na odnowienie limitu; dane źródłowe, kategoria i parametry są nadal przygotowywane.'],
@@ -317,7 +332,7 @@ export function createAllegroPreparationWorker({
         }
       : await editorialize(product, sourceUrl, actor);
     const firstChannelStates = asObject(asObject(editorial.product?.contentEditorial).channelStates);
-    if (task.skipEditorial !== true && (firstChannelStates.store?.status !== 'ready' || firstChannelStates.allegro?.status !== 'ready')) {
+    if (editorial.editorialReused !== true && task.skipEditorial !== true && (firstChannelStates.store?.status !== 'ready' || firstChannelStates.allegro?.status !== 'ready')) {
       // Identyczne, zakończone kanały zostaną zwrócone z cache specjalistów.
       // Ponawiamy tylko dlatego, że co najmniej jeden kanał nie dostarczył
       // poprawnego wyniku strukturalnego albo nie przeszedł bramki jakości.

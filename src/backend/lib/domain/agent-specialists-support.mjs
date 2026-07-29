@@ -528,6 +528,14 @@ function productEditorialTarget(product = {}) {
   return { store: true, vonHalsky: true, allegro, channels: allegro ? 'independent_store_allegro_von_halsky' : 'independent_store_von_halsky' };
 }
 
+function stableEditorialEvidence(value) {
+  if (Array.isArray(value)) return value.map(stableEditorialEvidence);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([name]) => !/(?:at|date|time|timestamp)$/i.test(name))
+    .map(([name, entry]) => [name, stableEditorialEvidence(entry)]));
+}
+
 function productEditorialFingerprintFacts(product = {}, target = productEditorialTarget(product)) {
   const source = product.sourceMaterial && typeof product.sourceMaterial === 'object' ? product.sourceMaterial : {};
   const hasSourceSnapshot = Object.keys(source).length > 0;
@@ -552,7 +560,10 @@ function productEditorialFingerprintFacts(product = {}, target = productEditoria
       ean: clean(source.ean || product.gtin || product.ean, 80),
       producerCode: clean(source.producerCode || product.kodProducenta || product.mpn, 160),
       parameters: source.parameters || product.parametryProducenta || product.parametryZrodla || product.parametry || product.parameters || {},
-      evidence: product.sourceEvidence || null,
+      // Daty technicznego odczytu zmieniają się przy każdym sprawdzeniu URL,
+      // lecz nie są zmianą treści produktu i nie mogą ponownie uruchamiać
+      // trzech redaktorów AI dla tej samej kartoteki.
+      evidence: stableEditorialEvidence(product.sourceEvidence || null),
     },
     category: clean(product.kategoria, 180), producer: clean(product.producent || product.marka, 160),
     ean: clean(product.gtin || product.ean, 80), producerCode: clean(product.kodProducenta || product.mpn, 160),
