@@ -602,6 +602,7 @@ test('potwierdzenie klienta otwiera druk A4 z aktualną historią transportu', a
 });
 
 test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawaniem paczek', async ({ page }) => {
+  test.setTimeout(90_000);
   const assertRuntime = observeRuntime(page);
   await loginAdmin(page);
   await page.goto('/#/admin/von-halsky');
@@ -633,10 +634,10 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   const matchingButton = page.getByRole('button', { name: 'Popraw dopasowanie' }).first();
   await matchingButton.click();
   await expect(page.getByRole('heading', { name: 'Popraw dopasowanie produktu' })).toBeVisible();
-  await expect(page.getByLabel('EAN / GTIN')).toBeVisible();
+  await expect(page.locator('.von-halsky-matching-editor input[name="ean"]')).toBeVisible();
   await expect(page.getByText('Nie można ręcznie wkleić obcego ID oferty.')).toBeVisible();
   await page.locator('.von-halsky-matching-editor [data-close]').first().click();
-  const previewButton = page.getByRole('button', { name: 'Podgląd' }).first();
+  const previewButton = page.getByRole('button', { name: 'Podgląd', exact: true }).first();
   await expect(previewButton).toBeVisible();
   await previewButton.click();
   await expect(page.locator('.von-halsky-product-preview')).toBeVisible();

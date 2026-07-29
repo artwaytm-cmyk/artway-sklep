@@ -6477,7 +6477,7 @@ const vonHalskyStan={
   sync:{status:"not_connected",lastConnectionAt:null,lastCatalogAt:null,lastCatalogCount:0,lastOrdersAt:null,lastError:"",lastRequestId:""},
   diagnostics:[],offers:[],orders:[],returns:[],claims:[],events:[],commands:[],categories:[],preview:null,operation:""
 };
-let vonHalskySzukaj="",vonHalskyEtap="wszystkie",vonHalskyFiltr="wszystkie",vonHalskyAgentFiltr="wszystkie",vonHalskyStatusKanalu="wszystkie",vonHalskyDostepnosc="wszystkie",vonHalskySort="jakosc",vonHalskyStrona=1,vonHalskyNaStronie=50;
+let vonHalskySzukaj="",vonHalskyEtap="wszystkie",vonHalskyFiltr="wszystkie",vonHalskyAgentFiltr="wszystkie",vonHalskyStatusKanalu="wszystkie",vonHalskyDostepnosc="wszystkie",vonHalskyProducent="wszyscy",vonHalskyKategoria="wszystkie",vonHalskyProblem="wszystkie",vonHalskyCena="wszystkie",vonHalskySort="jakosc",vonHalskyStrona=1,vonHalskyNaStronie=25;
 const vonHalskyZaznaczone=new Set();
 const vonHalskyAgentWToku=new Set();
 
@@ -6561,10 +6561,52 @@ function vonHalskyAgentStan(product={}){
   if(["requires_data","review","decision_required"].includes(raw))return {id:"wymaga-danych",label:"Agent: wymaga danych",cls:"attention"};
   return {id:"oczekuje",label:"Agent: oczekuje",cls:"waiting"};
 }
+function vonHalskyProblemProduktu(quality={},problem="wszystkie"){
+  if(problem==="wszystkie")return true;
+  const issues=normalizujSzukanyTekst((quality.braki||[]).join(" "));
+  if(problem==="identyfikacja")return !quality.ean&&!(quality.kod&&quality.marka);
+  if(problem==="zdjecie")return issues.includes("zdjec");
+  if(problem==="opis")return issues.includes("opis")||issues.includes("nazwa");
+  if(problem==="kategoria")return !quality.categoryId;
+  if(problem==="gpsr")return quality.gpsr.required&&!quality.gpsr.ready;
+  if(problem==="cena")return !quality.cena;
+  return true;
+}
+function vonHalskyOpcjeFiltrow(){
+  const producers=new Map(),categories=new Map();
+  for(const product of vonHalskyProdukty()){
+    const producer=String(product.producent||product.marka||"").trim(),category=String(product.kategoria||"").trim();
+    if(producer){const id=normalizujSzukanyTekst(producer);producers.set(id,{id,label:producer,count:(producers.get(id)?.count||0)+1});}
+    if(category){const id=normalizujSzukanyTekst(category);categories.set(id,{id,label:category,count:(categories.get(id)?.count||0)+1});}
+  }
+  const sorter=(left,right)=>left.label.localeCompare(right.label,"pl");
+  return {producers:[...producers.values()].sort(sorter),categories:[...categories.values()].sort(sorter)};
+}
+function vonHalskyLiczbaAktywnychFiltrow(){
+  return [
+    !!vonHalskySzukaj,
+    vonHalskyEtap!=="wszystkie",
+    vonHalskyFiltr!=="wszystkie",
+    vonHalskyAgentFiltr!=="wszystkie",
+    vonHalskyStatusKanalu!=="wszystkie",
+    vonHalskyDostepnosc!=="wszystkie",
+    vonHalskyProducent!=="wszyscy",
+    vonHalskyKategoria!=="wszystkie",
+    vonHalskyProblem!=="wszystkie",
+    vonHalskyCena!=="wszystkie",
+    vonHalskySort!=="jakosc",
+  ].filter(Boolean).length;
+}
+function vonHalskyResetujFiltry(){
+  vonHalskySzukaj="";vonHalskyEtap="wszystkie";vonHalskyFiltr="wszystkie";vonHalskyAgentFiltr="wszystkie";
+  vonHalskyStatusKanalu="wszystkie";vonHalskyDostepnosc="wszystkie";vonHalskyProducent="wszyscy";
+  vonHalskyKategoria="wszystkie";vonHalskyProblem="wszystkie";vonHalskyCena="wszystkie";
+  vonHalskySort="jakosc";vonHalskyStrona=1;renderuj();
+}
 function vonHalskyWiersze(){
   const q=normalizujSzukanyTekst(vonHalskySzukaj),terms=q.split(" ").filter(Boolean);
   const rows=vonHalskyProdukty().map(product=>({product,quality:vonHalskyOcenaProduktu(product)})).filter(({product,quality})=>{
-    const searchable=normalizujSzukanyTekst([product.nazwa,product.externalId,product.sku,quality.ean,quality.kod,quality.marka,product.kategoria].join(" "));
+    const searchable=normalizujSzukanyTekst([product.nazwa,product.externalId,product.sku,product.id,quality.ean,quality.kod,quality.marka,product.producent,product.kategoria,quality.categoryPath,quality.ofertaId,quality.offerStatus,quality.gpsr?.name].join(" "));
     if(terms.some(term=>!searchable.includes(term)))return false;
     if(vonHalskyFiltr==="gotowe"&&!quality.gotowy)return false;
     if(vonHalskyFiltr==="braki"&&quality.gotowy)return false;
@@ -6578,6 +6620,11 @@ function vonHalskyWiersze(){
     if(vonHalskyStatusKanalu==="niewystawione"&&quality.ofertaId)return false;
     if(vonHalskyDostepnosc==="dostepne"&&!quality.dostepny)return false;
     if(vonHalskyDostepnosc==="wstrzymane"&&quality.dostepny)return false;
+    if(vonHalskyProducent!=="wszyscy"&&normalizujSzukanyTekst(product.producent||product.marka)!==vonHalskyProducent)return false;
+    if(vonHalskyKategoria!=="wszystkie"&&normalizujSzukanyTekst(product.kategoria)!==vonHalskyKategoria)return false;
+    if(vonHalskyCena==="z-cena"&&!quality.cena)return false;
+    if(vonHalskyCena==="bez-ceny"&&quality.cena)return false;
+    if(!vonHalskyProblemProduktu(quality,vonHalskyProblem))return false;
     if(vonHalskyEtap!=="wszystkie"&&vonHalskyEtapOferty(product,quality)!==vonHalskyEtap)return false;
     if(vonHalskyAgentFiltr!=="wszystkie"&&vonHalskyAgentStan(product).id!==vonHalskyAgentFiltr)return false;
     return true;
@@ -6598,8 +6645,8 @@ function vonHalskyStatystyki(){
 function vonHalskyEtapySprzedazyHTML(){
   const counts={wszystkie:0,sprzedaz:0,wystawienie:0,przygotowanie:0,aktualizacja:0,wstrzymane:0};
   for(const product of vonHalskyProdukty()){const quality=vonHalskyOcenaProduktu(product);counts.wszystkie+=1;counts[vonHalskyEtapOferty(product,quality)]+=1;}
-  const items=[["wszystkie","Wszystkie"],["sprzedaz","W sprzedaży"],["wystawienie","Do wystawienia"],["przygotowanie","Do przygotowania"],["aktualizacja","Do aktualizacji"],["wstrzymane","Wstrzymane"]];
-  return `<div class="von-halsky-stage-filters" aria-label="Etapy sprzedaży">${items.map(([value,label])=>`<button class="${vonHalskyEtap===value?"active":""}" type="button" onclick="vonHalskyEtap=${jsArg(value)};vonHalskyStrona=1;renderuj()"><span>${esc(label)}</span><b>${counts[value]||0}</b></button>`).join("")}</div>`;
+  const items=[["wszystkie","▦","Wszystkie"],["sprzedaz","✓","W sprzedaży"],["wystawienie","＋","Do wystawienia"],["przygotowanie","⚠","Do przygotowania"],["aktualizacja","↻","Do aktualizacji"],["wstrzymane","⏸","Wstrzymane"]];
+  return `<section class="allegro-listing-metrics von-halsky-stage-filters" aria-label="Etapy sprzedaży">${items.map(([value,icon,label])=>`<button class="${vonHalskyEtap===value?"active":""}" type="button" onclick="vonHalskyEtap=${jsArg(value)};vonHalskyStrona=1;renderuj()"><span>${icon}</span><b>${counts[value]||0}</b><small>${esc(label)}</small></button>`).join("")}</section>`;
 }
 function vonHalskyUstawZaznaczenieZakres(zakres="strona",checked=true){
   const rows=vonHalskyWiersze(),start=(vonHalskyStrona-1)*vonHalskyNaStronie;
@@ -6739,8 +6786,24 @@ function vonHalskyOtworzPodglad(productId){
   document.body.appendChild(shell);shell.querySelector("[data-close]")?.focus();
 }
 function vonHalskyFiltryHTML(rows){
-  const fields=`<label class="search-wide">Produkt lub identyfikator<input placeholder="Nazwa, EAN, EXTERNAL_ID, SKU, producent, kategoria…" value="${esc(vonHalskySzukaj)}" oninput="vonHalskySzukaj=this.value;vonHalskyStrona=1;zaplanujRenderPoWpisaniu()"></label><label>Etap sprzedaży<select onchange="vonHalskyEtap=this.value;vonHalskyStrona=1;renderuj()">${[["wszystkie","Wszystkie etapy"],["sprzedaz","W sprzedaży"],["wystawienie","Do wystawienia"],["przygotowanie","Do przygotowania"],["aktualizacja","Do aktualizacji"],["wstrzymane","Wstrzymane"]].map(([value,label])=>`<option value="${value}" ${vonHalskyEtap===value?"selected":""}>${label}</option>`).join("")}</select></label><label>Jakość danych<select onchange="vonHalskyFiltr=this.value;vonHalskyStrona=1;renderuj()">${[["wszystkie","Wszystkie"],["gotowe","Gotowe do publikacji"],["braki","Wymagają uzupełnienia"],["ean","Z poprawnym EAN"],["bez-ean","Bez EAN"],["kategoria","Z kategorią"],["bez-kategorii","Bez kategorii"],["gpsr","Z kompletnym GPSR"],["bez-gpsr","Bez kompletnego GPSR"]].map(([value,label])=>`<option value="${value}" ${vonHalskyFiltr===value?"selected":""}>${label}</option>`).join("")}</select></label><label>Praca Agenta<select onchange="vonHalskyAgentFiltr=this.value;vonHalskyStrona=1;renderuj()">${[["wszystkie","Każdy stan"],["w-toku","Wykonywane teraz"],["gotowe","Potwierdzone zapisem"],["wymaga-danych","Wymagają danych"],["ponowienie","Zaplanowane ponowienie"],["blad","Błąd wykonania"],["oczekuje","Jeszcze niesprawdzone"]].map(([value,label])=>`<option value="${value}" ${vonHalskyAgentFiltr===value?"selected":""}>${label}</option>`).join("")}</select></label><label>Status kanału<select onchange="vonHalskyStatusKanalu=this.value;vonHalskyStrona=1;renderuj()">${[["wszystkie","Wszystkie"],["aktywne","Połączone z Von Halsky"],["niewystawione","Jeszcze niewystawione"]].map(([value,label])=>`<option value="${value}" ${vonHalskyStatusKanalu===value?"selected":""}>${label}</option>`).join("")}</select></label><label>Dostępność<select onchange="vonHalskyDostepnosc=this.value;vonHalskyStrona=1;renderuj()">${[["wszystkie","Wszystkie"],["dostepne","Dostępne w sprzedaży"],["wstrzymane","Wstrzymane"]].map(([value,label])=>`<option value="${value}" ${vonHalskyDostepnosc===value?"selected":""}>${label}</option>`).join("")}</select></label><label>Sortowanie<select onchange="vonHalskySort=this.value;renderuj()">${[["jakosc","Najpierw wymagające pracy"],["nazwa","Nazwa A–Z"],["ean","EAN"],["cena","Cena malejąco"]].map(([value,label])=>`<option value="${value}" ${vonHalskySort===value?"selected":""}>${label}</option>`).join("")}</select></label><label>Na stronie<select onchange="vonHalskyNaStronie=Number(this.value);vonHalskyStrona=1;renderuj()">${[25,50,100,250].map(value=>`<option ${vonHalskyNaStronie===value?"selected":""}>${value}</option>`).join("")}</select></label><button class="btn ghost" type="button" onclick="vonHalskySzukaj='';vonHalskyEtap='wszystkie';vonHalskyFiltr='wszystkie';vonHalskyAgentFiltr='wszystkie';vonHalskyStatusKanalu='wszystkie';vonHalskyDostepnosc='wszystkie';vonHalskySort='jakosc';vonHalskyStrona=1;renderuj()">Wyczyść filtry</button>`;
-  return adminWyszukiwaniePanelHTML({id:"von-halsky-products",title:"Wyszukiwanie katalogu Von Halsky",description:"Etap sprzedaży, jakość danych, praca Agenta, stan kanału i dostępność są niezależnymi filtrami.",fields,results:rows.length,active:!!(vonHalskySzukaj||vonHalskyEtap!=="wszystkie"||vonHalskyFiltr!=="wszystkie"||vonHalskyAgentFiltr!=="wszystkie"||vonHalskyStatusKanalu!=="wszystkie"||vonHalskyDostepnosc!=="wszystkie"||vonHalskySort!=="jakosc"),open:true});
+  const {producers,categories}=vonHalskyOpcjeFiltrow(),active=vonHalskyLiczbaAktywnychFiltrow();
+  const options=(items,current)=>items.map(([value,label])=>`<option value="${esc(value)}" ${current===value?"selected":""}>${esc(label)}</option>`).join("");
+  const fields=`<div class="allegro-listing-advanced-grid admin-search-full von-halsky-filter-grid">
+    <label class="allegro-listing-search-wide"><span>Produkt, oferta lub identyfikator</span><input placeholder="Nazwa, EAN, EXTERNAL_ID, SKU, kod producenta, ID oferty…" value="${esc(vonHalskySzukaj)}" oninput="vonHalskySzukaj=this.value;vonHalskyStrona=1;zaplanujRenderPoWpisaniu()"></label>
+    <label><span>Etap sprzedaży</span><select onchange="vonHalskyEtap=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Wszystkie etapy"],["sprzedaz","W sprzedaży"],["wystawienie","Do wystawienia"],["przygotowanie","Do przygotowania"],["aktualizacja","Do aktualizacji"],["wstrzymane","Wstrzymane"]],vonHalskyEtap)}</select></label>
+    <label><span>Problem do rozwiązania</span><select onchange="vonHalskyProblem=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Każdy problem"],["identyfikacja","Brak identyfikacji"],["zdjecie","Brak zdjęcia"],["opis","Nazwa lub opis"],["kategoria","Brak kategorii"],["gpsr","Niekompletny GPSR"],["cena","Brak ceny"]],vonHalskyProblem)}</select></label>
+    <label><span>Jakość danych</span><select onchange="vonHalskyFiltr=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Każdy poziom"],["gotowe","Gotowe do publikacji"],["braki","Wymagają uzupełnienia"],["ean","Z poprawnym EAN"],["bez-ean","Bez poprawnego EAN"],["kategoria","Z kategorią kanału"],["bez-kategorii","Bez kategorii kanału"],["gpsr","Z kompletnym GPSR"],["bez-gpsr","Bez kompletnego GPSR"]],vonHalskyFiltr)}</select></label>
+    <label><span>Praca Agenta</span><select onchange="vonHalskyAgentFiltr=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Każdy stan"],["w-toku","Wykonywane teraz"],["gotowe","Potwierdzone zapisem"],["wymaga-danych","Wymagają danych"],["ponowienie","Zaplanowane ponowienie"],["blad","Błąd wykonania"],["oczekuje","Jeszcze niesprawdzone"]],vonHalskyAgentFiltr)}</select></label>
+    <label><span>Status kanału</span><select onchange="vonHalskyStatusKanalu=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Każdy status"],["aktywne","Połączone z Von Halsky"],["niewystawione","Jeszcze niewystawione"]],vonHalskyStatusKanalu)}</select></label>
+    <label><span>Producent</span><select onchange="vonHalskyProducent=this.value;vonHalskyStrona=1;renderuj()"><option value="wszyscy">Wszyscy producenci</option>${producers.map(item=>`<option value="${esc(item.id)}" ${vonHalskyProducent===item.id?"selected":""}>${esc(item.label)} (${item.count})</option>`).join("")}</select></label>
+    <label><span>Kategoria sklepu</span><select onchange="vonHalskyKategoria=this.value;vonHalskyStrona=1;renderuj()"><option value="wszystkie">Wszystkie kategorie</option>${categories.map(item=>`<option value="${esc(item.id)}" ${vonHalskyKategoria===item.id?"selected":""}>${esc(item.label)} (${item.count})</option>`).join("")}</select></label>
+    <label><span>Cena kanału</span><select onchange="vonHalskyCena=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Z ceną i bez ceny"],["z-cena","Cena ustalona"],["bez-ceny","Brak ceny"]],vonHalskyCena)}</select></label>
+    <label><span>Dostępność</span><select onchange="vonHalskyDostepnosc=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Każdy stan"],["dostepne","Dostępne w sprzedaży"],["wstrzymane","Wstrzymane"]],vonHalskyDostepnosc)}</select></label>
+    <label><span>Sortowanie</span><select onchange="vonHalskySort=this.value;vonHalskyStrona=1;renderuj()">${options([["jakosc","Najpierw wymagające pracy"],["nazwa","Nazwa A–Z"],["ean","EAN / GTIN"],["cena","Cena malejąco"]],vonHalskySort)}</select></label>
+    <label><span>Na stronie</span><select onchange="vonHalskyNaStronie=Number(this.value)||50;vonHalskyStrona=1;renderuj()">${[25,50,100,250,500,1000].map(value=>`<option value="${value}" ${vonHalskyNaStronie===value?"selected":""}>${value}</option>`).join("")}</select></label>
+    <button class="btn ghost allegro-listing-reset" type="button" onclick="vonHalskyResetujFiltry()" ${active?"":"disabled"}>Wyczyść filtry${active?` (${active})`:""}</button>
+  </div>`;
+  return adminWyszukiwaniePanelHTML({id:"von-halsky-products",title:"Wyszukiwanie i filtry ofert",description:"Łącz identyfikatory, problem, jakość, Agenta, producenta, kategorię, cenę i dostępność. Etap sprzedaży wybierasz kafelkami powyżej.",fields,results:rows.length,active:active>0,open:true});
 }
 function vonHalskyPublikacjaWyboruHTML(rows){
   const selected=rows.filter(({product})=>vonHalskyZaznaczone.has(String(product.id))),ready=selected.filter(({quality})=>quality.gotowy),blocked=selected.length-ready.length;
@@ -6748,18 +6811,33 @@ function vonHalskyPublikacjaWyboruHTML(rows){
   const status=!selected.length?"Zaznacz produkty w tabeli":!configured?"Uzupełnij prywatny kontrakt API":!connected?"Najpierw wykonaj test połączenia":blocked?`${ready.length} gotowych • ${blocked} zablokowanych`:`${ready.length} gotowych do przekazania`;
   return `<section class="von-halsky-publication-bar ${selected.length?"has-selection":""}" aria-label="Przygotowanie i ręczna publikacja ofert"><div class="von-halsky-publication-icon">↗</div><div><small>Agent przygotowuje • administrator publikuje</small><b>Praca wyłącznie na zaznaczonych produktach</b><span>${esc(status)}. Agent zapisuje kartotekę, ale nigdy sam nie tworzy nowej oferty.</span></div><div class="von-halsky-publication-count"><strong>${selected.length}</strong><small>zaznaczono</small></div><div class="von-halsky-publication-actions"><button class="btn ghost" type="button" ${!selected.length||busy?"disabled":""} onclick="vonHalskyPrzygotujWybraneAgentem()">${vonHalskyStan.operation==="agent"?"Agent pracuje…":`🤖 Przygotuj Agentem (${selected.length})`}</button><button class="btn" type="button" ${!selected.length||!configured||!connected||busy?"disabled":""} onclick="vonHalskySynchronizujKatalog()">${vonHalskyStan.operation==="catalog"?"Przekazuję…":`Opublikuj / aktualizuj (${selected.length})`}</button></div></section>`;
 }
+function vonHalskyTabelaWierszHTML({product,quality}={}){
+  const productId=String(product.id),match=vonHalskyMetodaDopasowania(product,quality),agent=vonHalskyAgentStan(product);
+  const offerClosed=["CLOSED","SOLDOUT","INACTIVE"].includes(String(quality.offerStatus||"").toUpperCase());
+  const channelLabel=quality.ofertaId?(quality.offerStatus||"oferta połączona"):quality.gotowy?"gotowy do przekazania":"wymaga danych";
+  return `<tr class="${quality.gotowy?"is-ready":"needs-work"} ${vonHalskyZaznaczone.has(productId)?"is-selected":""}">
+    <td data-label="" class="von-halsky-cell-select"><input type="checkbox" aria-label="Zaznacz ${esc(quality.nazwa||"produkt")}" ${vonHalskyZaznaczone.has(productId)?"checked":""} onchange="vonHalskyUstawZaznaczenie([${jsArg(productId)}],this.checked)"></td>
+    <td data-label="Produkt" class="von-halsky-cell-product"><div class="von-halsky-product"><span>${quality.zdjecie?`<img src="${esc(quality.zdjecie)}" loading="lazy" alt="">`:esc(product.ikona||"📦")}</span><div><b>${esc(quality.nazwa||"Produkt")}</b><small>${esc(product.kategoria||"bez kategorii")} • ${esc(product.producent||product.marka||"producent —")}</small><em>${quality.presentation.mode==="custom"?"Dopasowanie Von Halsky":"Treść ze sklepu"}</em></div></div></td>
+    <td data-label="Identyfikacja" class="von-halsky-cell-identity"><div class="von-halsky-identity"><span class="von-halsky-match-state ${match.level}">${esc(match.label)}</span><b>EAN ${esc(quality.ean||"—")}</b><small>EXTERNAL_ID ${esc(product.externalId||product.sku||product.id||"—")}</small><small>Kod ${esc(quality.kod||"—")} • marka ${esc(quality.marka||"—")}</small><small>Kategoria ${esc(quality.categoryPath||quality.categoryId||"nieprzypisana")}</small><small class="${quality.gpsr.ready?"von-halsky-ok":"von-halsky-issues"}">GPSR ${quality.gpsr.ready?`✓ ${esc(quality.gpsr.name)}`:`— ${esc(quality.gpsr.missing.join(", "))}`}</small></div></td>
+    <td data-label="Gotowość" class="von-halsky-cell-quality"><div class="von-halsky-quality"><div class="von-halsky-score"><strong>${quality.wynik}%</strong><span><i style="width:${quality.wynik}%"></i></span></div><span class="von-halsky-agent-state ${agent.cls}">${esc(agent.label)}</span>${product.vonHalskyAgentPreparedAt?`<small>zapis ${esc(allegroDataTxt(product.vonHalskyAgentPreparedAt))}</small>`:""}${quality.braki.length?`<small class="von-halsky-issues">${quality.braki.map(esc).join(" • ")}</small>`:'<small class="von-halsky-ok">Dane spełniają kontrolę obowiązkową</small>'}${quality.ostrzezenia.length?`<small>${quality.ostrzezenia.map(esc).join(" • ")}</small>`:""}</div></td>
+    <td data-label="Cena i kanał" class="von-halsky-cell-channel"><div class="von-halsky-channel-cell"><b>${quality.cena?zl(quality.cena):"Cena —"}</b><small>${quality.dostepny?"sprzedaż aktywna":"sprzedaż wstrzymana"}</small><span class="lvl ${quality.ofertaId?"lvl-ok":quality.gotowy?"lvl-info":"lvl-ostrzezenie"}">${esc(channelLabel)}</span>${quality.ofertaId?`<small>ID ${esc(quality.ofertaId)}</small>`:""}<small>Zakres ${vonHalskyStan.settings.minimumStock}–${vonHalskyStan.settings.maximumStock} szt.</small></div></td>
+    <td data-label="Akcje" class="von-halsky-cell-actions"><div class="von-halsky-row-actions"><button class="btn" type="button" onclick="vonHalskyOtworzDopasowanie(${jsArg(product.id)})">Popraw dopasowanie</button><div class="von-halsky-row-secondary"><button class="btn ghost" type="button" ${vonHalskyStan.operation?"disabled":""} onclick="vonHalskyPrzygotujAgentem([${jsArg(productId)}])">🤖 Przygotuj</button><button class="btn ghost" type="button" onclick="vonHalskyOtworzPodglad(${jsArg(product.id)})">Podgląd</button><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(product.id)}">Edycja</a>${quality.ofertaId?`<button class="btn ghost" type="button" onclick="vonHalskyZmienStanOferty(${jsArg(quality.ofertaId)},${offerClosed?"true":"false"})">${offerClosed?"Wznów":"Zamknij"}</button>`:""}</div></div></td>
+  </tr>`;
+}
 function vonHalskyWystawianieHTML(){
   const rows=vonHalskyWiersze(),pages=Math.max(1,Math.ceil(rows.length/vonHalskyNaStronie));vonHalskyStrona=Math.min(vonHalskyStrona,pages);
   const start=(vonHalskyStrona-1)*vonHalskyNaStronie,visible=rows.slice(start,start+vonHalskyNaStronie),selected=[...vonHalskyZaznaczone].filter(id=>rows.some(({product})=>String(product.id)===id));
-  return `<section class="panel von-halsky-catalog-panel"><div class="order-section-head"><div><span class="order-pro-label">Jedno centrum ofert</span><h2>Przygotowanie i wystawianie produktów</h2><p class="order-detail-lead">Powiązanie, jakość danych, podgląd i publikacja są wykonywane w jednym miejscu. EAN ma pierwszeństwo; bez EAN wymagane są kod producenta i marka.</p></div><button class="btn ghost" onclick="vonHalskyLaduj(true)">↻ Odśwież status</button></div>
+  const shownFrom=visible.length?start+1:0,shownTo=start+visible.length;
+  return `<div class="allegro-listing-workspace von-halsky-listing-workspace"><section class="panel von-halsky-catalog-panel"><div class="order-section-head"><div><span class="order-pro-label">Jedno centrum ofert</span><h2>Przygotowanie i wystawianie produktów</h2><p class="order-detail-lead">Powiązanie, jakość danych, podgląd i publikacja są wykonywane w jednym miejscu. EAN ma pierwszeństwo; bez EAN wymagane są kod producenta i marka.</p></div><button class="btn ghost" onclick="vonHalskyLaduj(true)">↻ Odśwież status</button></div>
     <div class="von-halsky-offer-flow" aria-label="Proces wystawiania"><div><span>1</span><b>Dopasuj</b><small>EAN lub kod + marka</small></div><i>›</i><div><span>2</span><b>Uzupełnij</b><small>Treść, zdjęcia i kategorię</small></div><i>›</i><div><span>3</span><b>Sprawdź</b><small>Podgląd i kontrola jakości</small></div><i>›</i><div><span>4</span><b>Opublikuj</b><small>Wyłącznie zaznaczone</small></div></div>
     ${vonHalskyEtapySprzedazyHTML()}
     ${vonHalskyFiltryHTML(rows)}
     ${adminOperacjeWynikowHTML({id:"von-halsky-products",selected:selected.length,pageCount:visible.length,resultCount:rows.length,selectPage:"vonHalskyUstawZaznaczenieZakres('strona',true)",selectAll:"vonHalskyUstawZaznaczenieZakres('filtr',true)",clear:"vonHalskyUstawZaznaczenieZakres('filtr',false)",exportSelected:"vonHalskyEksportuj('selected')",exportAll:"vonHalskyEksportuj('all')",exportLabel:"CSV Von Halsky"})}
     ${vonHalskyPublikacjaWyboruHTML(rows)}
-    <div class="warehouse-worktable-wrap"><table class="log-table von-halsky-table"><thead><tr><th></th><th>Produkt</th><th>Dopasowanie i identyfikacja</th><th>Jakość oferty</th><th>Cena i dostępność</th><th>Status kanału</th><th>Akcje</th></tr></thead><tbody>${visible.map(({product,quality})=>{const match=vonHalskyMetodaDopasowania(product,quality),agent=vonHalskyAgentStan(product);return `<tr class="${quality.gotowy?"is-ready":"needs-work"}"><td><input type="checkbox" ${vonHalskyZaznaczone.has(String(product.id))?"checked":""} onchange="vonHalskyUstawZaznaczenie([${jsArg(String(product.id))}],this.checked)"></td><td><div class="von-halsky-product"><span>${quality.zdjecie?`<img src="${esc(quality.zdjecie)}" loading="lazy" alt="">`:esc(product.ikona||"📦")}</span><div><b>${esc(quality.nazwa||"Produkt")}</b><small>${esc(product.kategoria||"bez kategorii")} • ${esc(product.producent||product.marka||"producent —")}</small><em>${quality.presentation.mode==="custom"?"Dopasowanie Von Halsky":"Treść ze sklepu"}</em></div></div></td><td><span class="von-halsky-match-state ${match.level}">${esc(match.label)}</span><b>EAN ${esc(quality.ean||"—")}</b><small>EXTERNAL_ID ${esc(product.externalId||product.sku||product.id||"—")}</small><small>Kod ${esc(quality.kod||"—")} • marka ${esc(quality.marka||"—")}</small><small>Kategoria ${esc(quality.categoryPath||quality.categoryId||"nieprzypisana")}</small><small class="${quality.gpsr.ready?"von-halsky-ok":"von-halsky-issues"}">GPSR ${quality.gpsr.ready?`✓ ${esc(quality.gpsr.name)}`:`— ${esc(quality.gpsr.missing.join(", "))}`}</small></td><td><div class="von-halsky-score"><strong>${quality.wynik}%</strong><span><i style="width:${quality.wynik}%"></i></span></div><span class="von-halsky-agent-state ${agent.cls}">${esc(agent.label)}</span>${product.vonHalskyAgentPreparedAt?`<small>zapis ${esc(allegroDataTxt(product.vonHalskyAgentPreparedAt))}</small>`:""}${quality.braki.length?`<small class="von-halsky-issues">${quality.braki.map(esc).join(" • ")}</small>`:'<small class="von-halsky-ok">Dane spełniają kontrolę obowiązkową</small>'}${quality.ostrzezenia.length?`<small>${quality.ostrzezenia.map(esc).join(" • ")}</small>`:""}</td><td><b>${quality.cena?zl(quality.cena):"—"}</b><small>${quality.dostepny?"sprzedaż aktywna":"sprzedaż wstrzymana"}</small><small>kanał: ${vonHalskyStan.settings.minimumStock}–${vonHalskyStan.settings.maximumStock} szt.</small></td><td><span class="lvl ${quality.ofertaId?"lvl-ok":quality.gotowy?"lvl-info":"lvl-ostrzezenie"}">${quality.ofertaId?esc(quality.offerStatus||"oferta połączona"):quality.gotowy?"gotowy do przekazania":"wymaga danych"}</span>${quality.ofertaId?`<small>ID ${esc(quality.ofertaId)}</small>`:""}</td><td><div class="warehouse-worktable-actions"><button class="btn" type="button" onclick="vonHalskyOtworzDopasowanie(${jsArg(product.id)})">Popraw dopasowanie</button><button class="btn ghost" type="button" ${vonHalskyStan.operation?"disabled":""} onclick="vonHalskyPrzygotujAgentem([${jsArg(String(product.id))}])">🤖 Przygotuj</button><button class="btn ghost" type="button" onclick="vonHalskyOtworzPodglad(${jsArg(product.id)})">Podgląd</button><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(product.id)}">Pełna edycja</a>${quality.ofertaId?`<button class="btn ghost" type="button" onclick="vonHalskyZmienStanOferty(${jsArg(quality.ofertaId)},${quality.offerStatus==="CLOSED"||quality.offerStatus==="SOLDOUT"?"true":"false"})">${quality.offerStatus==="CLOSED"||quality.offerStatus==="SOLDOUT"?"Wznów":"Zamknij"}</button>`:""}</div></td></tr>`;}).join("")||'<tr><td colspan="7">Brak produktów pasujących do aktywnych filtrów.</td></tr>'}</tbody></table></div>
-    <div class="von-halsky-pagination"><button class="btn ghost" ${vonHalskyStrona<=1?"disabled":""} onclick="vonHalskyStrona--;renderuj()">← Poprzednia</button><span>Strona <b>${vonHalskyStrona}</b> z ${pages} • pokazano ${visible.length} z ${rows.length}</span><button class="btn ghost" ${vonHalskyStrona>=pages?"disabled":""} onclick="vonHalskyStrona++;renderuj()">Następna →</button></div>
-  </section>`;
+    <div class="allegro-listing-results-head"><div><b>${rows.length} produktów w aktywnym widoku</b><small>Pokazano ${shownFrom}–${shownTo} • strona ${vonHalskyStrona} z ${pages}</small></div><span><b>${selected.length}</b> zaznaczonych</span></div>
+    <div class="admin-standard-table-wrap von-halsky-table-wrap"><table class="admin-standard-table admin-responsive-table von-halsky-table"><colgroup><col class="von-halsky-col-select"><col class="von-halsky-col-product"><col class="von-halsky-col-identity"><col class="von-halsky-col-quality"><col class="von-halsky-col-channel"><col class="von-halsky-col-actions"></colgroup><thead><tr><th><input type="checkbox" aria-label="Zaznacz produkty na stronie" ${visible.length&&visible.every(({product})=>vonHalskyZaznaczone.has(String(product.id)))?"checked":""} onchange="vonHalskyUstawZaznaczenieZakres('strona',this.checked)"></th><th>Produkt</th><th>Identyfikacja</th><th>Gotowość</th><th>Cena i kanał</th><th>Akcje</th></tr></thead><tbody>${visible.map(vonHalskyTabelaWierszHTML).join("")||'<tr><td data-label="" colspan="6"><div class="allegro-listing-empty"><span>⌕</span><b>Brak produktów w tym widoku</b><small>Zmień filtry albo wyczyść wyszukiwanie.</small></div></td></tr>'}</tbody></table></div>
+    ${pages>1?`<nav class="allegro-listing-pagination von-halsky-pagination" aria-label="Paginacja produktów"><button class="btn ghost" ${vonHalskyStrona<=1?"disabled":""} onclick="vonHalskyStrona--;renderuj()">← Poprzednia</button><span>Strona <b>${vonHalskyStrona}</b> z <b>${pages}</b></span><button class="btn ghost" ${vonHalskyStrona>=pages?"disabled":""} onclick="vonHalskyStrona++;renderuj()">Następna →</button></nav>`:""}
+  </section></div>`;
 }
 function vonHalskyZamowieniaHTML(){
   const connected=vonHalskyPolaczenieEtykieta()==="połączone";
