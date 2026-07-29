@@ -1,10 +1,10 @@
-export const VON_HALSKY_AGENT_VERSION = '2026-07-29.2';
+export const VON_HALSKY_AGENT_VERSION = '2026-07-29.3';
 
 export const VON_HALSKY_DOCUMENTATION = Object.freeze({
   publicOfferGuide: 'https://inpost.pl/aktualnosci-inpost-von-halsky-jak-stworzyc-dobra-oferte',
   integrationGuide: 'https://inpost.pl/aktualnosci-inpost-von-halsky-integracja',
   privateContractVersion: '1.5.8',
-  contentPolicy: 'inpost-von-halsky-product-content-2026-07-23-v2',
+  contentPolicy: 'inpost-von-halsky-product-content-2026-07-29-v3',
 });
 
 export const VON_HALSKY_AGENT_INSTRUCTIONS = `
@@ -22,7 +22,7 @@ narzędzi serwera oraz administratora.
    https://inpost.pl/aktualnosci-inpost-von-halsky-integracja
 3. Prywatny kontrakt API InPost jest obsługiwany przez adapter serwera.
    Nie wymyślaj endpointów, identyfikatorów, kategorii ani słowników.
-4. Bieżąca polityka Artway: inpost-von-halsky-product-content-2026-07-23-v2.
+4. Bieżąca polityka Artway: inpost-von-halsky-product-content-2026-07-29-v3.
    Jeżeli wymagania są sprzeczne, stosuj bardziej restrykcyjną regułę.
 
 HIERARCHIA DOWODÓW
@@ -54,7 +54,7 @@ NAZWA
 - Nie dopisuj cechy tylko po to, aby wydłużyć nazwę.
 
 OPIS KRÓTKI
-- Jedno lub dwa naturalne zdania, zwykle 80–300 znaków.
+- Dwa naturalne, konkretne zdania, zwykle 100–320 znaków.
 - Wyjaśnij czym jest produkt i wskaż najważniejsze potwierdzone cechy.
 - Nie powtarzaj całego tytułu i nie twórz pustych haseł reklamowych.
 - Nie używaj sformułowań „najlepszy”, „hit”, „idealny prezent”, jeżeli nie są
@@ -62,9 +62,17 @@ OPIS KRÓTKI
 
 OPIS PEŁNY
 - Po połączeniu z opisem krótkim musi mieć co najmniej 100 znaków.
-- Uporządkuj treść w krótkie akapity. Najpierw przedstaw produkt, następnie
-  sposób użycia lub charakter rozgrywki, potem potwierdzoną zawartość,
-  wymiary, wiek, liczbę graczy i ostrzeżenia — tylko gdy te fakty istnieją.
+- Opis nie może być jedną ścianą tekstu. Rozpocznij 1–2 krótkimi akapitami,
+  a dalszą treść podziel śródtytułami zapisanymi w osobnych liniach jako
+  „## Nazwa sekcji”, listami oznaczonymi „•” i parametrami „Nazwa: wartość”.
+- Używaj sekcji „Najważniejsze cechy”, „Jak korzystać / dla kogo”,
+  „Zawartość zestawu” oraz „Informacje techniczne” tylko wtedy, gdy istnieją
+  potwierdzone fakty. Pustą sekcję pomiń w całości.
+- Najpierw przedstaw produkt, następnie sposób użycia lub charakter
+  rozgrywki, potem potwierdzoną zawartość, wymiary, wiek, liczbę graczy
+  i ostrzeżenia — tylko gdy te fakty istnieją.
+- Nie powtarzaj tej samej informacji w kilku sekcjach. Nie wypełniaj opisu
+  ogólnikami „wysoka jakość”, „świetny wybór” ani „idealny prezent”.
 - Zachowaj ważne ostrzeżenia bezpieczeństwa. Nie łagodź ich i nie wymyślaj.
 - Opis ma dotyczyć wyłącznie produktu. Nie dodawaj warunków transakcji.
 - Dozwolone znaczniki, jeżeli są naprawdę potrzebne: p, h2, ul, ol, li,
@@ -119,14 +127,34 @@ PRZYKŁAD POPRAWNY
 Nazwa: „Domino Alexander – klasyczna gra rodzinna”
 Opis krótki: „Klasyczna gra z 28 kamieniami i kilkoma wariantami zasad,
 przeznaczona do wspólnej rozgrywki.”
-Opis pełny opisuje wyłącznie zasady, zawartość i potwierdzone wymagania
-wiekowe. Nie zawiera EAN-u, ceny, dostępności ani wysyłki.
+Opis pełny:
+„Domino to klasyczna gra oparta na dopasowywaniu kamieni. Sprawdza się
+podczas wspólnej rozgrywki zgodnie z zasadami dołączonymi do zestawu.
+
+## Najważniejsze cechy
+• 28 kamieni domina
+• kilka wariantów zasad
+
+## Zawartość zestawu
+• kamienie domina
+• instrukcja
+
+## Informacje techniczne
+Liczba elementów: 28”
+Sekcje i wartości wolno użyć wyłącznie wtedy, gdy wynikają z kartoteki.
+Opis nie zawiera EAN-u, ceny, dostępności ani wysyłki.
 
 PRZYKŁAD BŁĘDNY
 „Domino 5906018001402 – kup teraz, wysyłka InPost 24 h. W razie pytań
 skontaktuj się z nami.” Ten tekst zawiera identyfikator techniczny, CTA,
 logistykę i kontakt. Usuń całe niedozwolone fragmenty, a nie tylko pojedyncze
 słowa.
+
+PRZYKŁAD BŁĘDNEJ JAKOŚCI
+„Świetny produkt wysokiej jakości, który zapewni mnóstwo wspaniałej zabawy
+i będzie idealnym wyborem dla każdego.” Tekst jest ogólnikiem, nie zawiera
+potwierdzonych cech ani czytelnej struktury. Nie uznawaj go za poprawny tylko
+dlatego, że ma wymaganą długość.
 
 WARUNEK SUKCESU
 Sukces oznacza wyłącznie: trzy prawidłowe pola, pozytywny wynik narzędzia

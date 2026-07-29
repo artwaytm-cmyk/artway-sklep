@@ -228,25 +228,37 @@ test('edytor produktu pokazuje trzy widoki klienta i aktualizuje je bez przeład
     }
     await route.fallback();
   });
-  await page.evaluate(() => sessionStorage.setItem('artway_product_editor_channel', 'store'));
+  await page.evaluate(() => {
+    sessionStorage.setItem('artway_product_editor_channel', 'store');
+    sessionStorage.setItem('artway_product_editor_section', 'summary');
+  });
   await page.goto(`/#/admin/produkty/edytuj/${encodeURIComponent(productId)}`);
   const form = page.locator('form.product-editor-form');
   await expect(form).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('#product-editor-record')).toBeVisible();
+  await expect(page.locator('#product-editor-channels')).toBeVisible();
+  await expect(page.locator('#product-editor-store')).toBeHidden();
   await expect(page.locator('#product-editor-shared-data')).toHaveCount(1);
   await expect(page.locator('[data-product-channel-preview]')).toHaveCount(3);
-  await expect(page.locator('[data-product-channel-preview="store"]')).toBeVisible();
-  await expect(page.locator('[data-product-channel-preview="allegro"]')).toBeHidden();
-  await expect(page.locator('[data-product-channel-preview="vonHalsky"]')).toBeHidden();
 
   await page.evaluate(() => { window.__productEditorFormBefore = document.querySelector('form.product-editor-form'); });
+  await page.locator('[data-product-section-nav="basics"]').click();
+  await expect(page.locator('#product-editor-record')).toBeHidden();
+  await expect(page.locator('#product-editor-basics')).toBeVisible();
   await form.locator('[name="nazwa"]').fill('Produkt testowy — podgląd na żywo');
+  await page.locator('[data-product-channel-nav="store"]').click();
+  await expect(page.locator('[data-product-channel-preview="store"]')).toBeVisible();
   await expect(page.locator('[data-product-channel-preview="store"] h2')).toHaveText('Produkt testowy — podgląd na żywo');
+  await form.locator('[name="opis"]').fill('Krótki wstęp o produkcie.\n\n## Najważniejsze cechy\n• Pierwsza potwierdzona cecha\n• Druga potwierdzona cecha\n\nWiek: 6+');
+  await expect(page.locator('[data-product-channel-preview="store"] .product-preview-copy h4')).toContainText('Najważniejsze cechy');
+  await expect(page.locator('[data-product-channel-preview="store"] .product-preview-copy li')).toHaveCount(2);
+  await expect(page.locator('[data-product-channel-preview="store"] .product-preview-specs')).toContainText('Wiek');
   expect(await page.evaluate(() => window.__productEditorFormBefore === document.querySelector('form.product-editor-form'))).toBe(true);
 
-  await page.locator('[data-product-channel-tab="allegro"]').click();
+  await page.locator('[data-product-channel-nav="allegro"]').click();
   await expect(page.locator('[data-product-channel-preview="store"]')).toBeHidden();
   await expect(page.locator('[data-product-channel-preview="allegro"]')).toBeVisible();
-  await page.locator('[data-product-channel-tab="vonHalsky"]').click();
+  await page.locator('[data-product-channel-nav="vonHalsky"]').click();
   await expect(page.locator('[data-product-channel-preview="allegro"]')).toBeHidden();
   await expect(page.locator('[data-product-channel-preview="vonHalsky"]')).toBeVisible();
   if (process.env.ARTWAY_VISUAL_CAPTURE) await page.screenshot({ path: '/tmp/artway-product-editor-desktop.png', fullPage: true });

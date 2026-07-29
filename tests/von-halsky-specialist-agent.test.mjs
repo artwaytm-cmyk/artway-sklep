@@ -40,6 +40,9 @@ test('wyspecjalizowany Agent ma rozbudowaną instrukcję, narzędzia i typowany 
   assert.ok(VON_HALSKY_AGENT_INSTRUCTIONS.length > 6000);
   assert.match(VON_HALSKY_AGENT_INSTRUCTIONS, /check_von_halsky_identity/);
   assert.match(VON_HALSKY_AGENT_INSTRUCTIONS, /check_von_halsky_draft/);
+  assert.match(VON_HALSKY_AGENT_INSTRUCTIONS, /Opis nie może być jedną ścianą tekstu/);
+  assert.match(VON_HALSKY_AGENT_INSTRUCTIONS, /## Najważniejsze cechy/);
+  assert.match(VON_HALSKY_AGENT_INSTRUCTIONS, /PRZYKŁAD BŁĘDNEJ JAKOŚCI/);
   assert.match(VON_HALSKY_AGENT_VERSION, /^2026-07-29/);
   assert.equal(agent.tools.length, 2);
   assert.ok(agent.outputType);

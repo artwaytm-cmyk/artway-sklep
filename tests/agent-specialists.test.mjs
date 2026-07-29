@@ -108,6 +108,13 @@ test('zespół zawiera konkretne role do treści, promocji, komunikacji i nadzor
   assert.match(SPECIALISTS.von_halsky_compliance.rules, /linki/i);
   assert.match(SPECIALISTS.supplier_message.rules, /cen/i);
   assert.match(specialistPlaybook('von_halsky_offer'), /nie może zawierać linków/i);
+  for (const role of ['product_content', 'allegro_offer', 'von_halsky_offer']) {
+    const playbook = specialistPlaybook(role);
+    assert.match(playbook, /Opis pełny nie może być jedną ścianą tekstu/i);
+    assert.match(playbook, /## Najważniejsze cechy/);
+    assert.match(playbook, /Informacje techniczne/);
+    assert.match(playbook, /Puste sekcje pomijaj/i);
+  }
   assert.match(specialistPlaybook('operations_supervisor'), /Bramka jakości/i);
   assert.equal(SPECIALIST_PLAYBOOK_VERSION, PROMPT_VERSION);
 });

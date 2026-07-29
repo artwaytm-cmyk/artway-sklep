@@ -43,17 +43,43 @@ test('pełny edytor ma stałą nawigację roboczą i pokazuje jeden aktywny kana
     readFile('src/styles/32-product-editor-workspace.css', 'utf8'),
   ]);
   assert.match(editor, /data-active-channel=/);
+  assert.match(editor, /data-editor-section=/);
   assert.match(workspace, /class="product-editor-commandbar"/);
   assert.match(workspace, /data-product-section-nav/);
   assert.match(workspace, /data-product-channel-tab=/);
   assert.match(workspace, /function productEditorAktywujKanal/);
+  assert.match(workspace, /function productEditorAktywujSekcje/);
+  assert.match(workspace, /function productEditorPoczatkowaSekcja/);
   assert.match(workspace, /sessionStorage\.setItem\("artway_product_editor_channel"/);
+  assert.match(workspace, /sessionStorage\.setItem\("artway_product_editor_section"/);
   assert.match(workspace, /function productEditorAutomatyzacjaHTML/);
   assert.doesNotMatch(workspace, /class="product-channel-dashboard-grid"[\s\S]{0,800}<a href="#product-editor-/);
   assert.match(styles, /\.product-editor-form\{display:grid;grid-template-columns:264px minmax\(0,1fr\)/);
   assert.match(styles, /data-active-channel="store"/);
   assert.match(styles, /data-active-channel="allegro"/);
   assert.match(styles, /data-active-channel="vonHalsky"/);
+  assert.match(styles, /data-editor-section="summary"/);
+  assert.match(styles, /data-editor-section="allegro"/);
+});
+
+test('studio treści ocenia strukturę i pokazuje profesjonalny układ w podglądzie kanału', async () => {
+  const [workspace, styles] = await Promise.all([
+    readFile('src/frontend/12-product-editor-workspace.js', 'utf8'),
+    readFile('src/styles/32-product-editor-workspace.css', 'utf8'),
+  ]);
+  assert.match(workspace, /function productEditorOcenaOpisu/);
+  assert.match(workspace, /function productEditorOpisNarzedziaHTML/);
+  assert.match(workspace, /function productEditorWstawFormatOpisu/);
+  assert.match(workspace, /function productEditorPodgladParametryHTML/);
+  assert.match(workspace, /class="product-preview-copy"/);
+  assert.match(workspace, /class="product-preview-specs"/);
+  for (const field of ['opis', 'allegroDescription', 'vonHalskyDescription']) {
+    assert.match(workspace, new RegExp(`productEditorOpisNarzedziaHTML\\("${field}"`));
+  }
+  assert.match(styles, /\.product-description-studio/);
+  assert.match(styles, /\.product-description-quality/);
+  assert.match(styles, /\.product-preview-copy h4/);
+  assert.match(styles, /\.product-preview-parameters/);
 });
 
 test('kartoteka przechowuje główne źródło osobno od pomocniczych linków znalezionych przez Agenta', async () => {

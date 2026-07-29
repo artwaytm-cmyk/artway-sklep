@@ -1,4 +1,4 @@
-export const SPECIALIST_PLAYBOOK_VERSION = '2026-07-29.2';
+export const SPECIALIST_PLAYBOOK_VERSION = '2026-07-29.3';
 
 const COMMON = Object.freeze({
   input: [
@@ -30,10 +30,18 @@ const COMMON = Object.freeze({
   ],
 });
 
+const DESCRIPTION_LAYOUT_STANDARD = Object.freeze([
+  'Opis krótki ma zawierać 2–3 naturalne, konkretne zdania: czym jest produkt, dla kogo lub do czego służy oraz najważniejszą potwierdzoną cechę. Bez pustych haseł reklamowych.',
+  'Opis pełny nie może być jedną ścianą tekstu. Zaczyna się krótkim wprowadzeniem, a dalsza treść używa śródtytułów zapisanych w osobnych liniach jako „## Nazwa sekcji”, krótkich akapitów oraz list oznaczonych „•”.',
+  'Stosuj sekcje „## Najważniejsze cechy”, „## Jak korzystać / dla kogo”, „## Zawartość zestawu” i „## Informacje techniczne” tylko wtedy, gdy istnieją potwierdzone fakty dla danej sekcji. Puste sekcje pomijaj w całości.',
+  'W sekcji „Informacje techniczne” zapisuj każdą potwierdzoną wartość w osobnej linii jako „Nazwa parametru: wartość”. Nie zamieniaj braku danych w ogólnik i nie powtarzaj tych samych zdań w kilku sekcjach.',
+  'Układ jest zwykłym tekstem strukturalnym, nie fragmentem strony źródłowej. Nie zwracaj menu, HTML-u kontrolek, komentarzy procesu, JSON-u ani nagłówków bez treści.',
+]);
+
 const ROLE_OPERATING_CONTRACTS = Object.freeze({
   product_content: {
     triggers: ['nowy produkt z linku lub importu', 'zmiana materiału źródłowego', 'brak albo słaba jakość nazwy, skrótu, opisu lub SEO', 'jawna korekta administratora'],
-    success: ['sześć kompletnych pól sklepu', 'czytelna hierarchia bez śmieci źródłowych', 'zgodność nazwy, wariantu i producenta', 'brak opcjonalnej cechy nie blokuje zapisu'],
+    success: ['sześć kompletnych pól sklepu', 'czytelna hierarchia: wprowadzenie, śródtytuły, akapity, listy i parametry', 'zgodność nazwy, wariantu i producenta', 'brak opcjonalnej cechy nie blokuje zapisu'],
     failures: [
       'Przykład błędu: źródło zawiera „Rozmiar uniwersalny 483 szt.”. To kontrolka zapasu, więc usuń ją całkowicie; nie wpisuj rozmiaru ani liczby sztuk do cech produktu.',
       'Przykład błędu: opis sąsiedniego wariantu podaje inny EAN. Nie łącz faktów; zatrzymaj redakcję i wskaż konflikt identyfikacji.',
@@ -41,7 +49,8 @@ const ROLE_OPERATING_CONTRACTS = Object.freeze({
     ],
     examples: [
       'Nazwa „GRA ALE PARY JEDZONKO 0176 ALEX” → „Ale Pary – Jedzonko, gra edukacyjna Alexander”, o ile marka i wariant są potwierdzone.',
-      'Opis ma nagłówek określający rodzaj produktu, dwa krótkie akapity o zastosowaniu oraz listę wyłącznie potwierdzonych elementów lub cech.',
+      'Dobry układ: „Krótki wstęp…”, potem „## Najważniejsze cechy”, linie „• …”, następnie — tylko gdy są dane — „## Jak korzystać / dla kogo” oraz „## Informacje techniczne” z wierszami „Wiek: 6+”.',
+      'Zły układ: jeden akapit złożony z ogólników „wysoka jakość, świetna zabawa, idealny wybór”, bez potwierdzonych cech i bez czytelnych sekcji.',
     ],
   },
   store_compliance: {
@@ -55,7 +64,7 @@ const ROLE_OPERATING_CONTRACTS = Object.freeze({
   },
   allegro_offer: {
     triggers: ['produkt ma zostać przygotowany do Allegro', 'dane sklepu zmieniły się po ostatnim fingerprintcie Allegro', 'oferta wymaga bezpiecznej aktualizacji treści'],
-    success: ['tytuł 12–75 znaków i minimum 3 słowa', 'opis dotyczy wyłącznie produktu', 'brak treści kontaktowych, transakcyjnych i logistycznych', 'treść przechodzi deterministyczną bramkę Allegro'],
+    success: ['tytuł 12–75 znaków i minimum 3 słowa', 'opis ma profesjonalny układ sekcji i dotyczy wyłącznie produktu', 'brak treści kontaktowych, transakcyjnych i logistycznych', 'treść przechodzi deterministyczną bramkę Allegro'],
     failures: [
       '„Skontaktuj się przed zakupem” jest zawsze usuwane w całości; nie zamieniaj na „zapytaj sprzedawcę”.',
       '„Wysyłamy InPostem w 24 h” jest informacją o dostawie i nie może pozostać w opisie.',
@@ -64,6 +73,7 @@ const ROLE_OPERATING_CONTRACTS = Object.freeze({
     examples: [
       'Dozwolone: „Gra rozwija spostrzegawczość i kojarzenie elementów”. Niedozwolone: „Napisz do nas, aby ustalić dostępność”.',
       'Opis kończy się ostatnią cechą lub zawartością produktu, bez CTA prowadzącego poza Allegro.',
+      'Dobry opis Allegro: krótki wstęp, „## Najważniejsze cechy”, lista potwierdzonych cech, a dalej wyłącznie istniejące sekcje produktu. Nie dodawaj osobnej sekcji dostawy, płatności, kontaktu, zwrotów ani reklamacji.',
     ],
   },
   allegro_compliance: {
@@ -94,13 +104,13 @@ const ROLE_OPERATING_CONTRACTS = Object.freeze({
   },
   von_halsky_offer: {
     triggers: ['produkt kwalifikuje się do kanału Von Halsky', 'zmiana wspólnych faktów kartoteki', 'brak nazwy albo opisu kanału'],
-    success: ['osobna nazwa, skrót i opis kanału', 'nazwa 7–150 znaków z najważniejszymi faktami na początku', 'opis minimum 100 znaków', 'brak linków, obrazów, kontaktu i logistyki', 'tożsamość przez EAN albo kod producenta i markę', 'treść zgodna z potwierdzonym wariantem'],
+    success: ['osobna nazwa, skrót i profesjonalnie podzielony opis kanału', 'nazwa 7–150 znaków z najważniejszymi faktami na początku', 'opis minimum 100 znaków', 'brak linków, obrazów, kontaktu i logistyki', 'tożsamość przez EAN albo kod producenta i markę', 'treść zgodna z potwierdzonym wariantem'],
     failures: [
       'Adres artwaytm.pl lub link źródłowy w opisie powoduje usunięcie całego odesłania.',
       'Dane obsługi klienta nie należą do karty produktu; pozostaw je konfiguracji Portalu Merchanta.',
       'Jeżeli karta sklepu ma opis starszy niż materiał producenta, aktualizuj fakty, ale nie kopiuj layoutu strony źródłowej.',
     ],
-    examples: ['Nazwa zaczyna się od rodzaju/nazwy produktu i marki, a opis opisuje zastosowanie oraz potwierdzone cechy bez informacji handlowych.', 'Zdjęcie 600×600 albo ze znakiem wodnym zostaje wskazane do wymiany, a nie zastąpione przypadkowym obrazem podobnego produktu.', 'Parametr kategorii jest wypełniany tylko wtedy, gdy nazwa parametru i wartość mają dokładny odpowiednik w kartotece oraz słowniku API.'],
+    examples: ['Nazwa zaczyna się od rodzaju/nazwy produktu i marki, a opis ma wstęp, śródtytuły, listę cech oraz parametry bez informacji handlowych.', 'Zdjęcie 600×600 albo ze znakiem wodnym zostaje wskazane do wymiany, a nie zastąpione przypadkowym obrazem podobnego produktu.', 'Parametr kategorii jest wypełniany tylko wtedy, gdy nazwa parametru i wartość mają dokładny odpowiednik w kartotece oraz słowniku API.'],
   },
   von_halsky_compliance: {
     triggers: ['bramka Von Halsky odrzuciła tekst', 'opis zawiera URL, obraz, kontakt, logistykę lub niedozwolony HTML'],
@@ -189,7 +199,7 @@ const PLAYBOOKS = Object.freeze({
       'Rozpoznaj produkt po EAN, kodzie producenta, marce, modelu i wariancie.',
       'Usuń ze źródła menu, koszyk, dostępność, cenę, logistykę, kontakt, regulaminy źródła i tekst o innych produktach.',
       'Przygotuj naturalną nazwę sklepową, krótki opis, pełny opis oraz SEO. Zachowaj potwierdzone zastosowanie, zawartość i parametry.',
-      'Opis pełny dziel na krótkie akapity, nagłówki oraz konkretne listy. Nie umieszczaj pustych punktów.',
+      ...DESCRIPTION_LAYOUT_STANDARD,
     ],
     mustNot: ['Nie zmieniaj pól allegro_* ani von_halsky_*.', 'Nie kopiuj treści źródła słowo w słowo.', 'Nie dodawaj ceny, stanu, wysyłki, kontaktu, linku źródłowego, EAN ani SKU do opisu.'],
     example: 'Wejście: chaotyczny opis gry. Wynik: nazwa produktu, 1–3 zdania skrótu, uporządkowany opis cech i zastosowania, meta dane; bez warunków sklepu źródłowego.',
@@ -202,7 +212,7 @@ const PLAYBOOKS = Object.freeze({
   },
   allegro_offer: {
     purpose: 'Niezależna redakcja tytułu i opisu Allegro z tych samych faktów produktu.',
-    procedure: ['Ustal tożsamość produktu.', 'Przygotuj tytuł 12–75 znaków i minimum 3 słowa.', 'Ułóż opis wyłącznie o oferowanym produkcie.', 'Zwróć punkty sprzedażowe wyłącznie jako potwierdzone cechy.'],
+    procedure: ['Ustal tożsamość produktu.', 'Przygotuj tytuł 12–75 znaków i minimum 3 słowa.', 'Ułóż opis wyłącznie o oferowanym produkcie.', ...DESCRIPTION_LAYOUT_STANDARD, 'Zwróć punkty sprzedażowe wyłącznie jako potwierdzone cechy.'],
     mustNot: ['Bez telefonu, e-maila, linku, prośby o kontakt, sprzedaży poza Allegro, płatności, dostawy, wysyłki, przewoźnika, terminów, zwrotów i reklamacji.', 'Nie nadpisuj treści sklepu ani Von Halsky.'],
     example: 'Opis kończy się informacją o produkcie, nie CTA, kontaktem ani logistyką.',
   },
@@ -235,7 +245,7 @@ const PLAYBOOKS = Object.freeze({
   },
   von_halsky_offer: {
     purpose: 'Niezależna karta InPost Von Halsky przygotowana według publicznych wymagań kanału.',
-    procedure: ['Ustal tożsamość po EAN albo kodzie producenta i marce.', 'Nazwa: 7–150 znaków, najważniejsze informacje na początku.', 'Opis: minimum 100 znaków, czytelny, skoncentrowany na produkcie.', 'Sprawdź zdjęcia: minimum jedno, białe tło, bez znaku wodnego i co najmniej 800×800 px.', 'Dopasuj kategorię i parametry tylko na podstawie potwierdzonych faktów oraz aktualnego słownika API.', 'Zwróć osobne pola Von Halsky; sklep jest bazą faktów, nie miejscem zapisu wyniku.'],
+    procedure: ['Ustal tożsamość po EAN albo kodzie producenta i marce.', 'Nazwa: 7–150 znaków, najważniejsze informacje na początku.', 'Opis: minimum 100 znaków, czytelny, skoncentrowany na produkcie.', ...DESCRIPTION_LAYOUT_STANDARD, 'Sprawdź zdjęcia: minimum jedno, białe tło, bez znaku wodnego i co najmniej 800×800 px.', 'Dopasuj kategorię i parametry tylko na podstawie potwierdzonych faktów oraz aktualnego słownika API.', 'Zwróć osobne pola Von Halsky; sklep jest bazą faktów, nie miejscem zapisu wyniku.'],
     mustNot: ['Opis nie może zawierać linków ani osadzonych zdjęć — oficjalnie powodują odrzucenie oferty.', 'Nie dodawaj telefonu, e-maila ani zachęty do kontaktu. Dane obsługi klienta należą do ustawień sklepu w Portalu Merchanta.', 'Nie dodawaj płatności, dostawy, logistyki ani haseł promocyjnych.', 'Nie zgaduj EAN, marki, kategorii, parametrów ani wartości słownikowej.', 'Nie pobieraj zdjęcia podobnego produktu.', 'Nie nadpisuj sklepu ani Allegro.'],
     example: 'Dozwolone: cechy i zastosowanie produktu. Niedozwolone: „więcej na artwaytm.pl”, „napisz do nas” albo obraz w HTML.',
   },
