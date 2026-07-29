@@ -1071,6 +1071,13 @@ async function chmuraZapiszUstawienia(opcje={}){
             chmuraWstrzymaneDomeny.set(key,Date.now()+CHMURA_ODRZUCONA_DOMENA_RETRY_MS);
             loguj("blad","Kontrakt zapisu domeny "+key+" jest niespójny z serwerem. Dane lokalne zachowano; kolejna próba nastąpi za 15 minut.");
           }
+          else if(/Brak połączenia z serwerem|Serwer nie odpowiedział|Serwer nie zwrócił prawidłowych danych/i.test(String(e.message||""))){
+            // Krótkie przeładowanie backendu nie jest uszkodzeniem danych.
+            // Klucz pozostaje w kolejce i następny cykl ponawia dokładnie ten
+            // sam zapis, dlatego nie zanieczyszczamy centralnej diagnostyki
+            // fałszywym błędem wymagającym interwencji.
+            loguj("info","Chwilowa przerwa serwera podczas zapisu "+key+" — zmiana pozostaje w kolejce do automatycznego ponowienia.");
+          }
           else loguj("blad","Zapis ustawienia domeny "+key+" w chmurze: "+e.message);
           break;
         }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { acquireDeploymentLock, deployStaticRelease } from './lib/atomic-release-manager.mjs';
@@ -50,6 +51,28 @@ function restartProductionBackend() {
   execFileSync('sudo', ['-n', 'systemctl', 'restart', backendService], { stdio: 'inherit' });
 }
 
+function backendRequiresRestart() {
+  const policy = argument('restart-backend', process.env.ARTWAY_RESTART_BACKEND || 'auto').toLowerCase();
+  if (policy === 'always') return true;
+  if (policy === 'never' || !backendService || backendService === 'none') return false;
+  try {
+    const active = JSON.parse(readFileSync(path.join(currentLink, 'release.json'), 'utf8'));
+    const previousCommit = String(active?.commit || '').trim();
+    if (!/^[a-f0-9]{7,64}$/i.test(previousCommit)) return true;
+    const changed = execFileSync('git', [
+      'diff', '--name-only', `${previousCommit}..${commit}`, '--',
+      'server.mjs',
+      'package.json',
+      'package-lock.json',
+      'src/backend',
+    ], { cwd: sourceRoot, encoding: 'utf8' }).trim();
+    return changed.length > 0;
+  } catch {
+    // Pierwsze wydanie albo niepełny manifest muszą przeładować backend.
+    return true;
+  }
+}
+
 let releaseLock;
 try {
   // products.json pozostaje wyłącznie awaryjną, publiczną projekcją. Tuż przed
@@ -58,12 +81,13 @@ try {
   execFileSync('node', ['scripts/generate-canonical-products-snapshot.mjs'], { cwd: sourceRoot, stdio: 'inherit' });
   execFileSync('npm', ['run', 'build:check'], { cwd: sourceRoot, stdio: 'inherit' });
   releaseLock = await acquireDeploymentLock(releasesRoot);
-  // Backend działa z kontrolowanego katalogu roboczego, a statyczny frontend z
-  // atomowego symlinku. Restart przed przełączeniem gwarantuje, że health-check
-  // sprawdza bieżący kod API, a nie proces pozostawiony po poprzednim wdrożeniu.
-  restartProductionBackend();
+  // Statyczne wydanie nie przerywa aktywnych zapisów panelu. Backend jest
+  // przeładowywany wyłącznie wtedy, gdy commit naprawdę zmienił kod serwera
+  // lub zależności. Dzięki temu zwykła publikacja UI nie tworzy krótkiego 502.
+  const restartBackend = backendRequiresRestart();
+  if (restartBackend) restartProductionBackend();
   const result = await deployStaticRelease({ sourceRoot, releasesRoot, currentLink, releaseId, commit, healthCheck: productionHealthCheck, keep });
-  console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+  console.log(JSON.stringify({ ok: true, backendRestarted: restartBackend, ...result }, null, 2));
 } catch (error) {
   console.error(`❌ ${error?.message || error}`);
   process.exitCode = 1;
