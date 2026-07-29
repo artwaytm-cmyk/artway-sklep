@@ -5,6 +5,7 @@ import {
   providerQuotaUnavailable,
 } from './agent-specialists-support.mjs';
 import { enrichAllegroProductEvidence } from './allegro-parameter-enrichment.mjs';
+import { buildProfessionalProductDescription, professionalDescriptionQuality } from './product-content-layout.mjs';
 import {
   ALLEGRO_PREPARATION_VERSION,
   allegroAutomaticPreparationDisposition,
@@ -65,20 +66,25 @@ function deterministicEditorialText(value = '', limit = 30_000) {
 function deterministicEditorialFallback(product = {}) {
   const source = asObject(product.sourceMaterial);
   const title = deterministicEditorialText(product.nazwa || product.name || source.title, 150).replace(/\n+/g, ' ').trim();
-  const longDescription = [
+  const sourceLongDescription = [
     source.longDescription,
     product.opis,
     product.allegroDescription,
   ].map((value) => deterministicEditorialText(value)).find((value) => value.length >= 150) || '';
-  if (!title || !longDescription) return null;
+  if (!title || !sourceLongDescription) return null;
   const sourceShort = [
     source.shortDescription,
     product.opisKrotki,
   ].map((value) => deterministicEditorialText(value, 500)).find((value) => value.length >= 40) || '';
-  const shortDescription = (sourceShort || longDescription.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ') || longDescription)
+  const shortDescription = (sourceShort || sourceLongDescription.split(/(?<=[.!?])\s+/).slice(0, 2).join(' ') || sourceLongDescription)
     .slice(0, 500)
     .trim();
   if (shortDescription.length < 40) return null;
+  const longDescription = buildProfessionalProductDescription({
+    ...product,
+    parametryProducenta: source.parameters || product.parametryProducenta,
+  }, sourceLongDescription);
+  if (!professionalDescriptionQuality(longDescription).professional) return null;
   const timestamp = new Date().toISOString();
   const base = {
     ...product,
@@ -405,6 +411,8 @@ export function createAllegroPreparationWorker({
       parametryProducenta: product.parametryProducenta,
       parametryZrodla: product.parametryZrodla,
       allegroCategoryId: auto.allegroCategoryId || product.allegroCategoryId,
+      allegroCategoryName: auto.allegroCategoryName || product.allegroCategoryName,
+      allegroCategoryResolution: auto.allegroCategoryResolution || product.allegroCategoryResolution,
       allegroProductId: auto.allegroProductId || product.allegroProductId,
       allegroParameters: auto.allegroParameters || product.allegroParameters,
       allegroParameterResolution: auto.allegroParameterResolution || product.allegroParameterResolution,
@@ -417,6 +425,9 @@ export function createAllegroPreparationWorker({
         version: 1,
         operation: draft.existingOffer ? 'update' : 'create',
         categoryId: auto.allegroCategoryId || product.allegroCategoryId || '',
+        categoryName: auto.allegroCategoryName || product.allegroCategoryName || '',
+        categorySource: auto.allegroCategoryResolution?.source || product.allegroCategoryResolution?.source || '',
+        categoryConfidence: Number(auto.allegroCategoryResolution?.confidence || product.allegroCategoryResolution?.confidence) || 0,
         catalogProductId: auto.allegroProductId || product.allegroProductId || '',
         parameterCount: asArray(compliance.draft?.productSet?.[0]?.product?.parameters).length + asArray(compliance.draft?.parameters).length,
         descriptionSectionCount: asArray(compliance.draft?.description?.sections).length,

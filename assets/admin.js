@@ -5110,12 +5110,15 @@ function produktRoboczyAllegroZFormularza(form,id,poprzedni={}){
 function allegroKategorieHTML(d){
   const selected=d?.selected||null;
   const suggestions=Array.isArray(d?.suggestions)?d.suggestions:[];
+  const consensus=d?.consensus||null,proof=consensus?.selected||null;
   if(!selected&&!suggestions.length&&!d?.errors?.length) return "";
   const row=(c,main=false)=>`<div class="allegro-category-row ${main?"main":""}">
     <div><b>${main?"✅ Dobrana kategoria: ":""}${esc(c.name||"—")}</b><br><small>ID: ${esc(c.id||"—")}${c.pathText?` • ${esc(c.pathText)}`:""}${c.leaf===false?" • niekońcowa":""}</small></div>
-    <button class="btn ghost" type="button" onclick="allegroUstawKategorieWFormularzu(${jsArg(c.id)})">Wybierz</button>
+    <button class="btn ghost" type="button" onclick="allegroUstawKategorieWFormularzu(${jsArg(c.id)})">Wybierz i zapisz</button>
   </div>`;
-  return `<div class="backend-note allegro-category-box">
+  return `<div class="allegro-category-box">
+    <header><div><small>WYNIK KLASYFIKACJI</small><h3>${proof?"Kategoria potwierdzona historią katalogu":"Dopasowanie bezpośrednio z Allegro"}</h3></div><strong>${esc(proof?`${consensus.confidence||proof.confidence||0}% pewności`:"wynik API")}</strong></header>
+    ${proof?`<div class="allegro-category-proof"><span>🧠</span><div><b>${esc(consensus.reason||"Potwierdzona większość podobnych produktów")}</b><small>${proof.examples?.length?`Przykłady: ${proof.examples.map(item=>esc(item.name||`produkt ${item.id}`)).join(" • ")}`:"Agent wykorzystał zapisane, potwierdzone przypisania z centralnego katalogu."}</small></div></div>`:""}
     ${selected?row(selected,true):`<b>Nie udało się automatycznie dobrać kategorii.</b>`}
     ${suggestions.length>1?`<details style="margin-top:.55rem"><summary>Inne pasujące kategorie (${suggestions.length})</summary>${suggestions.slice(0,10).map(c=>row(c,false)).join("")}</details>`:""}
     ${d?.errors?.length?`<small style="color:var(--muted2)">Część zapytań Allegro nie zwróciła danych: ${esc(d.errors.map(e=>e.phrase).join(", "))}</small>`:""}
@@ -5144,11 +5147,14 @@ function allegroDraftDiagnostykaHTML(d={},msg="",brak=""){
     <details><summary>Podgląd JSON wysyłany do Allegro</summary><pre style="white-space:pre-wrap;font-size:.75rem">${esc(JSON.stringify(d.draft||d,null,2))}</pre></details>
   </div>`;
 }
-function allegroUstawKategorieWFormularzu(id){
+async function allegroUstawKategorieWFormularzu(id){
   const form=document.querySelector("form.product-editor-form");
   if(!form?.elements?.allegroCategoryId){ toast("Nie znaleziono pola kategorii Allegro"); return; }
   form.elements.allegroCategoryId.value=String(id||"").trim();
-  toast("🟠 Ustawiono kategorię Allegro: "+String(id||""));
+  form.elements.allegroCategoryId.dispatchEvent(new Event("input",{bubbles:true}));
+  const productId=String(form.dataset.productId||"").trim();
+  if(productId&&productId!=="0")await allegroZapiszKategorieProduktu(productId,id,{source:"wybór administratora z katalogu Allegro",confidence:100});
+  toast("🟠 Ustawiono i zapisano kategorię Allegro: "+String(id||""));
 }
 function allegroPokazKategorieWFormularzu(d){
   const box=document.getElementById("allegroCategoryPreview");
@@ -5194,15 +5200,20 @@ async function allegroDobierzKategorieProduktu(id=0,btn=null){
     toast("🟠 Szukam kategorii w katalogu Allegro…");
     const d=await chmura("allegro-category-suggest",{method:"POST",body:{product,phrase,limit:10},timeout:18000});
     allegroPokazKategorieWFormularzu(d);
+    if(d.selected?.id){
+      form.elements.allegroCategoryId.value=String(d.selected.id);
+      if(id)await allegroZapiszKategorieProduktu(id,d.selected.id,{source:d.consensus?.selected?"potwierdzona większość podobnych produktów":"wyszukiwarka kategorii Allegro",confidence:Number(d.consensus?.confidence||d.selected.score)||80,evidenceCount:Number(d.consensus?.selected?.count)||0,examples:d.consensus?.selected?.examples||[],categoryName:d.selected.pathText||d.selected.name||""});
+    }
     toast(d.selected?.id?`🟠 Dobrano kategorię Allegro: ${d.selected.name} (${d.selected.id})`:"⚠️ Allegro nie zwróciło pasującej kategorii");
   }catch(e){ toast("⚠️ Kategorie Allegro: "+(e.message||e)); }
   finally{ if(btn)btn.disabled=false; }
 }
-async function allegroZapiszKategorieProduktu(id,categoryId){
+async function allegroZapiszKategorieProduktu(id,categoryId,resolution={}){
   if(!id||!categoryId) return false;
   const p=pobierzProduktAdmin(id);
-  if(p?.allegroCategoryId) return false;
-  await chmuraZapiszProduktyCentralnie([{productId:id,fields:{allegroCategoryId:String(categoryId)}}],"allegro-category-selection");
+  const resolvedAt=new Date().toISOString(),nextResolution={categoryId:String(categoryId),categoryName:String(resolution.categoryName||""),source:String(resolution.source||"wybór w edytorze"),confidence:Math.max(0,Math.min(100,Number(resolution.confidence)||100)),evidenceCount:Math.max(0,Number(resolution.evidenceCount)||0),examples:Array.isArray(resolution.examples)?resolution.examples.slice(0,4):[],resolvedAt};
+  if(String(p?.allegroCategoryId||"")===String(categoryId)&&JSON.stringify(p?.allegroCategoryResolution||{})===JSON.stringify(nextResolution))return false;
+  await chmuraZapiszProduktyCentralnie([{productId:id,fields:{allegroCategoryId:String(categoryId),allegroCategoryName:nextResolution.categoryName,allegroCategoryResolution:nextResolution}}],"allegro-category-selection");
   zbudujProdukty();
   return true;
 }
@@ -9965,6 +9976,32 @@ function productEditorAllegroTrescHTML(p={}){
   const state=productEditorTrescStan(p),al=state.allegroContent,status=productEditorStatusKanalu(al.status);
   return `<div class="product-channel-block product-allegro-content"><div class="product-channel-block-head"><div><small>STUDIO TREŚCI ALLEGRO</small><h3>Profesjonalny opis zgodny z regulaminem</h3></div><span class="product-content-status ${status[0]}"><b>${status[1]}</b></span></div><p class="muted">Tylko fakty o produkcie. Agent usuwa kontakt, linki, sprzedaż poza Allegro, dostawę, płatności i inne treści transakcyjne.</p><div class="product-content-grid"><label class="product-content-short"><span><b>Opis krótki Allegro</b><small>2 konkretne zdania bez haseł i logistyki</small></span><textarea name="allegroShortDescription" rows="5" maxlength="2000" oninput="productEditorKanalPoleWpisane(this,'allegro')">${esc(al.short)}</textarea></label><div class="product-content-long"><span><b>Opis pełny Allegro</b><small>Hierarchia publikowana w ofercie: sekcje, akapity i listy</small></span>${productEditorOpisNarzedziaHTML("allegroDescription","Allegro",al.full)}<textarea name="allegroDescription" rows="16" maxlength="20000" oninput="productEditorKanalPoleWpisane(this,'allegro')">${esc(al.full)}</textarea></div></div></div>`;
 }
+function productEditorAllegroKlasyfikacjaHTML(p={},edycja=false){
+  const resolution=p.allegroCategoryResolution&&typeof p.allegroCategoryResolution==="object"?p.allegroCategoryResolution:{};
+  const categoryId=String(p.allegroCategoryId||resolution.categoryId||""),categoryName=String(p.allegroCategoryName||resolution.categoryName||"");
+  const catalogId=String(p.allegroProductId||""),offerId=String(p.allegroOfferId||"");
+  const confidence=Math.max(0,Math.min(100,Number(resolution.confidence)||0)),evidence=Math.max(0,Number(resolution.evidenceCount)||0);
+  const categoryReady=!!categoryId,catalogState=catalogId?"Powiązano właściwy produkt katalogowy":(p.gtin||p.ean)?"Agent szuka po EAN/GTIN":"Brak EAN — Agent użyje kodu i parametrów";
+  return `<section class="product-allegro-classification ${categoryReady?"is-ready":"needs-work"}" data-allegro-classification>
+    <header><div><small>KLASYFIKACJA I TOŻSAMOŚĆ</small><h3>Kategoria oraz katalog Allegro</h3><p>Agent najpierw wykorzystuje potwierdzone przypisania podobnych produktów, następnie EAN i katalog Allegro, a dopiero na końcu wyszukiwarkę kategorii.</p></div><span class="${categoryReady?"is-ready":"needs-work"}">${categoryReady?"✓ kategoria zapisana":"! wymaga dopasowania"}</span></header>
+    <div class="product-allegro-classification-flow">
+      <article><span>1</span><small>Kategoria sklepu</small><b>${esc(p.kategoria||"nieustalona")}</b><em>punkt wyjścia</em></article>
+      <i>→</i>
+      <article class="${categoryReady?"is-ready":""}"><span>2</span><small>Kategoria Allegro</small><b>${esc(categoryName||categoryId||"Agent dobierze automatycznie")}</b><em>${categoryId?`ID ${esc(categoryId)}`:"oczekuje na przygotowanie"}</em></article>
+      <i>→</i>
+      <article class="${catalogId?"is-ready":""}"><span>3</span><small>Produkt katalogowy</small><b>${esc(catalogState)}</b><em>${catalogId?`ID ${esc(catalogId)}`:"unikalne dla tego produktu"}</em></article>
+    </div>
+    ${resolution.source?`<div class="product-allegro-classification-proof"><span>🧠</span><div><small>DOWÓD WYBORU AGENTA</small><b>${esc(resolution.source)}</b><p>${confidence?`Pewność ${confidence}%`:"Wynik zapisany"}${evidence?` • ${evidence} potwierdzonych produktów z tej samej grupy`:""}${resolution.resolvedAt?` • ${esc(allegroDataTxt(resolution.resolvedAt))}`:""}</p></div></div>`:""}
+    <div class="product-allegro-classification-fields">
+      <label><span>ID kategorii Allegro *</span><input name="allegroCategoryId" value="${esc(categoryId)}" placeholder="Agent uzupełni automatycznie"></label>
+      <label><span>ID produktu katalogowego</span><input name="allegroProductId" value="${esc(catalogId)}" placeholder="unikalne — wyszukiwane po EAN lub kodzie"></label>
+      <label><span>ID oferty Allegro</span><input name="allegroOfferId" value="${esc(offerId)}" placeholder="uzupełni API po wystawieniu"></label>
+      <label class="product-allegro-category-phrase"><span>Dodatkowa fraza, tylko gdy chcesz zmienić wynik</span><input name="allegroCategoryPhrase" value="${esc(p.allegroCategoryPhrase||"")}" placeholder="np. puzzle drewniane albo gry rodzinne"></label>
+      <button class="btn product-allegro-category-run" type="button" onclick="allegroDobierzKategorieProduktu(${edycja?jsArg(p.id):"0"},this)">🧠 Dopasuj kategorię i zapisz</button>
+    </div>
+    <div id="allegroCategoryPreview"></div>
+  </section>`;
+}
 function productEditorVonHalskyAuditHTML(p={}){
   const raw=String(p.vonHalskyAgentStatus||p.contentEditorial?.channelStates?.vonHalsky?.status||"oczekuje").toLowerCase();
   const ready=["ready","confirmed"].includes(raw),failed=["error","failed"].includes(raw),preparedAt=p.vonHalskyAgentConfirmedAt||p.vonHalskyAgentPreparedAt||p.contentEditorial?.channelStates?.vonHalsky?.savedAt||"";
@@ -10210,17 +10247,8 @@ function formularzProduktu(p, tryb){
         <div class="product-channel-overview">${productEditorKanalKontrolaHTML(p,"allegro")}${productEditorKanalPodgladHTML(p,"allegro")}</div>
         <div class="product-channel-block"><h3>Cena, prowizje i koszty Allegro</h3><input type="hidden" name="allegroFeePrice" value="${esc(p.allegroFeePrice??p.cenaAllegro??p.cena??"")}"><div class="product-profit-fields"><div class="f-group"><label>Cena na Allegro (zł)</label><input name="cenaAllegro" inputmode="decimal" value="${p.cenaAllegro??""}" placeholder="pusta = cena sklepu" oninput="aktualizujKalkulatorCenProduktu(this.form)"><small>Własna cena ma pierwszeństwo; puste pole dziedziczy cenę sklepu.</small></div><div class="f-group"><label>Prowizja Allegro (zł)</label><input name="allegroCommissionAmount" inputmode="decimal" value="${esc(p.allegroCommissionAmount??"")}" oninput="aktualizujKalkulatorCenProduktu(this.form)"></div><div class="f-group"><label>Prowizja Allegro (%)</label><input name="allegroCommissionRate" inputmode="decimal" value="${esc(p.allegroCommissionRate??"")}" oninput="aktualizujKalkulatorCenProduktu(this.form)"></div><div class="f-group"><label>Opłaty cykliczne (zł)</label><input name="allegroRecurringFees" inputmode="decimal" value="${esc(p.allegroRecurringFees??"")}" oninput="aktualizujKalkulatorCenProduktu(this.form)"></div><div class="f-group"><label>Inne koszty Allegro / szt.</label><input name="allegroAdditionalCost" inputmode="decimal" value="${esc(p.allegroAdditionalCost??"")}" oninput="aktualizujKalkulatorCenProduktu(this.form)"></div><div class="f-group"><label>Dopłata do wysyłki / szt.</label><input name="allegroShippingSubsidy" inputmode="decimal" value="${esc(p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI)}" oninput="aktualizujKalkulatorCenProduktu(this.form)"><small>Domyślnie zawsze 3,00 zł.</small></div><div class="f-group"><label>Reklama Allegro (% ceny)</label><input name="allegroAdsPercent" inputmode="decimal" value="${esc(p.allegroAdsPercent??"")}" oninput="aktualizujKalkulatorCenProduktu(this.form)"></div><div class="f-group"><label>Ostatnie wyliczenie API</label><input name="allegroFeeCalculatedAt" value="${esc(p.allegroFeeCalculatedAt||"")}" readonly><small>${p.allegroFeeCalculatedAt?esc(allegroDataTxt(p.allegroFeeCalculatedAt)):"jeszcze nie pobrano"}</small></div></div><div class="diag-actions">${edycja?`<button class="btn" type="button" onclick="allegroPobierzProwizjeProduktu(${jsArg(p.id)},this)">Pobierz aktualne opłaty</button>`:""}<a class="btn ghost" href="#/admin/allegro/rentownosc">Kalkulator marży</a></div></div>
         ${productEditorAllegroTrescHTML(p)}
-        <div class="f-row" style="margin-top:.7rem">
-          <div class="f-group"><label>ID kategorii Allegro *</label><input name="allegroCategoryId" value="${esc(p.allegroCategoryId||"")}" placeholder="wymagane do wystawienia"></div>
-          <div class="f-group"><label>ID produktu Allegro</label><input name="allegroProductId" value="${esc(p.allegroProductId||"")}" placeholder="opcjonalnie, jeśli znany"></div>
-          <div class="f-group"><label>ID oferty Allegro</label><input name="allegroOfferId" value="${esc(p.allegroOfferId||"")}" placeholder="uzupełni się po wystawieniu"></div>
-        </div>
+        ${productEditorAllegroKlasyfikacjaHTML(p,edycja)}
         <div class="f-group"><label>Tytuł oferty Allegro <small>12–75 znaków, minimum 3 słowa</small></label><input name="allegroTitle" maxlength="75" value="${esc(p.allegroTitle||"")}" placeholder="Agent utworzy zgodny tytuł z nazwy, producenta i kategorii" oninput="productEditorKanalPoleWpisane(this,'allegro')"><small>Jeśli pole pozostanie puste, Agent zapisze bezpieczny tytuł przed wystawieniem. Możesz go później zmienić ręcznie.</small></div>
-        <div class="f-row">
-          <div class="f-group"><label>Szukaj w katalogu Allegro</label><input name="allegroCategoryPhrase" value="${esc(p.allegroCategoryPhrase||"")}" placeholder="np. gry planszowe, zabawki kreatywne albo nazwa produktu"></div>
-          <div class="f-group"><label>Dobieranie kategorii</label><button class="btn ghost" type="button" onclick="allegroDobierzKategorieProduktu(${edycja?jsArg(p.id):"0"},this)">🔎 Dobierz kategorię Allegro</button></div>
-        </div>
-        <div id="allegroCategoryPreview"></div>
         <div class="product-channel-block allegro-sales-conditions" data-allegro-sales-conditions><div class="product-channel-block-head"><div><small>Warunki sprzedaży z konta Allegro</small><h3>Dostawa, zwroty, reklamacje i gwarancja</h3></div><button class="btn ghost" type="button" onclick="allegroPobierzWarunkiDoEdytora(this)">↻ Pobierz dostępne opcje</button></div><p class="muted">Wybierasz istniejące warunki z konta. System nie tworzy ani nie modyfikuje cennika; domyślnie stosuje zapisany cennik „artway2”.</p><input type="hidden" name="allegroShippingRateName" value="${esc(p.allegroShippingRateName||"artway2")}"><input type="hidden" name="allegroReturnPolicyName" value="${esc(p.allegroReturnPolicyName||"")}"><input type="hidden" name="allegroImpliedWarrantyName" value="${esc(p.allegroImpliedWarrantyName||"")}"><input type="hidden" name="allegroWarrantyName" value="${esc(p.allegroWarrantyName||"")}"><div class="product-sales-condition-grid"><label class="f-group"><span>Cennik dostawy *</span><select name="allegroShippingRateId" data-name-field="allegroShippingRateName" data-allegro-condition="shippingRates" data-current="${esc(p.allegroShippingRateId||"")}"><option value="${esc(p.allegroShippingRateId||"")}">${esc(p.allegroShippingRateName||"artway2 — domyślny")}</option></select></label><label class="f-group"><span>Warunki zwrotu *</span><select name="allegroReturnPolicyId" data-name-field="allegroReturnPolicyName" data-allegro-condition="returnPolicies" data-current="${esc(p.allegroReturnPolicyId||"")}"><option value="${esc(p.allegroReturnPolicyId||"")}">${esc(p.allegroReturnPolicyName||"domyślne z konta Allegro")}</option></select></label><label class="f-group"><span>Warunki reklamacji *</span><select name="allegroImpliedWarrantyId" data-name-field="allegroImpliedWarrantyName" data-allegro-condition="impliedWarranties" data-current="${esc(p.allegroImpliedWarrantyId||"")}"><option value="${esc(p.allegroImpliedWarrantyId||"")}">${esc(p.allegroImpliedWarrantyName||"domyślne z konta Allegro")}</option></select></label><label class="f-group"><span>Gwarancja</span><select name="allegroWarrantyId" data-name-field="allegroWarrantyName" data-allegro-condition="warranties" data-current="${esc(p.allegroWarrantyId||"")}"><option value="${esc(p.allegroWarrantyId||"")}">${esc(p.allegroWarrantyName||"brak lub domyślna")}</option></select></label></div><div data-allegro-sales-condition-status class="backend-note">Opcje zostaną pobrane bezpośrednio z Allegro i zapisane w tej kartotece produktu.</div></div>
         <div class="f-row">
           <div class="f-group"><label>Stan oferty Allegro <small style="font-weight:400;color:var(--muted2)">(ustawienie globalne; nie zmienia magazynu)</small></label><input name="allegroStock" type="number" value="${allegroStanOfertyProduktu()}" readonly><small>Każda oferta otrzymuje ${allegroStanOfertyProduktu()} szt. i automatyczne wznawianie. Zmienisz to w Ustawieniach Allegro.</small></div>
@@ -10380,6 +10408,10 @@ function daneProduktuZFormularza(f, id, poprzedni={}){
     allegroParameters.push(el?.dataset?.paramType==="dictionary"?{id:pid,valuesIds:[val]}:{id:pid,values:[val]});
   }
   if(allegroParameters.length)p.allegroParameters=allegroParameters;
+  if(String(p.allegroCategoryId||"")!==String(poprzedni.allegroCategoryId||"")){
+    p.allegroCategoryName="";
+    p.allegroCategoryResolution={categoryId:String(p.allegroCategoryId||""),categoryName:"",source:"ręczna zmiana w edytorze produktu",confidence:100,evidenceCount:0,examples:[],resolvedAt:new Date().toISOString()};
+  }
   productEditorZastosujWspolnaTresc(p,poprzedni);
   return seoAutomatyzujDaneProduktu(p,p.seoMode==="manual"?"ręczne SEO administratora":"automatycznie po zapisie produktu",{force:p.seoMode!=="manual"});
 }
@@ -11095,9 +11127,10 @@ function allegroPublikacjaCentrumOperacjiHTML(){
 }
 function allegroPublikacjaKartaHTML(p={}){
   const meta=allegroPublikacjaMetaProduktu(p),offer=meta.offer,missing=meta.missing,assessment=meta.withdrawnNoStock?allegroPublikacjaOcena(p,offer,missing):meta.unresolved?{code:"verify",label:"Zweryfikuj powiązanie",detail:`zapisane ID ${meta.offerId} nie jest jeszcze w rejestrze ofert`,score:35}:allegroPublikacjaOcena(p,offer,missing),action=allegroPublikacjaTrybProduktu(p,offer),selected=zaznaczoneAllegroProduktyKatalogu.has(String(p.id)),image=p.zdjecie||(p.zdjecia||[])[0]||"",status=meta.status;
+  const categoryResolution=p.allegroCategoryResolution&&typeof p.allegroCategoryResolution==="object"?p.allegroCategoryResolution:{},categoryLabel=p.allegroCategoryName||categoryResolution.categoryName||p.allegroCategoryId||"do dobrania",categoryProof=categoryResolution.source?`${categoryResolution.source}${categoryResolution.confidence?` • ${Math.round(Number(categoryResolution.confidence))}%`:""}`:(p.allegroCategoryId?"zapisana w kartotece":"Agent dobierze podczas przygotowania");
   const statusLabel=meta.withdrawnNoStock?(meta.pendingStockWithdrawal?"ACTIVE • oczekuje na wycofanie":"WYCOFANA • brak towaru"):meta.unresolved?`weryfikacja • ${meta.offerId}`:offer?`${status||"SZKIC"} • ${offer.id}`:"nowa";
   const primaryAction=action.disabled?`<button class="btn stock-blocked-action" disabled>${action.icon} ${esc(action.label)}</button>${meta.unresolved?`<button class="btn ghost" onclick="allegroWczytajDane(true).then(()=>renderuj())">↻ Zweryfikuj ofertę</button>`:""}`:meta.unresolved?`<button class="btn product-allegro-publish" onclick="allegroWczytajDane(true).then(()=>renderuj())">↻ Zweryfikuj ofertę</button>`:`<button class="btn product-allegro-publish" onclick="allegroPublikacjaOtworzDecyzje(${jsArg(p.id)},'${action.operation}')">${action.icon} ${esc(action.label)}</button>`;
-  return `<article class="allegro-publication-card ${selected?"selected":""} ${assessment.code}" data-allegro-listing-product="${esc(p.id)}"><label class="allegro-publication-check"><input type="checkbox" ${selected?"checked":""} ${meta.selectable?"":"disabled"} onchange="allegroPublikacjaPrzelaczWybor(${jsArg(p.id)},this.checked)"><span>${meta.selectable?"Zaznacz":"Niedostępny do publikacji"}</span></label><div class="allegro-publication-product">${image?`<img src="${esc(image)}" alt="" loading="lazy">`:`<span class="empty-image">📦</span>`}<div><small>${esc(p.producent||p.marka||"Producent nieuzupełniony")}</small><h3>${esc(p.nazwa||"Produkt bez nazwy")}</h3><p>ID ${esc(p.id)}${p.sku?` • SKU ${esc(p.sku)}`:""}</p><div class="allegro-publication-codes"><code>EAN ${esc(p.gtin||p.ean||"—")}</code><code>MPN ${esc(p.kodProducenta||p.mpn||p.externalId||"—")}</code></div></div></div><div class="allegro-publication-readiness"><div><span class="${assessment.code}">${assessment.code==="missing"||assessment.code==="verify"?"⚠️":assessment.code==="stock-blocked"?"⏸":assessment.code==="synced"?"✓":"●"} ${esc(assessment.label)}</span><b>${assessment.score}%</b></div><progress max="100" value="${assessment.score}"></progress><small>${esc(assessment.detail)}</small></div><div class="allegro-publication-data"><span><small>Cena sklepu</small><b>${zl(p.cena)}</b></span><span><small>Cena Allegro</small><b>${zl(p.cenaAllegro||p.cena)}</b></span><span><small>Kategoria</small><b>${esc(p.allegroCategoryId||"do dobrania")}</b></span><span><small>Oferta</small><b class="${status==="ACTIVE"&&!meta.withdrawnNoStock?"active":meta.withdrawnNoStock?"stock-blocked":""}">${esc(statusLabel)}</b></span></div><div class="allegro-publication-actions">${primaryAction}${meta.withdrawnNoStock?`<a class="btn ghost" href="#/admin/magazyn/dostawcy">Dostępność i decyzja</a>`:`<button class="btn ghost" onclick="allegroPublikacjaPrzygotujWybrane(${jsArg(p.id)})">🤖 Przygotuj dane</button>`}<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Edytuj</a>${offer?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(offer.id)}" target="_blank" rel="noopener">↗ Otwórz</a>`:""}<small>${meta.unresolved?"Najpierw potwierdź zapisane powiązanie; tworzenie duplikatu jest zablokowane":meta.withdrawnNoStock?`Status wynika z tej samej decyzji dostępności, która ukryła produkt w sklepie. ${esc(action.note)}`:`${esc(action.note)} • przed wysłaniem działa ponowna kontrola`}</small></div></article>`;
+  return `<article class="allegro-publication-card ${selected?"selected":""} ${assessment.code}" data-allegro-listing-product="${esc(p.id)}"><label class="allegro-publication-check"><input type="checkbox" ${selected?"checked":""} ${meta.selectable?"":"disabled"} onchange="allegroPublikacjaPrzelaczWybor(${jsArg(p.id)},this.checked)"><span>${meta.selectable?"Zaznacz":"Niedostępny do publikacji"}</span></label><div class="allegro-publication-product">${image?`<img src="${esc(image)}" alt="" loading="lazy">`:`<span class="empty-image">📦</span>`}<div><small>${esc(p.producent||p.marka||"Producent nieuzupełniony")}</small><h3>${esc(p.nazwa||"Produkt bez nazwy")}</h3><p>ID ${esc(p.id)}${p.sku?` • SKU ${esc(p.sku)}`:""}</p><div class="allegro-publication-codes"><code>EAN ${esc(p.gtin||p.ean||"—")}</code><code>MPN ${esc(p.kodProducenta||p.mpn||p.externalId||"—")}</code></div></div></div><div class="allegro-publication-readiness"><div><span class="${assessment.code}">${assessment.code==="missing"||assessment.code==="verify"?"⚠️":assessment.code==="stock-blocked"?"⏸":assessment.code==="synced"?"✓":"●"} ${esc(assessment.label)}</span><b>${assessment.score}%</b></div><progress max="100" value="${assessment.score}"></progress><small>${esc(assessment.detail)}</small></div><div class="allegro-publication-data"><span><small>Cena sklepu</small><b>${zl(p.cena)}</b></span><span><small>Cena Allegro</small><b>${zl(p.cenaAllegro||p.cena)}</b></span><span class="allegro-publication-category-data"><small>Kategoria</small><b>${esc(categoryLabel)}</b><em>${esc(categoryProof)}</em></span><span><small>Oferta</small><b class="${status==="ACTIVE"&&!meta.withdrawnNoStock?"active":meta.withdrawnNoStock?"stock-blocked":""}">${esc(statusLabel)}</b></span></div><div class="allegro-publication-actions">${primaryAction}${meta.withdrawnNoStock?`<a class="btn ghost" href="#/admin/magazyn/dostawcy">Dostępność i decyzja</a>`:`<button class="btn ghost" onclick="allegroPublikacjaPrzygotujWybrane(${jsArg(p.id)})">🤖 Przygotuj dane</button>`}<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Edytuj</a>${offer?`<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(offer.id)}" target="_blank" rel="noopener">↗ Otwórz</a>`:""}<small>${meta.unresolved?"Najpierw potwierdź zapisane powiązanie; tworzenie duplikatu jest zablokowane":meta.withdrawnNoStock?`Status wynika z tej samej decyzji dostępności, która ukryła produkt w sklepie. ${esc(action.note)}`:`${esc(action.note)} • przed wysłaniem działa ponowna kontrola`}</small></div></article>`;
 }
 
 allegroWystawianiePanelHTML=function(){

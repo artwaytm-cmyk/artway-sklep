@@ -34,6 +34,87 @@ function structuredLines(value = '') {
   return source.split(/\n+/).map((line) => line.trim()).filter(Boolean).slice(0, 80);
 }
 
+const PLACEHOLDER_COPY = /(?:kr[oó]tki wst[eę]p o produkcie|pierwsza potwierdzona cecha|druga potwierdzona cecha|opis produktu do uzupe[łl]nienia|najwa[żz]niejsze informacje o produkcie)/i;
+
+function plainDescription(value = '') {
+  return decode(clean(value, 30_000))
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*\/\s*(?:p|div|li|h[1-6]|ul|ol)\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/^\s*(?:#{1,4}|[•·▪◦*-])\s*/gm, '')
+    .replace(/[ \t\u00a0]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function sentences(value = '') {
+  const source = plainDescription(value);
+  const parts = source.split(/(?<=[.!?])\s+|\n+/).map((item) => clean(item, 500).trim()).filter((item) => item.length >= 20 && !PLACEHOLDER_COPY.test(item));
+  return [...new Set(parts.map((item) => item.replace(/\s+/g, ' ')))].slice(0, 12);
+}
+
+function parameterEntries(product = {}) {
+  const output = new Map();
+  const add = (label, value) => {
+    const name = clean(String(label || '').replace(/[_-]+/g, ' '), 100).replace(/\s+/g, ' ').trim();
+    const textValue = Array.isArray(value) ? value.map((item) => clean(item, 200)).filter(Boolean).join(', ') : clean(value, 400);
+    if (!name || !textValue || /^(?:id|url|link|source|źr[oó]d[łl]o)$/i.test(name)) return;
+    const key = name.toLocaleLowerCase('pl-PL');
+    if (!output.has(key)) output.set(key, { label: name.charAt(0).toLocaleUpperCase('pl-PL') + name.slice(1), value: textValue });
+  };
+  for (const source of [product.parametryProducenta, product.parametryZrodla, product.parametry, product.parameters]) {
+    if (Array.isArray(source)) {
+      for (const item of source) add(item?.name || item?.label, item?.value || item?.valuesLabels || item?.values);
+    } else if (source && typeof source === 'object') {
+      for (const [label, value] of Object.entries(source)) add(label, value);
+    }
+  }
+  add('Wiek', product.wiek || product.age);
+  add('Liczba graczy', product.gracze || product.players);
+  add('Materiał', product.material);
+  add('Rozmiar', product.rozmiar || product.size);
+  add('Liczba elementów', product.liczbaElementow || product.elementCount);
+  return [...output.values()].slice(0, 12);
+}
+
+export function professionalDescriptionQuality(value = '') {
+  const text = clean(value, 30_000);
+  const headings = (text.match(/(?:^|\n)\s*##\s+\S+/g) || []).length + (text.match(/<h[2-4][^>]*>/gi) || []).length;
+  const bullets = (text.match(/(?:^|\n)\s*[•·▪◦*-]\s+\S+/g) || []).length + (text.match(/<li[^>]*>/gi) || []).length;
+  const paragraphs = plainDescription(text).split(/\n{2,}|(?<=[.!?])\s+(?=[A-ZĄĆĘŁŃÓŚŹŻ])/).filter((part) => part.trim().length >= 30).length;
+  const parameters = (text.match(/(?:^|\n)\s*[\p{L}\d][^:\n]{1,50}:\s+\S+/gu) || []).length;
+  const placeholder = PLACEHOLDER_COPY.test(text);
+  const score = Math.max(0, Math.min(100,
+    (text.length >= 180 ? 22 : text.length >= 100 ? 12 : 0)
+    + Math.min(28, headings * 10)
+    + Math.min(24, bullets * 5)
+    + Math.min(16, paragraphs * 4)
+    + Math.min(10, parameters * 2)
+    - (placeholder ? 50 : 0)
+  ));
+  return { score, headings, bullets, paragraphs, parameters, placeholder, professional: score >= 45 && !placeholder };
+}
+
+export function buildProfessionalProductDescription(product = {}, value = '') {
+  const original = clean(value, 30_000), quality = professionalDescriptionQuality(original);
+  if (quality.professional) return original;
+  const parts = sentences(original), parameters = parameterEntries(product);
+  if (!parts.length && !parameters.length) return original;
+  const introduction = parts.slice(0, parts.length > 1 ? 1 : 2);
+  const features = parts.slice(introduction.length, introduction.length + 6);
+  const audience = parameters.filter((item) => /wiek|gracz|dziec|os[oó]b/i.test(item.label));
+  const contents = parameters.filter((item) => /zawarto|element|liczba sztuk|ilo[śs][ćc]/i.test(item.label));
+  const technical = parameters.filter((item) => !audience.includes(item) && !contents.includes(item)).slice(0, 8);
+  const blocks = [];
+  if (introduction.length) blocks.push(introduction.join(' '));
+  if (features.length) blocks.push(`## Najważniejsze cechy\n${features.map((item) => `• ${item}`).join('\n')}`);
+  if (audience.length) blocks.push(`## Dla kogo\n${audience.map((item) => `${item.label}: ${item.value}`).join('\n')}`);
+  if (contents.length) blocks.push(`## Zawartość zestawu\n${contents.map((item) => `${item.label}: ${item.value}`).join('\n')}`);
+  if (technical.length) blocks.push(`## Informacje techniczne\n${technical.map((item) => `${item.label}: ${item.value}`).join('\n')}`);
+  return blocks.join('\n\n').trim().slice(0, 30_000) || original;
+}
+
 function textItems(longDescription = '') {
   const result = [];
   let heading = '';
@@ -80,4 +161,3 @@ export function buildSharedProductDescriptionSections(product = {}) {
   }
   return sections.slice(0, 20);
 }
-

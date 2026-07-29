@@ -797,12 +797,15 @@ function produktRoboczyAllegroZFormularza(form,id,poprzedni={}){
 function allegroKategorieHTML(d){
   const selected=d?.selected||null;
   const suggestions=Array.isArray(d?.suggestions)?d.suggestions:[];
+  const consensus=d?.consensus||null,proof=consensus?.selected||null;
   if(!selected&&!suggestions.length&&!d?.errors?.length) return "";
   const row=(c,main=false)=>`<div class="allegro-category-row ${main?"main":""}">
     <div><b>${main?"✅ Dobrana kategoria: ":""}${esc(c.name||"—")}</b><br><small>ID: ${esc(c.id||"—")}${c.pathText?` • ${esc(c.pathText)}`:""}${c.leaf===false?" • niekońcowa":""}</small></div>
-    <button class="btn ghost" type="button" onclick="allegroUstawKategorieWFormularzu(${jsArg(c.id)})">Wybierz</button>
+    <button class="btn ghost" type="button" onclick="allegroUstawKategorieWFormularzu(${jsArg(c.id)})">Wybierz i zapisz</button>
   </div>`;
-  return `<div class="backend-note allegro-category-box">
+  return `<div class="allegro-category-box">
+    <header><div><small>WYNIK KLASYFIKACJI</small><h3>${proof?"Kategoria potwierdzona historią katalogu":"Dopasowanie bezpośrednio z Allegro"}</h3></div><strong>${esc(proof?`${consensus.confidence||proof.confidence||0}% pewności`:"wynik API")}</strong></header>
+    ${proof?`<div class="allegro-category-proof"><span>🧠</span><div><b>${esc(consensus.reason||"Potwierdzona większość podobnych produktów")}</b><small>${proof.examples?.length?`Przykłady: ${proof.examples.map(item=>esc(item.name||`produkt ${item.id}`)).join(" • ")}`:"Agent wykorzystał zapisane, potwierdzone przypisania z centralnego katalogu."}</small></div></div>`:""}
     ${selected?row(selected,true):`<b>Nie udało się automatycznie dobrać kategorii.</b>`}
     ${suggestions.length>1?`<details style="margin-top:.55rem"><summary>Inne pasujące kategorie (${suggestions.length})</summary>${suggestions.slice(0,10).map(c=>row(c,false)).join("")}</details>`:""}
     ${d?.errors?.length?`<small style="color:var(--muted2)">Część zapytań Allegro nie zwróciła danych: ${esc(d.errors.map(e=>e.phrase).join(", "))}</small>`:""}
@@ -831,11 +834,14 @@ function allegroDraftDiagnostykaHTML(d={},msg="",brak=""){
     <details><summary>Podgląd JSON wysyłany do Allegro</summary><pre style="white-space:pre-wrap;font-size:.75rem">${esc(JSON.stringify(d.draft||d,null,2))}</pre></details>
   </div>`;
 }
-function allegroUstawKategorieWFormularzu(id){
+async function allegroUstawKategorieWFormularzu(id){
   const form=document.querySelector("form.product-editor-form");
   if(!form?.elements?.allegroCategoryId){ toast("Nie znaleziono pola kategorii Allegro"); return; }
   form.elements.allegroCategoryId.value=String(id||"").trim();
-  toast("🟠 Ustawiono kategorię Allegro: "+String(id||""));
+  form.elements.allegroCategoryId.dispatchEvent(new Event("input",{bubbles:true}));
+  const productId=String(form.dataset.productId||"").trim();
+  if(productId&&productId!=="0")await allegroZapiszKategorieProduktu(productId,id,{source:"wybór administratora z katalogu Allegro",confidence:100});
+  toast("🟠 Ustawiono i zapisano kategorię Allegro: "+String(id||""));
 }
 function allegroPokazKategorieWFormularzu(d){
   const box=document.getElementById("allegroCategoryPreview");
@@ -881,15 +887,20 @@ async function allegroDobierzKategorieProduktu(id=0,btn=null){
     toast("🟠 Szukam kategorii w katalogu Allegro…");
     const d=await chmura("allegro-category-suggest",{method:"POST",body:{product,phrase,limit:10},timeout:18000});
     allegroPokazKategorieWFormularzu(d);
+    if(d.selected?.id){
+      form.elements.allegroCategoryId.value=String(d.selected.id);
+      if(id)await allegroZapiszKategorieProduktu(id,d.selected.id,{source:d.consensus?.selected?"potwierdzona większość podobnych produktów":"wyszukiwarka kategorii Allegro",confidence:Number(d.consensus?.confidence||d.selected.score)||80,evidenceCount:Number(d.consensus?.selected?.count)||0,examples:d.consensus?.selected?.examples||[],categoryName:d.selected.pathText||d.selected.name||""});
+    }
     toast(d.selected?.id?`🟠 Dobrano kategorię Allegro: ${d.selected.name} (${d.selected.id})`:"⚠️ Allegro nie zwróciło pasującej kategorii");
   }catch(e){ toast("⚠️ Kategorie Allegro: "+(e.message||e)); }
   finally{ if(btn)btn.disabled=false; }
 }
-async function allegroZapiszKategorieProduktu(id,categoryId){
+async function allegroZapiszKategorieProduktu(id,categoryId,resolution={}){
   if(!id||!categoryId) return false;
   const p=pobierzProduktAdmin(id);
-  if(p?.allegroCategoryId) return false;
-  await chmuraZapiszProduktyCentralnie([{productId:id,fields:{allegroCategoryId:String(categoryId)}}],"allegro-category-selection");
+  const resolvedAt=new Date().toISOString(),nextResolution={categoryId:String(categoryId),categoryName:String(resolution.categoryName||""),source:String(resolution.source||"wybór w edytorze"),confidence:Math.max(0,Math.min(100,Number(resolution.confidence)||100)),evidenceCount:Math.max(0,Number(resolution.evidenceCount)||0),examples:Array.isArray(resolution.examples)?resolution.examples.slice(0,4):[],resolvedAt};
+  if(String(p?.allegroCategoryId||"")===String(categoryId)&&JSON.stringify(p?.allegroCategoryResolution||{})===JSON.stringify(nextResolution))return false;
+  await chmuraZapiszProduktyCentralnie([{productId:id,fields:{allegroCategoryId:String(categoryId),allegroCategoryName:nextResolution.categoryName,allegroCategoryResolution:nextResolution}}],"allegro-category-selection");
   zbudujProdukty();
   return true;
 }

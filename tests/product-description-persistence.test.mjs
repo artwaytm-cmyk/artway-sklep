@@ -2,6 +2,25 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { buildProfessionalProductDescription, professionalDescriptionQuality } from '../src/backend/lib/domain/product-content-layout.mjs';
+
+test('prosty tekst źródłowy jest zamieniany w profesjonalną kartę bez wymyślania danych', () => {
+  const description = buildProfessionalProductDescription({
+    parametryProducenta: { Wiek: '6+', 'Liczba graczy': '2–4', Materiał: 'karton', 'Liczba elementów': '91' },
+  }, 'Gra rodzinna przenosi uczestników do świata piramid. Gracze planują kolejne ruchy i wspólnie sprawdzają swoje decyzje. Rozgrywka ćwiczy spostrzegawczość. Elementy mają czytelne ilustracje. Zasady pozwalają szybko rozpocząć zabawę.');
+  assert.match(description, /## Najważniejsze cechy/);
+  assert.match(description, /## Dla kogo/);
+  assert.match(description, /## Zawartość zestawu/);
+  assert.match(description, /## Informacje techniczne/);
+  assert.match(description, /Wiek: 6\+/);
+  assert.equal(professionalDescriptionQuality(description).professional, true);
+});
+
+test('pozorny opis z tekstem zastępczym nie przechodzi bramki jakości', () => {
+  const result = professionalDescriptionQuality('Krótki wstęp o produkcie.\\n\\n## Najważniejsze cechy\\n• Pierwsza potwierdzona cecha\\n• Druga potwierdzona cecha');
+  assert.equal(result.professional, false);
+  assert.equal(result.placeholder, true);
+});
 
 test('edytor pokazuje niezależne pola sklepu, Allegro i Von Halsky', async () => {
   const source = await readFile('src/frontend/12-product-editor-workspace.js', 'utf8');

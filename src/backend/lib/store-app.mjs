@@ -135,7 +135,7 @@ import {
 import { createAllegroOfferWithdrawalRoute } from './allegro-offer-withdrawal-route.mjs';
 import { allegroAutomaticCategoryParameters, allegroCategoryParameterResolutionReport } from './domain/allegro-category-parameter-resolver.mjs';
 import { enrichAllegroProductEvidence } from './domain/allegro-parameter-enrichment.mjs';
-import { allegroCategoryIntentPhrases, allegroCategoryParentPath, allegroCategorySpecificScore, allegroCorrectCategorySelection } from './domain/allegro-category-classifier.mjs';
+import { allegroCategoryConsensus, allegroCategoryIntentPhrases, allegroCategoryParentPath, allegroCategoryResolution, allegroCategorySpecificScore, allegroCategorySuggestedSelection, allegroCorrectCategorySelection } from './domain/allegro-category-classifier.mjs';
 import {
   ALLEGRO_COMPLIANCE_POLICY,
   allegroCheckText,
@@ -1880,6 +1880,12 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
     ? options.relatedProducts
     : await allegroAgentProduktyKompletne();
   product = enrichAllegroProductEvidence(product, relatedProducts).product;
+  const categoryConsensus = allegroCategoryConsensus(product, relatedProducts);
+  const categoryConsensusApplicable = categoryConsensus.selected
+    && ((!options.categoryId && !product.allegroCategoryId) || categoryConsensus.replaceCurrent);
+  if (categoryConsensusApplicable) {
+    options.categoryId = categoryConsensus.selected.id;
+  }
   const [offersRec, mappingsRec, offerSettings] = await Promise.all([
     czytaj('allegro_offers', { items: [] }),
     czytaj('allegro_mappings', { items: {} }),
@@ -1920,6 +1926,9 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   let categoryParameters = await allegroParametryKategorii(req, effectiveCategoryId);
   const categoryCorrection = !existingCatalogProductId ? await allegroCorrectCategorySelection({ product, categoryId: effectiveCategoryId, parameters: categoryParameters.parameters, suggest: () => allegroSugerujKategorie(req, product, { limit: 8 }), loadParameters: (id) => allegroParametryKategorii(req, id) }) : { changed: false };
   if (categoryCorrection.changed) { categorySuggestion = categoryCorrection.suggestion; effectiveCategoryId = categoryCorrection.categoryId; options.categoryId = effectiveCategoryId; categoryParameters = categoryCorrection.parameters; }
+  const categoryResolution = allegroCategoryResolution({
+    product, categoryId: effectiveCategoryId, categorySuggestion, consensus: categoryConsensus, catalogLookup, existingCatalogProductId,
+  });
   options.salesConditions = salesConditions;
   options.categoryParameters = categoryParameters.parameters;
   if (existingCatalogProductId && existingIdentityVerified) {
@@ -1992,6 +2001,8 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   return {
     ...draft,
     categorySuggestion,
+    categoryConsensus,
+    categoryResolution,
     salesConditions,
     categoryParameters: categoryParameters.parameters,
     requiredParameters,
@@ -2022,6 +2033,8 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
       allegroParameterResolution: parameterResolution,
       allegroProductId: options.catalogProductId || '',
       allegroCategoryId: effectiveCategoryId || '',
+      allegroCategoryName: categoryResolution.categoryName,
+      allegroCategoryResolution: categoryResolution,
       allegroSafetyInformation: gpsr.safetyInformation,
       allegroResponsibleProducer: gpsr.responsibleProducer,
       allegroParameterEvidence: preparedProduct.allegroParameterEvidence || {},
@@ -3446,8 +3459,11 @@ export default async (req) => {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
+      const relatedProducts = await allegroAgentProduktyKompletne();
+      const consensus = allegroCategoryConsensus(body.product || {}, relatedProducts);
       const result = await allegroSugerujKategorie(req, body.product || {}, { phrase: body.phrase, limit: body.limit || 10 });
-      return odpowiedz({ ok: true, ...result });
+      const selected = allegroCategorySuggestedSelection(consensus, result.selected, Boolean(body.phrase));
+      return odpowiedz({ ok: true, ...result, selected, consensus });
     }
 
     if (action === 'allegro-category-parameters') {

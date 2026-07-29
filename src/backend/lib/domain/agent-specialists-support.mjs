@@ -3,6 +3,7 @@ import { allegroSanitizePlainText } from '../allegro-compliance.mjs';
 import { allegroContentCompliance, vonHalskyContentCompliance } from './channel-content-compliance.mjs';
 import { AGENT_ACTION_POLICY, NEVER_AUTOMATIC } from './agent-action-policy.mjs';
 import { decisionFingerprint, decisionSubjectKey, normalizeDecisionReceipt } from './agent-decision-state.mjs';
+import { professionalDescriptionQuality } from './product-content-layout.mjs';
 import { SPECIALISTS } from './agent-specialist-definitions.mjs';
 import { SPECIALIST_PLAYBOOK_VERSION } from './agent-specialist-playbooks.mjs';
 
@@ -453,7 +454,8 @@ function productEditorialTextQuality(product = {}) {
   const longDescription = clean(product.opis || product.long_description, 30_000);
   const text = `${shortDescription}\n${longDescription}`;
   const issues = SOURCE_PAGE_NOISE.filter((rule) => rule.pattern.test(text)).map((rule) => rule.id);
-  return { clean: issues.length === 0, issues, shortDescription, longDescription };
+  const structure = professionalDescriptionQuality(longDescription);
+  return { clean: issues.length === 0 && !structure.placeholder, issues: structure.placeholder ? [...issues, 'placeholder_copy'] : issues, shortDescription, longDescription, structure };
 }
 
 function productEditorialQuality(product = {}) {

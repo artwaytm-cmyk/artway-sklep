@@ -82,6 +82,25 @@ test('studio treści ocenia strukturę i pokazuje profesjonalny układ w podglą
   assert.match(styles, /\.product-preview-parameters/);
 });
 
+test('sekcja Allegro pokazuje profesjonalny przepływ klasyfikacji i dowód wyboru Agenta', async () => {
+  const [editor, workspace, publication, styles] = await Promise.all([
+    readFile('src/frontend/12-product-editor.js', 'utf8'),
+    readFile('src/frontend/12-product-editor-workspace.js', 'utf8'),
+    readFile('src/frontend/11-allegro-product-publication.js', 'utf8'),
+    readFile('src/styles/32-product-editor-workspace.css', 'utf8'),
+  ]);
+  assert.match(editor, /productEditorAllegroKlasyfikacjaHTML\(p,edycja\)/);
+  assert.match(workspace, /function productEditorAllegroKlasyfikacjaHTML/);
+  assert.match(workspace, /Kategoria sklepu/);
+  assert.match(workspace, /Kategoria Allegro/);
+  assert.match(workspace, /Produkt katalogowy/);
+  assert.match(workspace, /DOWÓD WYBORU AGENTA/);
+  assert.match(publication, /potwierdzona większość podobnych produktów/);
+  assert.match(publication, /Wybierz i zapisz/);
+  assert.match(styles, /\.product-allegro-classification-flow/);
+  assert.match(styles, /\.product-allegro-classification-proof/);
+});
+
 test('kartoteka przechowuje główne źródło osobno od pomocniczych linków znalezionych przez Agenta', async () => {
   const [editor, workspace, saver, catalog] = await Promise.all([
     readFile('src/frontend/12-product-editor.js', 'utf8'),

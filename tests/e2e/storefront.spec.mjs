@@ -258,6 +258,9 @@ test('edytor produktu pokazuje trzy widoki klienta i aktualizuje je bez przeład
   await page.locator('[data-product-channel-nav="allegro"]').click();
   await expect(page.locator('[data-product-channel-preview="store"]')).toBeHidden();
   await expect(page.locator('[data-product-channel-preview="allegro"]')).toBeVisible();
+  await expect(page.locator('.product-allegro-classification')).toBeVisible();
+  await expect(page.locator('.product-allegro-classification-flow>article')).toHaveCount(3);
+  if (process.env.ARTWAY_VISUAL_CAPTURE) await page.screenshot({ path: '/tmp/artway-product-editor-allegro-desktop.png', fullPage: true });
   await page.locator('[data-product-channel-nav="vonHalsky"]').click();
   await expect(page.locator('[data-product-channel-preview="allegro"]')).toBeHidden();
   await expect(page.locator('[data-product-channel-preview="vonHalsky"]')).toBeVisible();

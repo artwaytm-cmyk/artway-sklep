@@ -1,5 +1,5 @@
 import { automaticEditorialAssessment, normalizeChannelEditorialResult, PROMPT_VERSION, productEditorialFingerprint, productEditorialSourceFingerprint, productPatch } from './agent-specialists.mjs';
-import { buildSharedProductDescriptionSections } from './product-content-layout.mjs';
+import { buildProfessionalProductDescription, buildSharedProductDescriptionSections } from './product-content-layout.mjs';
 
 const clean = (value = '', limit = 30_000) => String(value ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, limit);
 let editorialProviderUnavailableUntil = 0;
@@ -106,11 +106,16 @@ export async function prepareLinkedProductEditorial(product = {}, {
     && clean(product.opisKrotki || product.krotkiOpis, 1000).length >= 20
     && clean(product.opis, 20_000).length >= 80;
   const storeAssessment = storeRun ? automaticEditorialAssessment(storeRun) : existingContentAssessment(existingStoreReady);
-  const title = sharedTitle(storePatch.nazwa || product.nazwa || product.name), storeProduct = {
+  const title = sharedTitle(storePatch.nazwa || product.nazwa || product.name);
+  const storeRawDescription = editorialStructuredText(storePatch.opis || product.opis, 20_000);
+  const storeLongDescription = storeRun && storePatch.opis
+    ? buildProfessionalProductDescription({ ...product, sourceMaterial, parametryProducenta: sourceMaterial.parameters }, storeRawDescription)
+    : storeRawDescription;
+  const storeProduct = {
     ...product,
     nazwa: title,
     opisKrotki: editorialStructuredText(storePatch.opisKrotki || product.opisKrotki || product.krotkiOpis, 500),
-    opis: editorialStructuredText(storePatch.opis || product.opis, 20_000),
+    opis: storeLongDescription,
     ...(storePatch.seoTitle ? { seoTitle: clean(storePatch.seoTitle, 70) } : {}),
     ...(storePatch.seoDescription ? { seoDescription: clean(storePatch.seoDescription, 180) } : {}),
     ...(storePatch.seoKeywords ? { seoKeywords: clean(storePatch.seoKeywords, 500) } : {}),
@@ -135,6 +140,12 @@ export async function prepareLinkedProductEditorial(product = {}, {
   const existingVonHalskyTitle = clean(product.vonHalskyTitle, 150), existingVonHalskyShort = clean(product.vonHalskyShortDescription, 2000), existingVonHalskyDescription = clean(product.vonHalskyDescription, 30_000);
   const allegroAssessment = allegroRun ? automaticEditorialAssessment(allegroRun) : existingContentAssessment(existingAllegroTitle.length >= 5 && existingAllegroDescription.length >= 80);
   const vonHalskyAssessment = vonHalskyRun ? automaticEditorialAssessment(vonHalskyRun) : existingContentAssessment(existingVonHalskyTitle.length >= 5 && existingVonHalskyShort.length >= 20 && existingVonHalskyDescription.length >= 100);
+  const allegroLongDescription = allegroRun && allegroPatch.allegroDescription
+    ? buildProfessionalProductDescription(storeProduct, allegroPatch.allegroDescription)
+    : existingAllegroDescription;
+  const vonHalskyLongDescription = vonHalskyRun && vonHalskyPatch.vonHalskyDescription
+    ? buildProfessionalProductDescription(storeProduct, vonHalskyPatch.vonHalskyDescription)
+    : existingVonHalskyDescription;
   if (storeRun && !storeAssessment.eligible) warnings.push(`Sklep: ${storeAssessment.reason}`);
   if (allegroRun && !allegroAssessment.eligible) warnings.push(`Allegro: ${allegroAssessment.reason}`);
   if (vonHalskyRun && !vonHalskyAssessment.eligible) warnings.push(`Von Halsky: ${vonHalskyAssessment.reason}`);
@@ -146,12 +157,19 @@ export async function prepareLinkedProductEditorial(product = {}, {
   const channelProduct = {
     ...storeProduct,
     ...(allegroAssessment.eligible ? {
-      allegroTitle: clean(allegroPatch.allegroTitle || existingAllegroTitle, 75), allegroDescription: clean(allegroPatch.allegroDescription || existingAllegroDescription, 30_000),
-      allegroDescriptionSections: buildSharedProductDescriptionSections({ ...storeProduct, nazwa: allegroPatch.allegroTitle || existingAllegroTitle, opis: allegroPatch.allegroDescription || existingAllegroDescription, allegroDescription: allegroPatch.allegroDescription || existingAllegroDescription }),
+      allegroTitle: clean(allegroPatch.allegroTitle || existingAllegroTitle, 75),
+      allegroDescription: allegroLongDescription,
+      allegroDescriptionSections: buildSharedProductDescriptionSections({
+        ...storeProduct,
+        nazwa: allegroPatch.allegroTitle || existingAllegroTitle,
+        opis: allegroLongDescription,
+        allegroDescription: allegroLongDescription,
+      }),
     } : {}),
     ...(vonHalskyAssessment.eligible ? {
       vonHalskyContentMode: 'custom', vonHalskyTitle: clean(vonHalskyPatch.vonHalskyTitle || existingVonHalskyTitle, 150),
-      vonHalskyShortDescription: clean(vonHalskyPatch.vonHalskyShortDescription || existingVonHalskyShort, 2000), vonHalskyDescription: clean(vonHalskyPatch.vonHalskyDescription || existingVonHalskyDescription, 30_000),
+      vonHalskyShortDescription: clean(vonHalskyPatch.vonHalskyShortDescription || existingVonHalskyShort, 2000),
+      vonHalskyDescription: vonHalskyLongDescription,
       vonHalskyContentSource: 'agent-independent-von-halsky-content', vonHalskyContentUpdatedAt: preparedAt,
     } : { vonHalskyContentMode: 'custom' }),
   };

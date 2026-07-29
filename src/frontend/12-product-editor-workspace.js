@@ -374,6 +374,32 @@ function productEditorAllegroTrescHTML(p={}){
   const state=productEditorTrescStan(p),al=state.allegroContent,status=productEditorStatusKanalu(al.status);
   return `<div class="product-channel-block product-allegro-content"><div class="product-channel-block-head"><div><small>STUDIO TREŚCI ALLEGRO</small><h3>Profesjonalny opis zgodny z regulaminem</h3></div><span class="product-content-status ${status[0]}"><b>${status[1]}</b></span></div><p class="muted">Tylko fakty o produkcie. Agent usuwa kontakt, linki, sprzedaż poza Allegro, dostawę, płatności i inne treści transakcyjne.</p><div class="product-content-grid"><label class="product-content-short"><span><b>Opis krótki Allegro</b><small>2 konkretne zdania bez haseł i logistyki</small></span><textarea name="allegroShortDescription" rows="5" maxlength="2000" oninput="productEditorKanalPoleWpisane(this,'allegro')">${esc(al.short)}</textarea></label><div class="product-content-long"><span><b>Opis pełny Allegro</b><small>Hierarchia publikowana w ofercie: sekcje, akapity i listy</small></span>${productEditorOpisNarzedziaHTML("allegroDescription","Allegro",al.full)}<textarea name="allegroDescription" rows="16" maxlength="20000" oninput="productEditorKanalPoleWpisane(this,'allegro')">${esc(al.full)}</textarea></div></div></div>`;
 }
+function productEditorAllegroKlasyfikacjaHTML(p={},edycja=false){
+  const resolution=p.allegroCategoryResolution&&typeof p.allegroCategoryResolution==="object"?p.allegroCategoryResolution:{};
+  const categoryId=String(p.allegroCategoryId||resolution.categoryId||""),categoryName=String(p.allegroCategoryName||resolution.categoryName||"");
+  const catalogId=String(p.allegroProductId||""),offerId=String(p.allegroOfferId||"");
+  const confidence=Math.max(0,Math.min(100,Number(resolution.confidence)||0)),evidence=Math.max(0,Number(resolution.evidenceCount)||0);
+  const categoryReady=!!categoryId,catalogState=catalogId?"Powiązano właściwy produkt katalogowy":(p.gtin||p.ean)?"Agent szuka po EAN/GTIN":"Brak EAN — Agent użyje kodu i parametrów";
+  return `<section class="product-allegro-classification ${categoryReady?"is-ready":"needs-work"}" data-allegro-classification>
+    <header><div><small>KLASYFIKACJA I TOŻSAMOŚĆ</small><h3>Kategoria oraz katalog Allegro</h3><p>Agent najpierw wykorzystuje potwierdzone przypisania podobnych produktów, następnie EAN i katalog Allegro, a dopiero na końcu wyszukiwarkę kategorii.</p></div><span class="${categoryReady?"is-ready":"needs-work"}">${categoryReady?"✓ kategoria zapisana":"! wymaga dopasowania"}</span></header>
+    <div class="product-allegro-classification-flow">
+      <article><span>1</span><small>Kategoria sklepu</small><b>${esc(p.kategoria||"nieustalona")}</b><em>punkt wyjścia</em></article>
+      <i>→</i>
+      <article class="${categoryReady?"is-ready":""}"><span>2</span><small>Kategoria Allegro</small><b>${esc(categoryName||categoryId||"Agent dobierze automatycznie")}</b><em>${categoryId?`ID ${esc(categoryId)}`:"oczekuje na przygotowanie"}</em></article>
+      <i>→</i>
+      <article class="${catalogId?"is-ready":""}"><span>3</span><small>Produkt katalogowy</small><b>${esc(catalogState)}</b><em>${catalogId?`ID ${esc(catalogId)}`:"unikalne dla tego produktu"}</em></article>
+    </div>
+    ${resolution.source?`<div class="product-allegro-classification-proof"><span>🧠</span><div><small>DOWÓD WYBORU AGENTA</small><b>${esc(resolution.source)}</b><p>${confidence?`Pewność ${confidence}%`:"Wynik zapisany"}${evidence?` • ${evidence} potwierdzonych produktów z tej samej grupy`:""}${resolution.resolvedAt?` • ${esc(allegroDataTxt(resolution.resolvedAt))}`:""}</p></div></div>`:""}
+    <div class="product-allegro-classification-fields">
+      <label><span>ID kategorii Allegro *</span><input name="allegroCategoryId" value="${esc(categoryId)}" placeholder="Agent uzupełni automatycznie"></label>
+      <label><span>ID produktu katalogowego</span><input name="allegroProductId" value="${esc(catalogId)}" placeholder="unikalne — wyszukiwane po EAN lub kodzie"></label>
+      <label><span>ID oferty Allegro</span><input name="allegroOfferId" value="${esc(offerId)}" placeholder="uzupełni API po wystawieniu"></label>
+      <label class="product-allegro-category-phrase"><span>Dodatkowa fraza, tylko gdy chcesz zmienić wynik</span><input name="allegroCategoryPhrase" value="${esc(p.allegroCategoryPhrase||"")}" placeholder="np. puzzle drewniane albo gry rodzinne"></label>
+      <button class="btn product-allegro-category-run" type="button" onclick="allegroDobierzKategorieProduktu(${edycja?jsArg(p.id):"0"},this)">🧠 Dopasuj kategorię i zapisz</button>
+    </div>
+    <div id="allegroCategoryPreview"></div>
+  </section>`;
+}
 function productEditorVonHalskyAuditHTML(p={}){
   const raw=String(p.vonHalskyAgentStatus||p.contentEditorial?.channelStates?.vonHalsky?.status||"oczekuje").toLowerCase();
   const ready=["ready","confirmed"].includes(raw),failed=["error","failed"].includes(raw),preparedAt=p.vonHalskyAgentConfirmedAt||p.vonHalskyAgentPreparedAt||p.contentEditorial?.channelStates?.vonHalsky?.savedAt||"";
