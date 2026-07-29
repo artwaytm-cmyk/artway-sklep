@@ -951,300 +951,6 @@ function nalozWspolneUstawienia(dane){
     return zmieniono;
   } finally { chmuraWczytywanie = false; }
 }
-function chmuraPominBrudneDaneSerwera(dane={}){
-  if(!maUprawnieniaZapisuChmury()||!chmuraBrudneKlucze.size)return dane;
-  return Object.fromEntries(Object.entries(dane||{}).filter(([klucz])=>!chmuraBrudneKlucze.has(klucz)));
-}
-async function chmuraWczytajStan(){
-  chmuraOstatniPullZmienilDane=false;
-  try{
-    const lokalnaRewizja=Math.max(0,Number(wczytajLS("artway_chmura_rev",0))||0);
-    const trybAdmina=maUprawnieniaZapisuChmury(),wersjeDomen=trybAdmina?chmuraWersjeDomenAdmina:chmuraWersjeDomenPubliczne;
-    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev,settingsDomains:JSON.stringify(wersjeDomen||{}),catalogMode:trybAdmina?"legacy":"central",adminData:0,...(lokalnaRewizja?{settingsRev:lokalnaRewizja}:{})}});
-    chmuraOstatniPullZmienilDane=(await chmuraPobierzKatalogImportowany(d))||chmuraOstatniPullZmienilDane;
-    chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, admin:d.admin===true||chmuraStan.admin, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
-    const revLok = lokalnaRewizja;
-    const serwerNowszy = (d.rev||0) > revLok;
-    const zmienioneDomeny = Array.isArray(d.settings_changed_keys) && d.settings_changed_keys.length>0;
-    // Klient (bez tokenu): serwer jest źródłem prawdy → zawsze nakładaj.
-    // Admin: nakładaj nowszy rekord bazowy ALBO jawnie zmienione domeny.
-    // Domeny mają własne rewizje, więc ich świeżego zapisu nie wolno pominąć
-    // tylko dlatego, że globalna rewizja ustawień pozostała bez zmian.
-    if(d.settings && Object.keys(d.settings).length && (!maUprawnieniaZapisuChmury() || serwerNowszy || zmienioneDomeny)){
-      chmuraOstatniPullZmienilDane=nalozWspolneUstawienia(chmuraPominBrudneDaneSerwera(d.settings))||chmuraOstatniPullZmienilDane;
-      zapiszLS("artway_chmura_rev", d.rev||0);
-    }
-    if(d.settings_domain_versions&&typeof d.settings_domain_versions==="object"){
-      const merged={...(wersjeDomen||{}),...d.settings_domain_versions};
-      if(trybAdmina){chmuraWersjeDomenAdmina=merged;zapiszLS("artway_chmura_domain_versions_admin",merged);}
-      else{chmuraWersjeDomenPubliczne=merged;zapiszLS("artway_chmura_domain_versions_public",merged);}
-    }
-    if(Array.isArray(d.deleted_orders)) scalUsunieteZamowienia(d.deleted_orders);
-    if(Array.isArray(d.orders)){ chmuraOstatniPullZmienilDane=zapiszLS("artway_zamowienia", filtrujAktywneZamowienia(d.orders))||chmuraOstatniPullZmienilDane; chmuraStan.admin=true; }
-    if(Array.isArray(d.users)){ chmuraOstatniPullZmienilDane=zapiszLS("artway_uzytkownicy", polaczUzytkownikowCentralnych(d.users))||chmuraOstatniPullZmienilDane; chmuraStan.admin=true; }
-    if(chmuraMutacjePolUstawien.length)chmuraMutacjePolUstawienZaplanuj(0);
-    return true;
-  }catch(e){ chmuraStan = {...chmuraStan, dostepna:false, sprawdzono:true, error:e.message}; return false; }
-}
-function zaplanujZapisUstawien(){
-  if(!maUprawnieniaZapisuChmury()) return;
-  clearTimeout(chmuraTimerZapisu);
-  chmuraTimerZapisu = setTimeout(()=>chmuraZapiszUstawienia({flush:false}), 1200);
-}
-function chmuraDomenaGotowaDoZapisu(key,now=Date.now()){
-  const retryAt=Number(chmuraWstrzymaneDomeny.get(key)||0);
-  if(!retryAt)return true;
-  if(retryAt<=now){chmuraWstrzymaneDomeny.delete(key);return true;}
-  return false;
-}
-function chmuraZaplanujKolejnyZapis(){
-  clearTimeout(chmuraTimerZapisu);
-  const now=Date.now(),gotowy=[...chmuraBrudneKlucze].some(key=>chmuraDomenaGotowaDoZapisu(key,now));
-  if(gotowy||chmuraZapisPonowPoZakonczeniu){
-    chmuraZapisPonowPoZakonczeniu=false;
-    chmuraTimerZapisu=setTimeout(()=>chmuraZapiszUstawienia({flush:false}),1200);
-    return;
-  }
-  const terminy=[...chmuraBrudneKlucze].map(key=>Number(chmuraWstrzymaneDomeny.get(key)||0)).filter(value=>value>now);
-  if(terminy.length)chmuraTimerZapisu=setTimeout(()=>chmuraZapiszUstawienia({flush:false}),Math.max(1200,Math.min(...terminy)-now));
-}
-async function chmuraZapiszUstawienia(opcje={}){
-  if(!maUprawnieniaZapisuChmury()) return false;
-  if(opcje.flush===true){
-    let all=opcje.all===true;
-    for(let attempt=0;attempt<8;attempt++){
-      clearTimeout(chmuraTimerZapisu);
-      if(chmuraZapisWToku){
-        const pending=await chmuraZapisWToku.catch(()=>false);
-        if(!pending)return false;
-      }
-      clearTimeout(chmuraTimerZapisu);
-      const ok=await chmuraZapiszUstawienia({...opcje,flush:false,all});
-      all=false;
-      if(!ok)return false;
-      if(!chmuraZapisWToku&&!chmuraBrudneKlucze.size&&!chmuraZapisPonowPoZakonczeniu){
-        clearTimeout(chmuraTimerZapisu);
-        return true;
-      }
-    }
-    chmuraStan={...chmuraStan,error:"Serwer nie potwierdził jeszcze całej kolejki zmian."};
-    return false;
-  }
-  if(chmuraZapisWToku){chmuraZapisPonowPoZakonczeniu=true;return chmuraZapisWToku;}
-  chmuraZapisWToku=(async()=>{
-    const trybAdmina = maUprawnieniaZapisuChmury();
-    const wersjeDomen = trybAdmina ? chmuraWersjeDomenAdmina : chmuraWersjeDomenPubliczne;
-    const snapshot=zbierzWspolneUstawienia(), wszystkie= (opcje.all===true?KLUCZE_WSPOLNE:[...chmuraBrudneKlucze]).filter(k=>Object.prototype.hasOwnProperty.call(snapshot,k)&&chmuraDomenaGotowaDoZapisu(k));
-    if(!wszystkie.length) return true;
-    const domainKeys=wszystkie.filter(k=>CHMURA_DOMENOWE_KLUCZE.has(k)), patchKeys=wszystkie.filter(k=>!CHMURA_DOMENOWE_KLUCZE.has(k));
-    const odciski=Object.fromEntries(wszystkie.map(k=>[k,JSON.stringify(snapshot[k])]));
-    let expectedRev=Number(chmuraStan.rev||wczytajLS("artway_chmura_rev",0))||0,mutationId=`web-${Date.now().toString(36)}-${(++chmuraNumerMutacji).toString(36)}`;
-    let ok = true;
-    if(domainKeys.length){
-      for(const key of domainKeys){
-        try{
-          const expectedRevision = wersjeDomen && Object.prototype.hasOwnProperty.call(wersjeDomen, key) ? Number(wersjeDomen[key]) : null;
-          const body = {mode:"domain",key,value:snapshot[key]};
-          if(Number.isFinite(expectedRevision) && expectedRevision>0) body.expectedRevision = expectedRevision;
-          const d=await chmura("settings",{method:"POST",body,timeout:30000});
-          chmuraWstrzymaneDomeny.delete(key);
-          if(Number.isFinite(d.version)) {
-            if(trybAdmina) chmuraWersjeDomenAdmina={...(chmuraWersjeDomenAdmina||{}),[key]:Number(d.version)};
-            else chmuraWersjeDomenPubliczne={...(chmuraWersjeDomenPubliczne||{}),[key]:Number(d.version)};
-          }
-          if(d.merged===true) loguj("info",`Scalono równoległe zmiany domeny ${key}; żadnego zadania nie utracono.`);
-          chmuraStan={...chmuraStan,dostepna:true,admin:true,error:"",updated_at:d.updated_at||chmuraStan.updated_at,ostatniZapis:Date.now()};
-          if(Number.isFinite(d.rev)){ chmuraStan.rev=Number(d.rev); expectedRev=chmuraStan.rev; localStorage.setItem("artway_chmura_rev",JSON.stringify(chmuraStan.rev)); }
-          const teraz=zbierzWspolneUstawienia();
-          if(JSON.stringify(teraz[key])===odciski[key]) chmuraBrudneKlucze.delete(key);
-        }catch(e){
-          ok=false;
-          if(e.code==="settings_write_conflict"){
-            const currentVersion=Number(e?.payload?.currentVersion||e?.currentVersion||0);
-            if(Number.isFinite(currentVersion)&&currentVersion>0){
-              if(trybAdmina) chmuraWersjeDomenAdmina={...(chmuraWersjeDomenAdmina||{}),[key]:currentVersion};
-              else chmuraWersjeDomenPubliczne={...(chmuraWersjeDomenPubliczne||{}),[key]:currentVersion};
-            }
-            loguj("ostrzezenie",`${key}: wykryto równoległą zmianę; zapis pozostaje w kolejce i zostanie bezpiecznie ponowiony.`);
-          }else if(e.code==="auth")toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
-          else if(Number(e.status)===422&&/domena ustawien|domena ustawień/i.test(String(e.message||""))){
-            chmuraWstrzymaneDomeny.set(key,Date.now()+CHMURA_ODRZUCONA_DOMENA_RETRY_MS);
-            loguj("blad","Kontrakt zapisu domeny "+key+" jest niespójny z serwerem. Dane lokalne zachowano; kolejna próba nastąpi za 15 minut.");
-          }
-          else if(/Brak połączenia z serwerem|Serwer nie odpowiedział|Serwer nie zwrócił prawidłowych danych/i.test(String(e.message||""))){
-            // Krótkie przeładowanie backendu nie jest uszkodzeniem danych.
-            // Klucz pozostaje w kolejce i następny cykl ponawia dokładnie ten
-            // sam zapis, dlatego nie zanieczyszczamy centralnej diagnostyki
-            // fałszywym błędem wymagającym interwencji.
-            loguj("info","Chwilowa przerwa serwera podczas zapisu "+key+" — zmiana pozostaje w kolejce do automatycznego ponowienia.");
-          }
-          else loguj("blad","Zapis ustawienia domeny "+key+" w chmurze: "+e.message);
-          break;
-        }
-      }
-    }
-    if(!ok){ chmuraStan={...chmuraStan,error:`Nie udało się zapisać części ustawień domenowych.`}; return false; }
-    if(trybAdmina) zapiszLS("artway_chmura_domain_versions_admin",chmuraWersjeDomenAdmina||{});
-    else zapiszLS("artway_chmura_domain_versions_public",chmuraWersjeDomenPubliczne||{});
-    if(patchKeys.length){
-      const CHMURA_PATCH_MAX_BYTES = 9_600_000;
-      const sizeUtf8 = (value) => {
-        try {
-          return new Blob([JSON.stringify(value)]).size;
-        } catch (e) {
-          return String(JSON.stringify(value)).length;
-        }
-      };
-      const bladZapisuZaDuzy = (error, fallbackMessage) => {
-        const msg = String(fallbackMessage || error?.message || "").toLowerCase();
-        const is413 = Number(error?.status || 0) === 413;
-        const containsText = /ustawienia\s*sa\s*zbyt\s+duze|ustawienia\s+są\s+zbyt\s+duże|zbyt\s+duże|request\s+entity\s+too\s+large|żądanie\s+jest\s+zbyt\s+duże|payload.*too\s+large|limit.*rozmiar/i;
-        return is413 || containsText.test(msg);
-      };
-      const podzielKluczePoRozmiarze = (keys, limit) => {
-        if(!keys.length) return [];
-        const chunks = [];
-        let current = [];
-        let currentBytes = 2; // {}
-        for (const key of keys) {
-          const item = { [key]: snapshot[key] };
-          const itemBytes = sizeUtf8(item) + 6; // {"a":}+kolejny separator
-          if (current.length && currentBytes + itemBytes > limit) {
-            chunks.push(current);
-            current = [];
-            currentBytes = 2;
-          }
-          if (itemBytes > limit) {
-            chunks.push([key]);
-            currentBytes = 2;
-            current = [];
-            continue;
-          }
-          current.push(key);
-          currentBytes += itemBytes;
-        }
-        if (current.length) chunks.push(current);
-        return chunks;
-      };
-      const zapiszJakoDomena = async (key, currentExpected) => {
-        const expectedRevision = wersjeDomen && Object.prototype.hasOwnProperty.call(wersjeDomen, key) ? Number(wersjeDomen[key]) : null;
-        const body = {mode:"domain",key,value:snapshot[key]};
-        if (Number.isFinite(expectedRevision) && expectedRevision > 0) body.expectedRevision = expectedRevision;
-        const d = await chmura("settings",{method:"POST",body,timeout:30000});
-        if (Number.isFinite(d.version)) {
-          if (trybAdmina) chmuraWersjeDomenAdmina = {...(chmuraWersjeDomenAdmina || {}), [key]: Number(d.version)};
-          else chmuraWersjeDomenPubliczne = {...(chmuraWersjeDomenPubliczne || {}), [key]: Number(d.version)};
-        }
-        if (Number.isFinite(d.rev)) {
-          chmuraStan = { ...chmuraStan, rev: Number(d.rev) };
-          currentExpected = chmuraStan.rev;
-          localStorage.setItem("artway_chmura_rev", JSON.stringify(chmuraStan.rev));
-        }
-        return {ok:true,rev:Number(d.rev || currentExpected),errorMessage:"",updatedAt:d.updated_at||chmuraStan.updated_at};
-      };
-      const zapiszPatch = async (keys, expected) => {
-        if(!keys.length) return {ok:true,rev:expected};
-        const patch = Object.fromEntries(keys.map((k)=>[k,snapshot[k]]));
-        const expectedRev = expected;
-        const request = async () => {
-          const d = await chmura("settings",{method:"POST",body:{mode:"patch",patch,expectedRev,mutationId},timeout:30000});
-          return {ok:true,rev:Number(d.rev||expected),errorMessage:"",updatedAt:d.updated_at||chmuraStan.updated_at};
-        };
-        try {
-          return await request();
-        } catch (e) {
-          const tooLarge = bladZapisuZaDuzy(e, e?.message || "");
-          const shouldSplit = (keys.length > 1) && tooLarge;
-          if (shouldSplit) {
-            const chunks = podzielKluczePoRozmiarze(keys, Math.max(150000, Math.floor(CHMURA_PATCH_MAX_BYTES / Math.max(2, keys.length))));
-            if (chunks.length > 1) {
-              let rev = expected;
-              for (const chunk of chunks) {
-                const res = await zapiszPatch(chunk, rev);
-                if (!res.ok) return res;
-                rev = Number(res.rev || rev);
-              }
-              return {ok:true,rev,updatedAt:chmuraStan.updated_at,errorMessage:""};
-            }
-          }
-          if (tooLarge && keys.length === 1) {
-            try {
-              return await zapiszJakoDomena(keys[0], expected);
-            } catch (e2) {
-              return {ok:false,errorMessage:e2.message,code:e2.code||e.code||""};
-            }
-          }
-          return {ok:false,errorMessage:e.message,code:e.code||""};
-        }
-      };
-      try{
-        const patchResult = await zapiszPatch(patchKeys,expectedRev);
-        if(!patchResult.ok){
-          ok=false;
-          if(patchResult.code==="auth")toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
-          else if(patchResult.code==="settings_write_conflict")toast("⚠️ Serwer jest zajęty inną zmianą — dane lokalne zostały zachowane i zapis zostanie ponowiony.");
-          else loguj("blad","Zapis ustawień w chmurze: "+(patchResult.errorMessage||"Nieznany błąd zapisu."));
-          chmuraStan={...chmuraStan,error:patchResult.errorMessage||"Nieznany błąd zapisu ustawień."};
-        } else {
-          chmuraStan={...chmuraStan,dostepna:true,admin:true,rev:patchResult.rev||chmuraStan.rev,updated_at:patchResult.updatedAt||null,error:"",ostatniZapis:Date.now()};
-          localStorage.setItem("artway_chmura_rev",JSON.stringify(chmuraStan.rev));
-          for(const k of patchKeys)if(JSON.stringify(snapshot[k])===odciski[k])chmuraBrudneKlucze.delete(k);
-        }
-      }catch(e){
-        ok=false;
-        chmuraStan={...chmuraStan,error:e.message};
-        if(e.code==="auth")toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
-        else if(e.code==="settings_write_conflict")toast("⚠️ Serwer jest zajęty inną zmianą — dane lokalne zostały zachowane i zapis zostanie ponowiony.");
-        loguj("blad","Zapis ustawień w chmurze: "+e.message);
-      }
-    }
-    if(ok && patchKeys.length){
-      for(const k of patchKeys) if(JSON.stringify(snapshot[k])===odciski[k]) chmuraBrudneKlucze.delete(k);
-    }
-    return ok;
-  })();
-  try{return await chmuraZapisWToku;}finally{
-    chmuraZapisWToku=null;
-    if(chmuraBrudneKlucze.size||chmuraZapisPonowPoZakonczeniu)chmuraZaplanujKolejnyZapis();
-  }
-}
-// Ręczne WYSŁANIE całego sklepu z tego urządzenia na serwer (dla wszystkich).
-async function chmuraWyslijWszystko(){
-  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
-  toast("Wysyłanie na serwer…");
-  const okU = await chmuraZapiszUstawienia({all:true,flush:true});
-  await synchronizujBazeCentralna(true).catch(()=>{});
-  if(okU) toast("📤 Cały sklep wysłany na serwer — widoczny na każdym urządzeniu ✅");
-  else toast("⚠️ Nie udało się wysłać — sprawdź hasło bazy");
-  renderuj();
-}
-// Ręczne POBRANIE sklepu z serwera i nałożenie na to urządzenie.
-async function chmuraPobierzWszystko(){
-  try{
-    const d = await chmura("pull",{params:{catalogRev:"",settingsDomains:"{}",adminData:1}});
-    await chmuraPobierzKatalogImportowany(d,true);
-    chmuraBrudneKlucze.clear();
-    if(d.settings && Object.keys(d.settings).length){ nalozWspolneUstawienia(d.settings); zapiszLS("artway_chmura_rev", d.rev||0); }
-    if(d.settings_domain_versions&&typeof d.settings_domain_versions==="object"){
-      if(maUprawnieniaZapisuChmury()){chmuraWersjeDomenAdmina=d.settings_domain_versions;zapiszLS("artway_chmura_domain_versions_admin",d.settings_domain_versions);}
-      else{chmuraWersjeDomenPubliczne=d.settings_domain_versions;zapiszLS("artway_chmura_domain_versions_public",d.settings_domain_versions);}
-    }
-    chmuraStan = {...chmuraStan, dostepna:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
-    if(chmuraToken) await synchronizujBazeCentralna(true).catch(()=>{});
-    zastosujUstawienia(); zbudujProdukty();
-    odswiezMenu(); odswiezKoszyk();
-    toast("📥 Pobrano sklep z serwera ✅"); renderuj();
-  }catch(e){ toast("Błąd pobierania: "+e.message); }
-}
-function chmuraUstawToken(){
-  if(maUprawnieniaZapisuChmury()){
-    toast("Trwała sesja administratora jest aktywna ✅");
-    return;
-  }
-  toast("Zaloguj się jako administrator — połączenie z serwerem odnowi się automatycznie.");
-  location.hash="#/logowanie";
-}
-function chmuraWyczyscToken(){ chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; toast("Odłączono hasło bazy"); renderuj(); }
 function chmuraStatusHTML(){
   const ok = chmuraStan.dostepna, adm = chmuraStan.admin && maUprawnieniaZapisuChmury();
   const kolor = adm?"#166534":(ok?"#92400e":"#b91c1c"), tlo = adm?"#f0fdf4":(ok?"#fffbeb":"#fef2f2"), br = adm?"#86efac":(ok?"#fcd34d":"#fecaca");
@@ -1565,6 +1271,302 @@ function ustawNumerPrzelewuTelefon(v){
   KONFIG.numerPrzelewuTelefon = c || NUMER_PRZELEWU_TELEFON_DOMYSLNY;
   return KONFIG.numerPrzelewuTelefon;
 }
+
+// Trwałe pobieranie i zapis domen ustawień. Ładowane bezpośrednio po rdzeniu synchronizacji.
+function chmuraPominBrudneDaneSerwera(dane={}){
+  if(!maUprawnieniaZapisuChmury()||!chmuraBrudneKlucze.size)return dane;
+  return Object.fromEntries(Object.entries(dane||{}).filter(([klucz])=>!chmuraBrudneKlucze.has(klucz)));
+}
+async function chmuraWczytajStan(){
+  chmuraOstatniPullZmienilDane=false;
+  try{
+    const lokalnaRewizja=Math.max(0,Number(wczytajLS("artway_chmura_rev",0))||0);
+    const trybAdmina=maUprawnieniaZapisuChmury(),wersjeDomen=trybAdmina?chmuraWersjeDomenAdmina:chmuraWersjeDomenPubliczne;
+    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev,settingsDomains:JSON.stringify(wersjeDomen||{}),catalogMode:trybAdmina?"legacy":"central",adminData:0,...(lokalnaRewizja?{settingsRev:lokalnaRewizja}:{})}});
+    chmuraOstatniPullZmienilDane=(await chmuraPobierzKatalogImportowany(d))||chmuraOstatniPullZmienilDane;
+    chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, admin:d.admin===true||chmuraStan.admin, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
+    const revLok = lokalnaRewizja;
+    const serwerNowszy = (d.rev||0) > revLok;
+    const zmienioneDomeny = Array.isArray(d.settings_changed_keys) && d.settings_changed_keys.length>0;
+    // Klient (bez tokenu): serwer jest źródłem prawdy → zawsze nakładaj.
+    // Admin: nakładaj nowszy rekord bazowy ALBO jawnie zmienione domeny.
+    // Domeny mają własne rewizje, więc ich świeżego zapisu nie wolno pominąć
+    // tylko dlatego, że globalna rewizja ustawień pozostała bez zmian.
+    if(d.settings && Object.keys(d.settings).length && (!maUprawnieniaZapisuChmury() || serwerNowszy || zmienioneDomeny)){
+      chmuraOstatniPullZmienilDane=nalozWspolneUstawienia(chmuraPominBrudneDaneSerwera(d.settings))||chmuraOstatniPullZmienilDane;
+      zapiszLS("artway_chmura_rev", d.rev||0);
+    }
+    if(d.settings_domain_versions&&typeof d.settings_domain_versions==="object"){
+      const merged={...(wersjeDomen||{}),...d.settings_domain_versions};
+      if(trybAdmina){chmuraWersjeDomenAdmina=merged;zapiszLS("artway_chmura_domain_versions_admin",merged);}
+      else{chmuraWersjeDomenPubliczne=merged;zapiszLS("artway_chmura_domain_versions_public",merged);}
+    }
+    if(Array.isArray(d.deleted_orders)) scalUsunieteZamowienia(d.deleted_orders);
+    if(Array.isArray(d.orders)){ chmuraOstatniPullZmienilDane=zapiszLS("artway_zamowienia", filtrujAktywneZamowienia(d.orders))||chmuraOstatniPullZmienilDane; chmuraStan.admin=true; }
+    if(Array.isArray(d.users)){ chmuraOstatniPullZmienilDane=zapiszLS("artway_uzytkownicy", polaczUzytkownikowCentralnych(d.users))||chmuraOstatniPullZmienilDane; chmuraStan.admin=true; }
+    if(chmuraMutacjePolUstawien.length)chmuraMutacjePolUstawienZaplanuj(0);
+    return true;
+  }catch(e){ chmuraStan = {...chmuraStan, dostepna:false, sprawdzono:true, error:e.message}; return false; }
+}
+function zaplanujZapisUstawien(){
+  if(!maUprawnieniaZapisuChmury()) return;
+  clearTimeout(chmuraTimerZapisu);
+  chmuraTimerZapisu = setTimeout(()=>chmuraZapiszUstawienia({flush:false}), 1200);
+}
+function chmuraDomenaGotowaDoZapisu(key,now=Date.now()){
+  const retryAt=Number(chmuraWstrzymaneDomeny.get(key)||0);
+  if(!retryAt)return true;
+  if(retryAt<=now){chmuraWstrzymaneDomeny.delete(key);return true;}
+  return false;
+}
+function chmuraZaplanujKolejnyZapis(){
+  clearTimeout(chmuraTimerZapisu);
+  const now=Date.now(),gotowy=[...chmuraBrudneKlucze].some(key=>chmuraDomenaGotowaDoZapisu(key,now));
+  if(gotowy||chmuraZapisPonowPoZakonczeniu){
+    chmuraZapisPonowPoZakonczeniu=false;
+    chmuraTimerZapisu=setTimeout(()=>chmuraZapiszUstawienia({flush:false}),1200);
+    return;
+  }
+  const terminy=[...chmuraBrudneKlucze].map(key=>Number(chmuraWstrzymaneDomeny.get(key)||0)).filter(value=>value>now);
+  if(terminy.length)chmuraTimerZapisu=setTimeout(()=>chmuraZapiszUstawienia({flush:false}),Math.max(1200,Math.min(...terminy)-now));
+}
+async function chmuraZapiszUstawienia(opcje={}){
+  if(!maUprawnieniaZapisuChmury()) return false;
+  if(opcje.flush===true){
+    let all=opcje.all===true;
+    for(let attempt=0;attempt<8;attempt++){
+      clearTimeout(chmuraTimerZapisu);
+      if(chmuraZapisWToku){
+        const pending=await chmuraZapisWToku.catch(()=>false);
+        if(!pending)return false;
+      }
+      clearTimeout(chmuraTimerZapisu);
+      const ok=await chmuraZapiszUstawienia({...opcje,flush:false,all});
+      all=false;
+      if(!ok)return false;
+      if(!chmuraZapisWToku&&!chmuraBrudneKlucze.size&&!chmuraZapisPonowPoZakonczeniu){
+        clearTimeout(chmuraTimerZapisu);
+        return true;
+      }
+    }
+    chmuraStan={...chmuraStan,error:"Serwer nie potwierdził jeszcze całej kolejki zmian."};
+    return false;
+  }
+  if(chmuraZapisWToku){chmuraZapisPonowPoZakonczeniu=true;return chmuraZapisWToku;}
+  chmuraZapisWToku=(async()=>{
+    const trybAdmina = maUprawnieniaZapisuChmury();
+    const wersjeDomen = trybAdmina ? chmuraWersjeDomenAdmina : chmuraWersjeDomenPubliczne;
+    const snapshot=zbierzWspolneUstawienia(), wszystkie= (opcje.all===true?KLUCZE_WSPOLNE:[...chmuraBrudneKlucze]).filter(k=>Object.prototype.hasOwnProperty.call(snapshot,k)&&chmuraDomenaGotowaDoZapisu(k));
+    if(!wszystkie.length) return true;
+    const domainKeys=wszystkie.filter(k=>CHMURA_DOMENOWE_KLUCZE.has(k)), patchKeys=wszystkie.filter(k=>!CHMURA_DOMENOWE_KLUCZE.has(k));
+    const odciski=Object.fromEntries(wszystkie.map(k=>[k,JSON.stringify(snapshot[k])]));
+    let expectedRev=Number(chmuraStan.rev||wczytajLS("artway_chmura_rev",0))||0,mutationId=`web-${Date.now().toString(36)}-${(++chmuraNumerMutacji).toString(36)}`;
+    let ok = true;
+    if(domainKeys.length){
+      for(const key of domainKeys){
+        try{
+          const expectedRevision = wersjeDomen && Object.prototype.hasOwnProperty.call(wersjeDomen, key) ? Number(wersjeDomen[key]) : null;
+          const body = {mode:"domain",key,value:snapshot[key]};
+          if(Number.isFinite(expectedRevision) && expectedRevision>0) body.expectedRevision = expectedRevision;
+          const d=await chmura("settings",{method:"POST",body,timeout:30000});
+          chmuraWstrzymaneDomeny.delete(key);
+          if(Number.isFinite(d.version)) {
+            if(trybAdmina) chmuraWersjeDomenAdmina={...(chmuraWersjeDomenAdmina||{}),[key]:Number(d.version)};
+            else chmuraWersjeDomenPubliczne={...(chmuraWersjeDomenPubliczne||{}),[key]:Number(d.version)};
+          }
+          if(d.merged===true) loguj("info",`Scalono równoległe zmiany domeny ${key}; żadnego zadania nie utracono.`);
+          chmuraStan={...chmuraStan,dostepna:true,admin:true,error:"",updated_at:d.updated_at||chmuraStan.updated_at,ostatniZapis:Date.now()};
+          if(Number.isFinite(d.rev)){ chmuraStan.rev=Number(d.rev); expectedRev=chmuraStan.rev; localStorage.setItem("artway_chmura_rev",JSON.stringify(chmuraStan.rev)); }
+          const teraz=zbierzWspolneUstawienia();
+          if(JSON.stringify(teraz[key])===odciski[key]) chmuraBrudneKlucze.delete(key);
+        }catch(e){
+          ok=false;
+          if(e.code==="settings_write_conflict"){
+            const currentVersion=Number(e?.payload?.currentVersion||e?.currentVersion||0);
+            if(Number.isFinite(currentVersion)&&currentVersion>0){
+              if(trybAdmina) chmuraWersjeDomenAdmina={...(chmuraWersjeDomenAdmina||{}),[key]:currentVersion};
+              else chmuraWersjeDomenPubliczne={...(chmuraWersjeDomenPubliczne||{}),[key]:currentVersion};
+            }
+            loguj("ostrzezenie",`${key}: wykryto równoległą zmianę; zapis pozostaje w kolejce i zostanie bezpiecznie ponowiony.`);
+          }else if(e.code==="auth")toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
+          else if(Number(e.status)===422&&/domena ustawien|domena ustawień/i.test(String(e.message||""))){
+            chmuraWstrzymaneDomeny.set(key,Date.now()+CHMURA_ODRZUCONA_DOMENA_RETRY_MS);
+            loguj("blad","Kontrakt zapisu domeny "+key+" jest niespójny z serwerem. Dane lokalne zachowano; kolejna próba nastąpi za 15 minut.");
+          }
+          else if(/Brak połączenia z serwerem|Serwer nie odpowiedział|Serwer nie zwrócił prawidłowych danych/i.test(String(e.message||""))){
+            // Krótkie przeładowanie backendu nie jest uszkodzeniem danych.
+            // Klucz pozostaje w kolejce i następny cykl ponawia dokładnie ten
+            // sam zapis, dlatego nie zanieczyszczamy centralnej diagnostyki
+            // fałszywym błędem wymagającym interwencji.
+            loguj("info","Chwilowa przerwa serwera podczas zapisu "+key+" — zmiana pozostaje w kolejce do automatycznego ponowienia.");
+          }
+          else loguj("blad","Zapis ustawienia domeny "+key+" w chmurze: "+e.message);
+          break;
+        }
+      }
+    }
+    if(!ok){ chmuraStan={...chmuraStan,error:`Nie udało się zapisać części ustawień domenowych.`}; return false; }
+    if(trybAdmina) zapiszLS("artway_chmura_domain_versions_admin",chmuraWersjeDomenAdmina||{});
+    else zapiszLS("artway_chmura_domain_versions_public",chmuraWersjeDomenPubliczne||{});
+    if(patchKeys.length){
+      const CHMURA_PATCH_MAX_BYTES = 9_600_000;
+      const sizeUtf8 = (value) => {
+        try {
+          return new Blob([JSON.stringify(value)]).size;
+        } catch (e) {
+          return String(JSON.stringify(value)).length;
+        }
+      };
+      const bladZapisuZaDuzy = (error, fallbackMessage) => {
+        const msg = String(fallbackMessage || error?.message || "").toLowerCase();
+        const is413 = Number(error?.status || 0) === 413;
+        const containsText = /ustawienia\s*sa\s*zbyt\s+duze|ustawienia\s+są\s+zbyt\s+duże|zbyt\s+duże|request\s+entity\s+too\s+large|żądanie\s+jest\s+zbyt\s+duże|payload.*too\s+large|limit.*rozmiar/i;
+        return is413 || containsText.test(msg);
+      };
+      const podzielKluczePoRozmiarze = (keys, limit) => {
+        if(!keys.length) return [];
+        const chunks = [];
+        let current = [];
+        let currentBytes = 2; // {}
+        for (const key of keys) {
+          const item = { [key]: snapshot[key] };
+          const itemBytes = sizeUtf8(item) + 6; // {"a":}+kolejny separator
+          if (current.length && currentBytes + itemBytes > limit) {
+            chunks.push(current);
+            current = [];
+            currentBytes = 2;
+          }
+          if (itemBytes > limit) {
+            chunks.push([key]);
+            currentBytes = 2;
+            current = [];
+            continue;
+          }
+          current.push(key);
+          currentBytes += itemBytes;
+        }
+        if (current.length) chunks.push(current);
+        return chunks;
+      };
+      const zapiszJakoDomena = async (key, currentExpected) => {
+        const expectedRevision = wersjeDomen && Object.prototype.hasOwnProperty.call(wersjeDomen, key) ? Number(wersjeDomen[key]) : null;
+        const body = {mode:"domain",key,value:snapshot[key]};
+        if (Number.isFinite(expectedRevision) && expectedRevision > 0) body.expectedRevision = expectedRevision;
+        const d = await chmura("settings",{method:"POST",body,timeout:30000});
+        if (Number.isFinite(d.version)) {
+          if (trybAdmina) chmuraWersjeDomenAdmina = {...(chmuraWersjeDomenAdmina || {}), [key]: Number(d.version)};
+          else chmuraWersjeDomenPubliczne = {...(chmuraWersjeDomenPubliczne || {}), [key]: Number(d.version)};
+        }
+        if (Number.isFinite(d.rev)) {
+          chmuraStan = { ...chmuraStan, rev: Number(d.rev) };
+          currentExpected = chmuraStan.rev;
+          localStorage.setItem("artway_chmura_rev", JSON.stringify(chmuraStan.rev));
+        }
+        return {ok:true,rev:Number(d.rev || currentExpected),errorMessage:"",updatedAt:d.updated_at||chmuraStan.updated_at};
+      };
+      const zapiszPatch = async (keys, expected) => {
+        if(!keys.length) return {ok:true,rev:expected};
+        const patch = Object.fromEntries(keys.map((k)=>[k,snapshot[k]]));
+        const expectedRev = expected;
+        const request = async () => {
+          const d = await chmura("settings",{method:"POST",body:{mode:"patch",patch,expectedRev,mutationId},timeout:30000});
+          return {ok:true,rev:Number(d.rev||expected),errorMessage:"",updatedAt:d.updated_at||chmuraStan.updated_at};
+        };
+        try {
+          return await request();
+        } catch (e) {
+          const tooLarge = bladZapisuZaDuzy(e, e?.message || "");
+          const shouldSplit = (keys.length > 1) && tooLarge;
+          if (shouldSplit) {
+            const chunks = podzielKluczePoRozmiarze(keys, Math.max(150000, Math.floor(CHMURA_PATCH_MAX_BYTES / Math.max(2, keys.length))));
+            if (chunks.length > 1) {
+              let rev = expected;
+              for (const chunk of chunks) {
+                const res = await zapiszPatch(chunk, rev);
+                if (!res.ok) return res;
+                rev = Number(res.rev || rev);
+              }
+              return {ok:true,rev,updatedAt:chmuraStan.updated_at,errorMessage:""};
+            }
+          }
+          if (tooLarge && keys.length === 1) {
+            try {
+              return await zapiszJakoDomena(keys[0], expected);
+            } catch (e2) {
+              return {ok:false,errorMessage:e2.message,code:e2.code||e.code||""};
+            }
+          }
+          return {ok:false,errorMessage:e.message,code:e.code||""};
+        }
+      };
+      try{
+        const patchResult = await zapiszPatch(patchKeys,expectedRev);
+        if(!patchResult.ok){
+          ok=false;
+          if(patchResult.code==="auth")toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
+          else if(patchResult.code==="settings_write_conflict")toast("⚠️ Serwer jest zajęty inną zmianą — dane lokalne zostały zachowane i zapis zostanie ponowiony.");
+          else loguj("blad","Zapis ustawień w chmurze: "+(patchResult.errorMessage||"Nieznany błąd zapisu."));
+          chmuraStan={...chmuraStan,error:patchResult.errorMessage||"Nieznany błąd zapisu ustawień."};
+        } else {
+          chmuraStan={...chmuraStan,dostepna:true,admin:true,rev:patchResult.rev||chmuraStan.rev,updated_at:patchResult.updatedAt||null,error:"",ostatniZapis:Date.now()};
+          localStorage.setItem("artway_chmura_rev",JSON.stringify(chmuraStan.rev));
+          for(const k of patchKeys)if(JSON.stringify(snapshot[k])===odciski[k])chmuraBrudneKlucze.delete(k);
+        }
+      }catch(e){
+        ok=false;
+        chmuraStan={...chmuraStan,error:e.message};
+        if(e.code==="auth")toast("⚠️ Hasło bazy nieprawidłowe — ustawienia nie zapisały się w chmurze");
+        else if(e.code==="settings_write_conflict")toast("⚠️ Serwer jest zajęty inną zmianą — dane lokalne zostały zachowane i zapis zostanie ponowiony.");
+        loguj("blad","Zapis ustawień w chmurze: "+e.message);
+      }
+    }
+    if(ok && patchKeys.length){
+      for(const k of patchKeys) if(JSON.stringify(snapshot[k])===odciski[k]) chmuraBrudneKlucze.delete(k);
+    }
+    return ok;
+  })();
+  try{return await chmuraZapisWToku;}finally{
+    chmuraZapisWToku=null;
+    if(chmuraBrudneKlucze.size||chmuraZapisPonowPoZakonczeniu)chmuraZaplanujKolejnyZapis();
+  }
+}
+// Ręczne WYSŁANIE całego sklepu z tego urządzenia na serwer (dla wszystkich).
+async function chmuraWyslijWszystko(){
+  if(!maUprawnieniaZapisuChmury()){ chmuraUstawToken(); return; }
+  toast("Wysyłanie na serwer…");
+  const okU = await chmuraZapiszUstawienia({all:true,flush:true});
+  await synchronizujBazeCentralna(true).catch(()=>{});
+  if(okU) toast("📤 Cały sklep wysłany na serwer — widoczny na każdym urządzeniu ✅");
+  else toast("⚠️ Nie udało się wysłać — sprawdź hasło bazy");
+  renderuj();
+}
+// Ręczne POBRANIE sklepu z serwera i nałożenie na to urządzenie.
+async function chmuraPobierzWszystko(){
+  try{
+    const d = await chmura("pull",{params:{catalogRev:"",settingsDomains:"{}",adminData:1}});
+    await chmuraPobierzKatalogImportowany(d,true);
+    chmuraBrudneKlucze.clear();
+    if(d.settings && Object.keys(d.settings).length){ nalozWspolneUstawienia(d.settings); zapiszLS("artway_chmura_rev", d.rev||0); }
+    if(d.settings_domain_versions&&typeof d.settings_domain_versions==="object"){
+      if(maUprawnieniaZapisuChmury()){chmuraWersjeDomenAdmina=d.settings_domain_versions;zapiszLS("artway_chmura_domain_versions_admin",d.settings_domain_versions);}
+      else{chmuraWersjeDomenPubliczne=d.settings_domain_versions;zapiszLS("artway_chmura_domain_versions_public",d.settings_domain_versions);}
+    }
+    chmuraStan = {...chmuraStan, dostepna:true, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
+    if(chmuraToken) await synchronizujBazeCentralna(true).catch(()=>{});
+    zastosujUstawienia(); zbudujProdukty();
+    odswiezMenu(); odswiezKoszyk();
+    toast("📥 Pobrano sklep z serwera ✅"); renderuj();
+  }catch(e){ toast("Błąd pobierania: "+e.message); }
+}
+function chmuraUstawToken(){
+  if(maUprawnieniaZapisuChmury()){
+    toast("Trwała sesja administratora jest aktywna ✅");
+    return;
+  }
+  toast("Zaloguj się jako administrator — połączenie z serwerem odnowi się automatycznie.");
+  location.hash="#/logowanie";
+}
+function chmuraWyczyscToken(){ chmuraToken=""; try{sessionStorage.removeItem("artway_chmura_token");localStorage.removeItem("artway_chmura_token");}catch(e){} chmuraStan={...chmuraStan,admin:false}; toast("Odłączono hasło bazy"); renderuj(); }
 
 /* ═══════════ ATOMOWE MUTACJE PÓL USTAWIEŃ ═══════════
    Każda drobna zmiana formularza trafia do trwałej kolejki, jest nakładana na
@@ -3667,10 +3669,10 @@ async function wczytajProdukty(){ await pobierzBazoweProdukty(); finalizujWczyta
 
 /* ═══════════ ROUTER (podstrony) ═══════════ */
 const ADMIN_MODULY_RUNTIME = Object.freeze({
-  core:"admin-core",shell:"admin-shell",ui:"admin-ui",agent:"admin-agent",warehouse:"admin-warehouse",shipping:"admin-shipping",commerce:"admin-commerce",communications:"admin-communications",
-  inventory:"admin-inventory",productEditor:"admin-product-editor",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system",vonHalsky:"admin-von-halsky"
+  core:"admin-core",shell:"admin-shell",ui:"admin-ui",agent:"admin-agent",warehouse:"admin-warehouse",shipping:"admin-shipping",commerce:"admin-commerce",commerceSettings:"admin-commerce-settings",communications:"admin-communications",
+  inventory:"admin-inventory",seo:"admin-seo",productEditor:"admin-product-editor",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system",vonHalsky:"admin-von-halsky"
 });
-const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",commerce:"admin-commerce",vonHalsky:"admin-von-halsky"});
+const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",warehouse:"admin-warehouse",commerce:"admin-commerce",vonHalsky:"admin-von-halsky"});
 const SKLEP_MODULY_RUNTIME = Object.freeze({account:"store-account",content:"store-content"});
 const adminZaladowaneModuly = new Set();
 const adminObietniceModulow = new Map();
@@ -3698,7 +3700,7 @@ function adminModulyDlaTrasy(route=""){
   const t=String(route||"").split("?")[0],moduly=["core","ui"],add=(...items)=>items.forEach(item=>{if(!moduly.includes(item))moduly.push(item);});
   add("shell");
   if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
-  if(t==="/diagnostyka"||t==="/admin/system/diagnostyka")add("agent","warehouse","shipping","commerce","communications","inventory","catalog","personalization","system","vonHalsky");
+  if(t==="/diagnostyka"||t==="/admin/system/diagnostyka")add("agent","warehouse","shipping","commerce","commerceSettings","communications","inventory","seo","catalog","personalization","system","vonHalsky");
   else if(t.startsWith("/admin/system"))add("system");
   else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("shipping","commerce","communications","inventory","system");
   else if(t.startsWith("/admin/agent-ai"))add("agent","warehouse","commerce","communications","inventory","productEditor");
@@ -3709,10 +3711,10 @@ function adminModulyDlaTrasy(route=""){
   else if(t.startsWith("/admin/wysylki"))add("agent","warehouse","shipping","commerce","inventory");
   else if(t.startsWith("/admin/von-halsky"))add("inventory","vonHalsky");
   else if(["/admin/allegro/komunikacja","/admin/allegro/wiadomosci","/admin/allegro/dyskusje"].includes(t))add("agent","warehouse","commerce","communications","inventory");
-  else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","communications","inventory","productEditor");
+  else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/klient")){add("agent","warehouse","commerce","communications","inventory","productEditor");if(t==="/admin/allegro/ustawienia")add("commerceSettings");}
   else if(t.startsWith("/admin/infakt"))add("inventory");
   else if(t==="/admin/asortyment"||t==="/admin/asortyment/produkty")add("commerce","inventory");
-  else if(t.startsWith("/admin/produkty/edytuj/")||t==="/admin/produkty/dodaj"||t==="/admin/produkty/z-linku")add("agent","commerce","inventory","productEditor");
+  else if(t.startsWith("/admin/produkty/edytuj/")||t==="/admin/produkty/dodaj"||t==="/admin/produkty/z-linku")add("agent","commerce","inventory","seo","productEditor");
   else if(t.startsWith("/admin/asortyment")||t.startsWith("/admin/produkty")||t==="/admin/kategorie"||t==="/admin/mapowanie"||t==="/admin/opinie"){
     add("commerce","inventory","catalog");
     if(t==="/admin/asortyment/rabaty")add("personalization");
@@ -3723,7 +3725,7 @@ function adminModulyDlaTrasy(route=""){
   }
   else if(t.startsWith("/admin/eksport"))add("inventory","catalog","personalization");
   else if(t.startsWith("/admin/aktualizacja")||t.startsWith("/admin/publikacja"))add("system");
-  else if(t.startsWith("/admin/seo"))add("inventory");
+  else if(t.startsWith("/admin/seo"))add("inventory","seo");
   else if(t.startsWith("/admin"))add("agent","warehouse","commerce","inventory","catalog","personalization","system");
   return moduly;
 }
@@ -4910,7 +4912,7 @@ async function testujInPost(cicho=false){
     if(!maUprawnieniaZapisuChmury()){ if(!cicho)chmuraUstawToken(); return false; }
     const d=await chmura("inpost-test",{timeout:15000});
     const ip=d.inpost||cfg||{};
-    stanBramki={...stanBramki,inpost:ip,error:""};
+    stanBramki={...stanBramki,inpost:{...ip,testError:"",lastTestAt:new Date().toISOString()},error:""};
     const org=ip.organization?.id?` • organizacja ${ip.organization.id}`:"";
     const uslugi=ip.organization?.services?.length?` • usługi: ${ip.organization.services.slice(0,3).join(", ")}`:"";
     const av=ip.serviceAvailability||{};
@@ -4921,7 +4923,7 @@ async function testujInPost(cicho=false){
     return true;
   }catch(bl){
     const ip=bl.inpost||stanBramki.inpost||{};
-    stanBramki={...stanBramki,inpost:ip,error:bl.message};
+    stanBramki={...stanBramki,inpost:{...ip,authenticated:false,testError:String(bl.message||"Test API nieudany"),testErrorCode:String(bl.code||"inpost_test_failed"),lastTestAt:new Date().toISOString()},error:bl.message};
     if(!cicho){
       if(bl.code==="inpost_not_configured") toast("InPost niegotowy — brakuje: "+((bl.missingEnv&&bl.missingEnv.length?bl.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")));
       else toast("Test InPost: "+bl.message);
@@ -5168,13 +5170,7 @@ function zastosujRegulyWysylek(){
 }
 let tabWysylek="zlecenia", filtrWysylek="aktywne", szukajWysylek="";
 
-/* Pozycjonowanie i darmowa promocja — bez płatnych API i bez sztucznych zmian treści. */
-const TABY_SEO=[
-  ["pulpit","📊 Pulpit"],["efekty","📈 Efekty"],["plan","🗓️ Plan dzienny"],["produkty","🏷️ Produkty SEO"],["tresci","✍️ Frazy i treści"],
-  ["promocja","📣 Darmowa promocja"],["techniczne","🛠️ Techniczne SEO"],["historia","🧾 Historia"],["ustawienia","⚙️ Ustawienia"]
-];
-function seoSzkielet(tab,tresc){const extras=tab==="promocja"?seoDodatkoweKanalyHTML():"";return adminSzkielet("/admin/seo",`${adminSubnavHTML(TABY_SEO.map(([id,label])=>({id,href:`#/admin/seo/${id}`,label})),tab)}${tresc}${extras}`);}
-function seoDodatkoweKanalyHTML(){return `<section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Dodatkowe kanały bez budżetu</span><h2>🌐 Pełne bezpłatne pokrycie</h2><p class="order-detail-lead">Automaty uruchamiamy tam, gdzie jest to bezpieczne. Kanały wymagające konta lub ręcznej publikacji pozostają wyraźnie oznaczone.</p></div></div><div class="seo-free-channels"><article><b>🖼️ Google Images i Lens — automatycznie</b><p>Mapa obrazów oraz dodatkowe zdjęcia w feedzie pomagają prezentować produkty w bezpłatnych wynikach obrazów i Lens.</p><a class="btn ghost" href="/sitemap.xml" target="_blank">Mapa obrazów</a></article><article><b>🔍 Bing i inne wyszukiwarki — automatycznie</b><p>IndexNow przekazuje nowe i zmienione adresy. Bezpłatne Bing Webmaster Tools pozwala dodatkowo kontrolować raporty.</p><a class="btn ghost" href="https://www.bing.com/webmasters/" target="_blank" rel="noopener">Bing Webmaster Tools ↗</a></article><article><b>📤 Udostępnianie organiczne — na żądanie</b><p>Produkt ma gotowy tytuł, opis i czysty adres do bezpłatnego udostępnienia. Publikacja pozostaje ręczna, aby nie wysyłać spamu.</p><a class="btn ghost" href="#/admin/seo/produkty">Wybierz produkt</a></article><article><b>📍 Profil Firmy Google — warunkowo</b><p>Bezpłatny profil lokalny ma sens wyłącznie przy rzeczywistej obsłudze klientów pod adresem lub na określonym obszarze.</p><a class="btn ghost" href="https://business.google.com/" target="_blank" rel="noopener">Profil Firmy Google ↗</a></article></div></section>`;}
+/* Publiczne metadane SEO ładowane na każdej stronie sklepu. */
 function seoTekstBezHTML(value=""){const el=document.createElement("div");el.innerHTML=String(value||"");return String(el.textContent||"").replace(/\s+/g," ").trim();}
 function seoPropozycjaProduktu(p={}){
   const brand=String(p.producent||p.marka||"").trim(),category=String(p.kategoria||"").trim();
@@ -5190,103 +5186,6 @@ function seoEfektywneDaneProduktu(p={}){
   const proposal=seoPropozycjaProduktu(p);
   return {...p,seoTitle:String(p.seoTitle||proposal.seoTitle||""),seoDescription:String(p.seoDescription||proposal.seoDescription||""),seoKeywords:String(p.seoKeywords||proposal.seoKeywords||""),seoMode:p.seoMode==="manual"?"manual":"auto"};
 }
-function seoAutomatyzujDaneProduktu(p={},source="automatyczne SEO produktu",options={}){
-  const proposal=seoPropozycjaProduktu(p),mode=p.seoMode==="manual"?"manual":"auto",force=options.force===true||mode==="auto",now=new Date().toISOString(),next={...p,seoMode:mode};
-  for(const field of ["seoTitle","seoDescription","seoKeywords"])if(force||!String(next[field]||"").trim())next[field]=proposal[field];
-  next.seoReviewedAt=now;next.seoSource=source;next.seoScore=seoOcenaProduktu({...next,seoReviewedAt:now}).score;
-  return next;
-}
-function seoOcenaProduktu(p={}){
-  const proposed=seoPropozycjaProduktu(p),title=String(p.seoTitle||""),desc=String(p.seoDescription||""),full=seoTekstBezHTML(p.opis||""),issues=[];let score=0;
-  if(title.length>=30&&title.length<=65)score+=18;else issues.push("tytuł SEO");
-  if(desc.length>=80&&desc.length<=165)score+=18;else issues.push("opis SEO");
-  if(full.length>=250)score+=16;else issues.push("pełny opis");
-  if(p.zdjecie)score+=12;else issues.push("zdjęcie");
-  if(p.kategoria)score+=8;else issues.push("kategoria");
-  if(p.gtin||p.ean)score+=8;else issues.push("EAN/GTIN");
-  if(p.producent||p.marka)score+=7;else issues.push("producent");
-  if(Number(p.cena)>0)score+=7;else issues.push("cena");
-  if(p.sourceUrl||p.producentUrl)score+=3;else issues.push("źródło");
-  if(p.seoReviewedAt)score+=3;
-  return {score:Math.min(100,score),issues,proposed};
-}
-function seoKolejkaProduktow(){
-  const hidden=new Set([...(produktyUkryte||[]),...(produktyDefinitywne||[]),...(koszDodanych||[]).map(x=>x.id)].map(String));
-  return produktyDoAdministracji().filter(p=>!hidden.has(String(p.id))&&!produktOznaczonyNiedostepny(p)&&Number(p.cena)>0).map(p=>{const effective=seoEfektywneDaneProduktu(p);return {...seoOcenaProduktu(effective),product:p,effective,coverage:"sklep • Google • Open Graph • dane strukturalne"};}).sort((a,b)=>{
-    const ap=a.product.seoPromoted||a.product.badge?1:0,bp=b.product.seoPromoted||b.product.badge?1:0;
-    if(seoUstawienia.preferBestsellers!==false&&bp!==ap)return bp-ap;
-    return a.score-b.score||String(a.product.seoReviewedAt||"").localeCompare(String(b.product.seoReviewedAt||""))||String(a.product.nazwa||"").localeCompare(String(b.product.nazwa||""),"pl");
-  });
-}
-function seoZapiszTrwale(id,patch){return zapiszPolaProduktuTrwale(id,patch,false,"seo-product-update");}
-async function seoWykonajPlanLokalny(limit=seoUstawienia.dailyLimit,source="ręcznie"){
-  const amount=Math.max(1,Math.min(50,Number(limit)||50)),today=new Date().toISOString().slice(0,10),queue=seoKolejkaProduktow(),fresh=queue.filter(x=>!String(x.product.seoReviewedAt||"").startsWith(today)),selected=fresh.slice(0,amount),now=new Date().toISOString();
-  const operations=selected.map(item=>{const p=item.product,next=seoAutomatyzujDaneProduktu(p,source,{force:p.seoMode!=="manual"&&seoUstawienia.autoFillMissing!==false});return {productId:p.id,fields:{seoTitle:next.seoTitle,seoDescription:next.seoDescription,seoKeywords:next.seoKeywords,seoMode:next.seoMode,seoReviewedAt:next.seoReviewedAt,seoSource:next.seoSource,seoScore:next.seoScore}};});
-  await chmuraZapiszProduktyCentralnie(operations,"seo-daily-fallback");
-  seoUstawienia={...seoUstawienia,lastRunAt:now,lastRunCount:selected.length};seoHistoria=[{id:`seo-${Date.now()}`,at:now,type:"daily",source,count:selected.length,products:selected.map(x=>({id:x.product.id,name:x.product.nazwa,scoreBefore:x.score}))},...(seoHistoria||[])].slice(0,500);
-  zapiszLS("artway_seo_ustawienia",seoUstawienia);zapiszLS("artway_seo_historia",seoHistoria);zaplanujZapisUstawien();zbudujProdukty();return selected;
-}
-async function seoUruchomPlanDzienny(button){
-  if(button)button.disabled=true;try{const d=await chmura("seo-daily-run",{method:"POST",body:{limit:seoUstawienia.dailyLimit,source:"manual-admin"},timeout:60000});await chmuraWczytajStan();zbudujProdukty();const sent=d.promotion?.accepted?` • zgłoszono ${d.promotion.count||0} adresów przez IndexNow`:"";toast(`✅ Plan SEO: opracowano ${d.processed||0} produktów${sent}`);}catch(e){const done=await seoWykonajPlanLokalny(seoUstawienia.dailyLimit,"centralny zapis awaryjny");toast(`✅ Plan SEO zapisany centralnie: ${done.length} produktów`);}finally{if(button)button.disabled=false;renderuj();}
-}
-function zapiszSeoUstawienia(event){event.preventDefault();const f=new FormData(event.currentTarget),limit=Math.max(1,Math.min(50,Number(f.get("dailyLimit"))||50));seoUstawienia={...seoUstawienia,enabled:f.get("enabled")==="on",autoFillMissing:f.get("autoFillMissing")==="on",autoAllProducts:true,preferBestsellers:f.get("preferBestsellers")==="on",indexNowEnabled:f.get("indexNowEnabled")==="on",dailyLimit:limit,searchConsoleReady:f.get("searchConsoleReady")==="on",merchantCenterReady:f.get("merchantCenterReady")==="on",businessProfileReady:f.get("businessProfileReady")==="on"};zapiszLS("artway_seo_ustawienia",seoUstawienia);zaplanujZapisUstawien();toast("Ustawienia pozycjonowania zapisane ✅");renderuj();}
-function seoUstawLimit(value){const input=document.querySelector('[name="dailyLimit"]');if(input){input.value=value;input.focus();}}
-async function seoPrzelaczPromowanie(id){const p=pobierzProduktAdmin(id);if(!p)return;await seoZapiszTrwale(id,{seoPromoted:!p.seoPromoted,seoPromotedAt:!p.seoPromoted?new Date().toISOString():""});toast(!p.seoPromoted?"Produkt otrzymał wyższy priorytet promocji ⭐":"Usunięto dodatkowy priorytet — produkt nadal promuje się automatycznie");renderuj();}
-async function seoUzupelnijProdukt(id){const p=pobierzProduktAdmin(id);if(!p)return;const now=new Date().toISOString(),next=seoAutomatyzujDaneProduktu(p,"ręczna kontrola SEO",{force:p.seoMode!=="manual"}),patch={seoTitle:next.seoTitle,seoDescription:next.seoDescription,seoKeywords:next.seoKeywords,seoMode:next.seoMode,seoReviewedAt:next.seoReviewedAt,seoSource:next.seoSource,seoScore:next.seoScore};await seoZapiszTrwale(id,patch);seoHistoria=[{id:`seo-${Date.now()}-${id}`,at:now,type:"single",source:"ręczna kontrola SEO",count:1,products:[{id:p.id,name:p.nazwa,scoreBefore:seoOcenaProduktu(seoEfektywneDaneProduktu(p)).score}]},...(seoHistoria||[])].slice(0,500);zapiszLS("artway_seo_historia",seoHistoria);zaplanujZapisUstawien();toast("Metadane SEO produktu zapisane na serwerze ✅");renderuj();}
-async function seoUdostepnijProdukt(id){const p=pobierzProduktAdmin(id);if(!p)return;const url=`${location.origin}/produkt/${encodeURIComponent(p.id)}`,data={title:p.seoTitle||p.nazwa,text:p.seoDescription||opisKrotkiProduktu(p),url};try{if(navigator.share)await navigator.share(data);else{await navigator.clipboard.writeText(`${data.title}\n${data.text}\n${url}`);toast("Skopiowano gotowy, bezpłatny materiał promocyjny 📋");}}catch(e){if(e?.name!=="AbortError")toast("Nie udało się udostępnić materiału");}}
-function seoCSV(value){const s=String(value??"");return `"${s.replace(/"/g,'""')}"`;}
-function seoEksportujFeedGoogleCSV(){const rows=[["id","title","description","link","image_link","availability","price","brand","gtin","mpn","condition"],...produkty.filter(p=>!produktOznaczonyNiedostepny(p)&&Number(p.cena)>0&&p.zdjecie).map(p=>[p.externalId||p.sku||p.id,p.seoTitle||p.nazwa,p.seoDescription||seoPropozycjaProduktu(p).seoDescription,`${location.origin}/produkt/${p.id}`,p.zdjecie||"","in_stock",`${Number(p.cena).toFixed(2)} PLN`,p.producent||p.marka||"",p.gtin||p.ean||"",p.mpn||p.kodProducenta||p.sku||"","new"])];pobierzPlik(`google-free-listings-${new Date().toISOString().slice(0,10)}.csv`,`\ufeff${rows.map(r=>r.map(seoCSV).join(",")).join("\n")}`,"text/csv");}
-function seoFiltrujKolejke(items=seoKolejkaProduktow()){
-  const query=normalizujSzukanyTekst(seoSzukaj),terms=query.split(" ").filter(Boolean),now=Date.now(),month=30*24*60*60*1000;
-  const filtered=items.filter(x=>{
-    const p=x.product,e=x.effective||seoEfektywneDaneProduktu(p),reviewed=p.seoReviewedAt?new Date(p.seoReviewedAt).getTime():0;
-    const search=normalizujSzukanyTekst([p.id,p.externalId,p.sku,p.gtin,p.ean,p.mpn,p.kodProducenta,p.nazwa,p.kategoria,p.producent,p.marka,e.seoTitle,e.seoDescription,e.seoKeywords,x.issues.join(" ")].join(" "));
-    if(terms.some(term=>!search.includes(term)))return false;
-    if(seoFiltrOceny==="krytyczne"&&x.score>=60)return false;if(seoFiltrOceny==="poprawa"&&(x.score<60||x.score>=85))return false;if(seoFiltrOceny==="gotowe"&&x.score<85)return false;
-    if(seoFiltrKontroli==="nigdy"&&reviewed)return false;if(seoFiltrKontroli==="dzisiaj"&&!String(p.seoReviewedAt||"").startsWith(new Date().toISOString().slice(0,10)))return false;if(seoFiltrKontroli==="stare"&&reviewed&&now-reviewed<=month)return false;
-    if(seoFiltrPromocji==="promowane"&&!p.seoPromoted)return false;if(seoFiltrPromocji==="niepromowane"&&p.seoPromoted)return false;
-    if(seoFiltrBrakow==="ean"&&(p.gtin||p.ean))return false;if(seoFiltrBrakow==="zdjecie"&&p.zdjecie)return false;if(seoFiltrBrakow==="opis"&&seoTekstBezHTML(p.opis||"").length>=250)return false;if(seoFiltrBrakow==="zrodlo"&&(p.sourceUrl||p.producentUrl))return false;
-    if(seoFiltrKategorii!=="wszystkie"&&String(p.kategoria||"")!==seoFiltrKategorii)return false;if(seoFiltrProducenta!=="wszyscy"&&String(p.producent||p.marka||"")!==seoFiltrProducenta)return false;
-    return true;
-  });
-  return filtered.sort((a,b)=>{const an=String(a.product.nazwa||""),bn=String(b.product.nazwa||"");if(seoSortowanie==="wynik-rosnaco")return a.score-b.score||an.localeCompare(bn,"pl");if(seoSortowanie==="wynik-malejaco")return b.score-a.score||an.localeCompare(bn,"pl");if(seoSortowanie==="nazwa")return an.localeCompare(bn,"pl");if(seoSortowanie==="kontrola")return String(a.product.seoReviewedAt||"").localeCompare(String(b.product.seoReviewedAt||""));return 0;});
-}
-function seoUstawFiltr(pole,value){
-  const v=String(value||"");if(pole==="seoFiltrOceny")seoFiltrOceny=v;else if(pole==="seoFiltrKontroli")seoFiltrKontroli=v;else if(pole==="seoFiltrPromocji")seoFiltrPromocji=v;else if(pole==="seoFiltrBrakow")seoFiltrBrakow=v;else if(pole==="seoFiltrKategorii")seoFiltrKategorii=v;else if(pole==="seoFiltrProducenta")seoFiltrProducenta=v;else if(pole==="seoSortowanie")seoSortowanie=v;else return;seoStrona=1;seoOdswiezWorkspace();
-}
-function seoSzukajProdukty(input){seoSzukaj=String(input?.value||input||"");seoStrona=1;clearTimeout(seoSzukajTimer);seoSzukajTimer=setTimeout(()=>seoOdswiezWorkspace({focusSearch:true}),180);}
-function seoResetujFiltry(){seoSzukaj="";seoFiltrOceny="wszystkie";seoFiltrKontroli="wszystkie";seoFiltrPromocji="wszystkie";seoFiltrBrakow="wszystkie";seoFiltrKategorii="wszystkie";seoFiltrProducenta="wszyscy";seoSortowanie="priorytet";seoStrona=1;seoOdswiezWorkspace({focusSearch:true});}
-function seoOdswiezWorkspace(options={}){const current=document.querySelector("[data-seo-list-workspace]");if(!current)return renderuj();const tab=current.dataset.seoTab||"produkty",fragment=dokumentTymczasowyHTML(seoProduktyWorkspaceHTML(seoKolejkaProduktow(),tab)),next=fragment.querySelector("[data-seo-list-workspace]");if(!next)return;current.replaceWith(next);seoOdswiezStanZaznaczen();if(options.focusSearch){const input=next.querySelector("[data-seo-search]");if(input){input.focus();input.setSelectionRange(input.value.length,input.value.length);}}}
-function seoUstawStrone(page){const total=Math.max(1,Math.ceil(seoFiltrujKolejke().length/seoNaStronie));seoStrona=Math.max(1,Math.min(total,Number(page)||1));seoOdswiezWorkspace();document.querySelector("[data-seo-list-workspace]")?.scrollIntoView({behavior:"smooth",block:"start"});}
-function seoUstawNaStronie(value){const n=Number(value);seoNaStronie=[25,50,100,250,500].includes(n)?n:50;seoStrona=1;zapiszLS("artway_seo_na_stronie",seoNaStronie);seoOdswiezWorkspace();}
-function seoPrzelaczZaznaczenie(id,checked){const key=String(id);if(checked)seoZaznaczoneProdukty.add(key);else seoZaznaczoneProdukty.delete(key);seoOdswiezStanZaznaczen();}
-function seoUstawZaznaczenie(ids,checked=true){for(const id of Array.isArray(ids)?ids:[])if(checked)seoZaznaczoneProdukty.add(String(id));else seoZaznaczoneProdukty.delete(String(id));seoOdswiezStanZaznaczen();}
-function seoZaznaczBiezacaStrone(checked=true){seoUstawZaznaczenie([...document.querySelectorAll("[data-seo-product-row]")].map(row=>row.dataset.seoProductId).filter(Boolean),checked);}
-function seoZaznaczWszystkieWyniki(){seoUstawZaznaczenie(seoFiltrujKolejke().map(x=>x.product.id),true);}
-function seoWyczyscZaznaczenie(){seoZaznaczoneProdukty.clear();seoOdswiezStanZaznaczen();}
-function seoEksportujWynikiCSV(zakres="filtr"){
-  const selected=new Set([...seoZaznaczoneProdukty].map(String));
-  const rows=seoFiltrujKolejke().filter(x=>zakres!=="zaznaczone"||selected.has(String(x.product.id))).map(x=>{const p=x.product,e=x.effective||seoEfektywneDaneProduktu(p);return [p.id,p.externalId||"",p.sku||"",p.gtin||p.ean||"",p.nazwa,p.kategoria||"",p.producent||p.marka||"",x.score,(x.issues||[]).join(" | "),e.seoTitle||"",e.seoDescription||"",e.seoKeywords||"",p.seoReviewedAt||""];});
-  adminEksportujCSV(zakres==="zaznaczone"?"seo-zaznaczone.csv":"seo-wyniki-filtra.csv",["id","external_id","sku","ean","nazwa","kategoria","producent","ocena","braki","tytul_seo","opis_seo","frazy","ostatnia_kontrola"],rows);
-}
-function seoOdswiezStanZaznaczen(){const selected=seoZaznaczoneProdukty.size;document.querySelectorAll("[data-seo-selected-count]").forEach(el=>el.textContent=String(selected));document.querySelectorAll("[data-seo-bulk-action]").forEach(el=>el.disabled=!selected);document.querySelectorAll("[data-seo-product-row]").forEach(row=>{const active=seoZaznaczoneProdukty.has(String(row.dataset.seoProductId));row.classList.toggle("is-selected",active);const box=row.querySelector("[data-seo-select]");if(box)box.checked=active;});}
-async function seoWykonajOperacjeZbiorcza(mode){
-  const ids=[...seoZaznaczoneProdukty],now=new Date().toISOString();if(!ids.length)return toast("Najpierw zaznacz produkty");if(!["optimize","promote","unpromote","auto","manual","audit"].includes(mode))return toast("Wybierz operację zbiorczą");let changed=0,names=[];
-  const operations=[];for(const id of ids){const p=pobierzProduktAdmin(id);if(!p)continue;let patch={};if(mode==="promote")patch={seoPromoted:true,seoPromotedAt:now};else if(mode==="unpromote")patch={seoPromoted:false,seoPromotedAt:""};else{const base=mode==="auto"?{...p,seoMode:"auto"}:mode==="manual"?{...seoEfektywneDaneProduktu(p),seoMode:"manual"}:p,next=seoAutomatyzujDaneProduktu(base,mode==="audit"?"zbiorczy audyt SEO":"zbiorcza optymalizacja SEO",{force:mode==="auto"||mode==="optimize"});patch={seoTitle:next.seoTitle,seoDescription:next.seoDescription,seoKeywords:next.seoKeywords,seoMode:next.seoMode,seoReviewedAt:next.seoReviewedAt,seoSource:next.seoSource,seoScore:next.seoScore};}operations.push({productId:id,fields:patch});changed++;names.push(p.nazwa||id);}
-  await chmuraZapiszProduktyCentralnie(operations,"seo-bulk-operation");
-  seoHistoria=[{id:`seo-bulk-${Date.now()}`,at:now,type:"bulk",source:`operacja zbiorcza: ${mode}`,count:changed,products:names.slice(0,100).map((name,i)=>({id:ids[i],name}))},...(seoHistoria||[])].slice(0,500);zapiszLS("artway_seo_historia",seoHistoria);zaplanujZapisUstawien();zbudujProdukty();seoZaznaczoneProdukty.clear();toast(`Zmieniono ${changed} produktów ✅`);seoOdswiezWorkspace();
-}
-function seoScoreBadge(score){return `<span class="seo-score ${score>=85?"good":score>=60?"medium":"bad"}">${score}/100</span>`;}
-function seoProduktRows(items,limit=200,options={}){const selectable=options.selectable===true;return items.slice(0,limit).map(x=>{const p=x.product,e=x.effective||seoEfektywneDaneProduktu(p),selected=seoZaznaczoneProdukty.has(String(p.id));return `<tr data-seo-product-row data-seo-product-id="${esc(p.id)}" class="${selected?"is-selected":""}">${selectable?`<td><input class="seo-row-checkbox" data-seo-select type="checkbox" aria-label="Zaznacz ${esc(p.nazwa)}" ${selected?"checked":""} onchange="seoPrzelaczZaznaczenie(${jsArg(p.id)},this.checked)"></td>`:""}<td>${p.zdjecie?`<img class="seo-product-thumb" src="${esc(p.zdjecie)}" alt="">`:esc(p.ikona||"📦")}</td><td><b>${esc(p.nazwa)}</b><br><small>${esc(p.externalId||p.sku||`ID ${p.id}`)} • ${esc(p.kategoria||"bez kategorii")} • ${esc(p.producent||p.marka||"bez producenta")}</small></td>${selectable?`<td><span class="seo-coverage-status ${e.seoMode}">${e.seoMode==="manual"?"✍️ ręczne":"⚙️ automatyczne"}</span><small>${esc(x.coverage||"")}</small></td>`:""}<td>${seoScoreBadge(x.score)}</td><td>${x.issues.length?esc(x.issues.slice(0,4).join(", ")):`<span class="lvl lvl-ok">kompletne</span>`}</td><td>${p.seoReviewedAt?esc(allegroDataTxt(p.seoReviewedAt)):"automatycznie"}</td><td class="seo-row-actions"><button class="btn ghost" onclick="seoUzupelnijProdukt(${jsArg(p.id)})">✨ Uzupełnij SEO</button><button class="btn ghost" onclick="seoPrzelaczPromowanie(${jsArg(p.id)})">${p.seoPromoted?"★ Priorytet":"☆ Nadaj priorytet"}</button><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Edytuj</a></td></tr>`;}).join("")||`<tr><td colspan="${selectable?8:6}">Brak produktów pasujących do filtrów.</td></tr>`;}
-function seoProduktyWorkspaceHTML(queue,tab="produkty"){
-  const filtered=seoFiltrujKolejke(queue),pages=Math.max(1,Math.ceil(filtered.length/seoNaStronie));seoStrona=Math.max(1,Math.min(seoStrona,pages));const start=(seoStrona-1)*seoNaStronie,current=filtered.slice(start,start+seoNaStronie),categories=[...new Set(queue.map(x=>String(x.product.kategoria||"")).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pl")),producers=[...new Set(queue.map(x=>String(x.product.producent||x.product.marka||"")).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pl"));
-  const option=(value,label,currentValue)=>`<option value="${esc(value)}" ${value===currentValue?"selected":""}>${esc(label)}</option>`;
-  return `<section class="panel seo-product-workspace" data-seo-list-workspace data-seo-tab="${esc(tab)}"><div class="order-section-head"><div><span class="order-pro-label">Automatyczne pokrycie całego katalogu</span><h2>${tab==="produkty"?"🏷️ Produkty SEO":"✍️ Frazy i treści"}</h2><p class="order-detail-lead">Każdy aktywny produkt działa automatycznie w sklepie, Google, Open Graph, danych Product/Offer, mapie strony i feedzie. Limit dzienny służy wyłącznie kolejnym audytom jakości.</p></div><span class="lvl lvl-ok">${queue.length}/${queue.length} objętych automatem</span></div>
-    ${adminWyszukiwaniePanelHTML({id:"seo-products",description:"Nazwa, identyfikatory, kategoria, producent, jakość treści, priorytet i data kontroli.",results:filtered.length,active:!!(seoSzukaj||seoFiltrOceny!=="wszystkie"||seoFiltrKontroli!=="wszystkie"||seoFiltrPromocji!=="wszystkie"||seoFiltrBrakow!=="wszystkie"||seoFiltrKategorii!=="wszystkie"||seoFiltrProducenta!=="wszyscy"),open:true,fields:`<div class="seo-advanced-toolbar admin-search-full"><label class="seo-search-wide">Produkt lub fraza<input class="seo-table-search" data-seo-search value="${esc(seoSzukaj)}" placeholder="Nazwa, EXTERNAL_ID, SKU, EAN, kod producenta, kategoria, producent, fraza…" oninput="seoSzukajProdukty(this)"></label><label>Ocena<select onchange="seoUstawFiltr('seoFiltrOceny',this.value)">${option("wszystkie","Wszystkie wyniki",seoFiltrOceny)}${option("krytyczne","Krytyczne: poniżej 60",seoFiltrOceny)}${option("poprawa","Do poprawy: 60–84",seoFiltrOceny)}${option("gotowe","Gotowe: 85–100",seoFiltrOceny)}</select></label><label>Kontrola<select onchange="seoUstawFiltr('seoFiltrKontroli',this.value)">${option("wszystkie","Każda kontrola",seoFiltrKontroli)}${option("nigdy","Nigdy niekontrolowane",seoFiltrKontroli)}${option("dzisiaj","Sprawdzone dzisiaj",seoFiltrKontroli)}${option("stare","Starsze niż 30 dni",seoFiltrKontroli)}</select></label><label>Priorytet promocji<select onchange="seoUstawFiltr('seoFiltrPromocji',this.value)">${option("wszystkie","Wszystkie — automatyczne",seoFiltrPromocji)}${option("promowane","Z dodatkowym priorytetem",seoFiltrPromocji)}${option("niepromowane","Standardowy priorytet",seoFiltrPromocji)}</select></label><label>Brak danych<select onchange="seoUstawFiltr('seoFiltrBrakow',this.value)">${option("wszystkie","Dowolny stan",seoFiltrBrakow)}${option("ean","Bez EAN/GTIN",seoFiltrBrakow)}${option("zdjecie","Bez zdjęcia",seoFiltrBrakow)}${option("opis","Bez pełnego opisu",seoFiltrBrakow)}${option("zrodlo","Bez linku źródłowego",seoFiltrBrakow)}</select></label><label>Kategoria<select onchange="seoUstawFiltr('seoFiltrKategorii',this.value)">${option("wszystkie","Wszystkie kategorie",seoFiltrKategorii)}${categories.map(v=>option(v,v,seoFiltrKategorii)).join("")}</select></label><label>Producent<select onchange="seoUstawFiltr('seoFiltrProducenta',this.value)">${option("wszyscy","Wszyscy producenci",seoFiltrProducenta)}${producers.map(v=>option(v,v,seoFiltrProducenta)).join("")}</select></label><label>Sortowanie<select onchange="seoUstawFiltr('seoSortowanie',this.value)">${option("priorytet","Priorytet automatu",seoSortowanie)}${option("wynik-rosnaco","Ocena: od najniższej",seoSortowanie)}${option("wynik-malejaco","Ocena: od najwyższej",seoSortowanie)}${option("nazwa","Nazwa A–Z",seoSortowanie)}${option("kontrola","Najdawniej kontrolowane",seoSortowanie)}</select></label><button class="btn ghost seo-reset-filters" type="button" onclick="seoResetujFiltry()">Wyczyść filtry</button></div>`,actions:adminOperacjeWynikowHTML({id:"seo-products",selected:seoZaznaczoneProdukty.size,pageCount:current.length,resultCount:filtered.length,selectPage:"seoZaznaczBiezacaStrone(true)",selectAll:"seoZaznaczWszystkieWyniki()",clear:"seoWyczyscZaznaczenie()",exportSelected:"seoEksportujWynikiCSV('zaznaczone')",exportAll:"seoEksportujWynikiCSV('filtr')"})})}
-    <div class="seo-results-summary"><b>Znaleziono ${filtered.length}</b><span>Pokazano ${filtered.length?start+1:0}–${Math.min(start+seoNaStronie,filtered.length)}</span><label>Na stronie <select onchange="seoUstawNaStronie(this.value)">${[25,50,100,250,500].map(v=>option(String(v),String(v),String(seoNaStronie))).join("")}</select></label></div>
-    <div class="seo-bulk-toolbar"><span>Wybrano: <b data-seo-selected-count>${seoZaznaczoneProdukty.size}</b></span><select data-seo-bulk-operation><option value="">Operacja dla zaznaczonych…</option><option value="optimize">Uzupełnij i zoptymalizuj SEO</option><option value="audit">Oznacz jako sprawdzone</option><option value="promote">Nadaj dodatkowy priorytet</option><option value="unpromote">Usuń priorytet — promocja pozostaje</option><option value="auto">Włącz tryb automatyczny</option><option value="manual">Chroń jako ręczne treści</option></select><button class="btn" data-seo-bulk-action ${seoZaznaczoneProdukty.size?"":"disabled"} onclick="seoWykonajOperacjeZbiorcza(this.previousElementSibling.value)">Wykonaj</button></div>
-    <div class="seo-table-wrap"><table class="log-table seo-product-table"><thead><tr><th></th><th></th><th>Produkt</th><th>Pokrycie</th><th>Wynik</th><th>Braki</th><th>Ostatnia kontrola</th><th>Akcje</th></tr></thead><tbody>${seoProduktRows(current,seoNaStronie,{selectable:true})}</tbody></table></div><div class="pagination">${paginacjaHTML(seoStrona,pages,"seoUstawStrone")}</div></section>`;
-}
 function seoAktualizujMetaDlaTrasy(route=trasa()){
   const ensure=(selector,create)=>{let el=document.head.querySelector(selector);if(!el){el=document.createElement(create.tag||"meta");for(const [k,v] of Object.entries(create.attrs||{}))el.setAttribute(k,v);document.head.appendChild(el);}return el;},setMeta=(name,value,property=false)=>{const attr=property?"property":"name",el=ensure(`meta[${attr}="${name}"]`,{tag:"meta",attrs:{[attr]:name}});el.setAttribute("content",String(value||""));};
   const baseTitle=ustawienia.nazwaSklepu||"Artway-TM",baseDesc=ustawienia.seo?.opis||ustawienia.opisSklepu||"Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów.";let title=ustawienia.seo?.tytul||`Gry, zabawki i artykuły imprezowe | ${baseTitle}`,desc=baseDesc,canonical=location.origin+"/",image="",price="",schema={"@context":"https://schema.org","@graph":[{"@type":"WebSite",name:baseTitle,url:canonical,inLanguage:"pl-PL"},{"@type":"OnlineStore",name:baseTitle,url:canonical,email:ustawienia.email||"artwaytm@gmail.com",telephone:ustawienia.telefon||"+48530038914"}]};
@@ -5296,73 +5195,8 @@ function seoAktualizujMetaDlaTrasy(route=trasa()){
   document.title=title;setMeta("description",desc);setMeta("robots",route.startsWith("/admin")||["/diagnostyka","/logowanie","/rejestracja","/konto","/zamowienia"].includes(route)?"noindex,nofollow":"index,follow,max-image-preview:large");setMeta("og:locale","pl_PL",true);setMeta("og:site_name",baseTitle,true);setMeta("og:title",title,true);setMeta("og:description",desc,true);setMeta("og:url",canonical,true);setMeta("og:type",route.startsWith("/produkt/")?"product":"website",true);setMeta("og:image",image,true);setMeta("twitter:card",image?"summary_large_image":"summary");setMeta("twitter:title",title);setMeta("twitter:description",desc);setMeta("twitter:image",image);setMeta("product:price:amount",price,true);setMeta("product:price:currency",price?"PLN":"",true);
   let link=document.head.querySelector('link[rel="canonical"]');if(!link){link=document.createElement("link");link.rel="canonical";document.head.appendChild(link);}link.href=canonical;let script=document.getElementById("artway-seo-schema");if(!script){script=document.createElement("script");script.id="artway-seo-schema";script.type="application/ld+json";document.head.appendChild(script);}script.textContent=JSON.stringify(schema);
 }
-function seoDzienWarszawa(value=new Date()){
-  const date=value instanceof Date?value:new Date(value);if(!Number.isFinite(date.getTime()))return "";
-  try{return new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Warsaw",year:"numeric",month:"2-digit",day:"2-digit"}).format(date);}catch(e){return date.toISOString().slice(0,10);}
-}
-function seoOstatniPrzebiegDzienny(){
-  const history=(seoHistoria||[]).filter(h=>h&&h.type==="daily"),today=seoDzienWarszawa();
-  return history.find(h=>String(h.scheduledDay||seoDzienWarszawa(h.at))===today&&String(h.source||"").startsWith("scheduled"))||history[0]||null;
-}
-function seoKanalyPrzebiegu(run,queue=[]){
-  if(run?.channels&&typeof run.channels==="object")return run.channels;
-  if(seoUstawienia.lastChannels&&typeof seoUstawienia.lastChannels==="object")return seoUstawienia.lastChannels;
-  const active=queue.length,processed=Number(run?.count||seoUstawienia.lastRunCount)||0,promotion=run?.promotion||{},submitted=Math.max(0,(Number(promotion.count||seoUstawienia.lastPromotionCount)||0)-1);
-  return {metadata:{status:processed?"completed":"no-changes",count:processed,label:"Tytuły, opisy i frazy"},structuredData:{status:processed?"completed":"no-changes",count:processed,label:"Product, Offer i Open Graph"},sitemap:{status:"published",count:active,label:"Mapa strony"},googleFeed:{status:"published",count:active,label:"Bezpłatny feed Google"},images:{status:"published",count:queue.filter(x=>x.product?.zdjecie).length,label:"Google Images i Lens"},indexNow:{status:promotion.status||seoUstawienia.lastPromotionStatus||"skipped",count:submitted,label:"IndexNow / Bing"}};
-}
-function seoStatusKanalu(channel={}){
-  const status=String(channel.status||"");if(["completed","published","accepted"].includes(status))return {icon:"✅",className:"ok",text:status==="accepted"?"przyjęte":"wykonane"};
-  if(status==="error")return {icon:"⚠️",className:"bad",text:"ponowienie zaplanowane"};
-  return {icon:"•",className:"wait",text:status==="no-changes"?"bez zmian":"oczekuje"};
-}
-function seoAutomatDziennyHTML(limit,queue=[]){
-  const run=seoOstatniPrzebiegDzienny(),today=seoDzienWarszawa(),runDay=run?String(run.scheduledDay||seoDzienWarszawa(run.at)):"",doneToday=runDay===today,channels=seoKanalyPrzebiegu(run,queue);
-  const cards=[channels.metadata,channels.structuredData,channels.googleFeed,channels.sitemap,channels.images,channels.indexNow].filter(Boolean);
-  return `<section class="panel seo-daily-proof ${doneToday?"is-complete":"is-waiting"}"><div class="order-section-head"><div><span class="order-pro-label">Automat dzienny • ${esc(limit)} produktów</span><h2>${doneToday?"✅ Dzisiejsza partia wykonana":"⏳ Najbliższa partia jest zaplanowana"}</h2><p class="order-detail-lead">${doneToday?`Serwer wykonał pracę ${esc(allegroDataTxt(run.at))}. Każdy kanał poniżej pokazuje własny, zapisany wynik.`:`Automat uruchamia się codziennie około 04:15. Ostatni zapis: ${run?esc(allegroDataTxt(run.at)):"brak wcześniejszego przebiegu"}.`}</p></div><span class="lvl ${doneToday?"lvl-ok":"lvl-warn"}">${doneToday?`${Number(run?.count)||0} / ${limit}`:"zaplanowano"}</span></div><div class="seo-daily-channel-grid">${cards.map(channel=>{const state=seoStatusKanalu(channel);return `<article class="${state.className}"><span>${state.icon}</span><div><b>${esc(channel.label||"Kanał")}</b><small>${esc(channel.count||0)} produktów • ${esc(state.text)}</small></div></article>`;}).join("")}</div></section>`;
-}
-function widokAdminSEO(sekcja="pulpit"){
-  const tab=TABY_SEO.some(([id])=>id===sekcja)?sekcja:"pulpit",queue=seoKolejkaProduktow(),limit=Math.max(1,Math.min(50,Number(seoUstawienia.dailyLimit)||50)),daily=queue.filter(x=>!String(x.product.seoReviewedAt||"").startsWith(new Date().toISOString().slice(0,10))).slice(0,limit),good=queue.filter(x=>x.score>=85).length,missing=queue.filter(x=>x.score<60).length,priority=queue.filter(x=>x.product.seoPromoted),avg=queue.length?Math.round(queue.reduce((s,x)=>s+x.score,0)/queue.length):0,indexNowOk=seoUstawienia.lastPromotionStatus==="accepted",indexNowState=indexNowOk?`Ostatnio zgłoszono ${Number(seoUstawienia.lastPromotionCount)||0} adresów — ${allegroDataTxt(seoUstawienia.lastPromotionAt)}`:seoUstawienia.lastPromotionStatus==="error"?"Ostatnie zgłoszenie nie powiodło się — automat ponowi próbę przy kolejnej partii":"Pierwsze zgłoszenie nastąpi przy najbliższej dziennej partii";
-  if(typeof seoPobierzEfekty==="function")queueMicrotask(()=>seoPobierzEfekty(typeof seoEfektyStan==="object"?seoEfektyStan.days:30));
-  const head=`<div class="panel seo-hero seo-control-hero"><div><span class="order-pro-label">Centrum bezpłatnego wzrostu</span><h1>📣 Pozycjonowanie i promocja produktów</h1><p>Techniczne SEO, uporządkowane treści, czyste adresy, dane Product/Offer, bezpłatny feed oraz rzeczywisty pomiar wejść i sprzedaży.</p><div class="seo-status-ribbon"><span class="${seoUstawienia.enabled?"ok":"wait"}">● Automat ${seoUstawienia.enabled?"aktywny":"wyłączony"}</span><span class="ok">● HTML produktów dla Google</span><span class="${indexNowOk?"ok":"wait"}">● IndexNow ${indexNowOk?"przyjęty":"oczekuje"}</span><span>● ${queue.length} produktów w mapie/feedzie</span></div></div><div class="seo-hero-score"><b>${avg}%</b><small>średnia gotowość katalogu</small></div></div>${seoAutomatDziennyHTML(limit,queue)}`;
-  if(tab==="efekty")return seoSzkielet(tab,`${head}${seoEfektyPanelHTML()}`);
-  if(tab==="pulpit")return seoSzkielet(tab,`${head}<div class="orders-stat-grid seo-stat-grid"><div class="order-stat-card money"><span>✅</span><b>${good}</b><small>produktów gotowych</small></div><div class="order-stat-card ${missing?"hot":""}"><span>⚠️</span><b>${missing}</b><small>wymaga uzupełnienia</small></div><div class="order-stat-card"><span>🗓️</span><b>${daily.length}</b><small>w najbliższej partii</small></div><div class="order-stat-card money"><span>📣</span><b>${queue.length}</b><small>aktywnych w darmowej promocji</small></div></div><div class="panel"><div class="order-section-head"><div><h2>Plan na dziś: ${limit} produktów</h2><p class="order-detail-lead">Wszystkie aktywne produkty są promowane automatycznie. W kolejce kontroli najpierw są produkty z dodatkowym priorytetem i bestsellery, potem karty z największymi brakami.</p></div><button class="btn" onclick="seoUruchomPlanDzienny(this)" ${seoUstawienia.enabled?"":"disabled"}>▶️ Wykonaj dzisiejszą partię</button></div><div class="seo-progress"><span style="width:${avg}%"></span></div><div style="overflow:auto"><table class="log-table"><tr><th></th><th>Produkt</th><th>Wynik</th><th>Braki</th><th>Kontrola</th><th>Akcje</th></tr>${seoProduktRows(daily,limit)}</table></div></div>`);
-  if(tab==="plan")return seoSzkielet(tab,`${head}<div class="panel"><div class="order-section-head"><div><h2>🗓️ Kolejka dzienna</h2><p class="order-detail-lead">Automat opracowuje do ${limit} pozycji dziennie. Po każdej partii odświeża metadane i dane strukturalne, aktualizuje pokrycie feedu oraz mapy i zgłasza zmienione adresy przez IndexNow. Nie zmieniamy treści tylko po to, by wyglądały na świeże.</p></div><button class="btn" onclick="seoUruchomPlanDzienny(this)">Uruchom ${limit} teraz</button></div><div style="overflow:auto"><table class="log-table"><tr><th></th><th>Produkt</th><th>Wynik</th><th>Braki</th><th>Ostatnio</th><th>Akcje</th></tr>${seoProduktRows(daily,limit)}</table></div></div>`);
-  if(tab==="produkty"||tab==="tresci")return seoSzkielet(tab,`${head}${seoProduktyWorkspaceHTML(queue,tab)}`);
-  if(tab==="promocja")return seoSzkielet(tab,`${head}<div class="panel"><div class="order-section-head"><div><h2>📣 Darmowa promocja całego katalogu</h2><p class="order-detail-lead"><b>${queue.length} aktywnych produktów</b> jest objętych automatem bez ręcznego zaznaczania. Kanały są wyłącznie bezpłatne — bez kampanii i budżetu reklamowego.</p></div><div class="diag-actions"><a class="btn" href="/google-products.xml" target="_blank">🔄 Automatyczny feed XML</a><button class="btn ghost" onclick="seoEksportujFeedGoogleCSV()">⬇️ Kopia CSV</button></div></div><div class="seo-free-channels"><article><b>🛍️ Bezpłatne informacje Google — automatycznie</b><p>Google cyklicznie pobiera wszystkie kwalifikujące się aktywne produkty z <code>${esc(location.origin)}/google-products.xml</code>. Ukryte lub niedostępne pozycje są automatycznie wycofywane z feedu.</p><div class="diag-actions"><a class="btn ghost" href="/google-products.xml" target="_blank">Sprawdź feed</a><a class="btn ghost" href="https://merchants.google.com/" target="_blank" rel="noopener">Merchant Center ↗</a></div></article><article><b>🔎 Google Search Console — automatycznie</b><p>Mapa <code>${esc(location.origin)}/sitemap.xml</code> obejmuje wszystkie aktywne karty. Nowe produkty trafiają do niej bez ręcznego zgłaszania.</p><div class="diag-actions"><a class="btn ghost" href="/sitemap.xml" target="_blank">Sprawdź mapę</a><a class="btn ghost" href="https://search.google.com/search-console" target="_blank" rel="noopener">Search Console ↗</a></div></article><article><b>${indexNowOk?"✅":"⚡"} IndexNow — automatycznie</b><p>Cały aktywny katalog jest zgłaszany przy pierwszym uruchomieniu, a potem automat przekazuje poprawione i nowe karty do Bing oraz innych uczestniczących wyszukiwarek. ${esc(indexNowState)}.</p><small>Zgłoszenie przyspiesza wykrycie zmiany, ale nie gwarantuje pozycji ani indeksacji.</small></article><article><b>🔗 allsklep.pl — drugi adres podpięty</b><p>Krótki adres marketingowy działa i przekierowuje kodem 301 na właściwą podstronę <code>artwaytm.pl</code>. Jedna domena kanoniczna chroni pozycjonowanie przed duplikacją treści.</p><a class="btn ghost" href="https://allsklep.pl/" target="_blank" rel="noopener">Sprawdź drugi adres ↗</a></article></div><div class="backend-note"><b>Automatyczne pokrycie:</b> wszystkie aktywne produkty trafiają do mapy strony, bezpłatnego feedu Google i systemu zgłoszeń wyszukiwarkom. Gwiazdka priorytetu zmienia wyłącznie kolejność audytu — nigdy nie wyłącza produktu z darmowej promocji.</div><h3>Produkty z dodatkowym priorytetem (${priority.length})</h3><div class="seo-promotion-grid">${priority.map(x=>`<article>${x.product.zdjecie?`<img src="${esc(x.product.zdjecie)}" alt="">`:"📦"}<div><b>${esc(x.product.nazwa)}</b><small>${esc(x.product.seoDescription||x.proposed.seoDescription)}</small><div class="diag-actions"><button class="btn" onclick="seoUdostepnijProdukt(${jsArg(x.product.id)})">Udostępnij bezpłatnie</button><button class="btn ghost" onclick="seoPrzelaczPromowanie(${jsArg(x.product.id)})">Zdejmij dodatkowy priorytet</button></div></div></article>`).join("")||`<div class="backend-note">Brak dodatkowych priorytetów. Wszystkie aktywne produkty nadal promują się automatycznie.</div>`}</div></div>`);
-  if(tab==="techniczne")return seoSzkielet(tab,`${head}<div class="panel"><h2>🛠️ Techniczne SEO</h2><div class="seo-technical-grid"><article><span>✅</span><b>Mapa produktów XML</b><small>Automatyczna, tylko aktywne produkty, prawdziwe daty ostatniej kontroli.</small><a class="btn ghost" href="/sitemap.xml" target="_blank">Otwórz sitemap.xml</a></article><article><span>✅</span><b>Feed Google Merchant XML</b><small>Aktualne ceny, opisy, zdjęcia, dostępność, marka, GTIN/MPN i linki produktów. Gotowy do cyklicznego pobierania.</small><a class="btn ghost" href="/google-products.xml" target="_blank">Otwórz feed produktowy</a></article><article><span>✅</span><b>Dane Product/Offer</b><small>Nazwa, opis, zdjęcia, SKU, GTIN, marka, cena i dostępność na karcie produktu.</small><a class="btn ghost" href="https://search.google.com/test/rich-results" target="_blank" rel="noopener">Test wyników z elementami rozszerzonymi ↗</a></article><article><span>✅</span><b>Canonical i Open Graph</b><small>Każdy produkt ma własny czysty adres /produkt/ID oraz właściwe metadane.</small></article><article><span>✅</span><b>robots.txt</b><small>Sklep jest dostępny dla robotów, panel administracyjny ma noindex.</small><a class="btn ghost" href="/robots.txt" target="_blank">Otwórz robots.txt</a></article></div></div>`);
-  if(tab==="historia")return seoSzkielet(tab,`${head}<div class="panel"><h2>🧾 Historia pracy</h2><div class="seo-table-wrap"><table class="log-table"><tr><th>Data</th><th>Źródło</th><th>Produkty</th><th>IndexNow</th><th>Kanały</th><th>Szczegóły</th></tr>${(seoHistoria||[]).map(h=>`<tr><td>${esc(allegroDataTxt(h.at))}</td><td>${esc(h.source||h.type||"automat")}</td><td><b>${esc(h.count||0)}</b></td><td>${h.promotion?.status==="accepted"?"✅":"•"} ${esc(Math.max(0,(Number(h.promotion?.count)||0)-1))}</td><td>${h.channels?`✅ ${Object.values(h.channels).filter(Boolean).length}`:"starszy zapis"}</td><td>${esc((h.products||[]).slice(0,8).map(x=>x.name||x.id).join(", "))}</td></tr>`).join("")||`<tr><td colspan="6">Plan nie był jeszcze uruchamiany.</td></tr>`}</table></div></div>`);
-  return seoSzkielet("ustawienia",`${head}<div class="panel"><form onsubmit="zapiszSeoUstawienia(event)"><div class="order-section-head"><div><h2>⚙️ Ustawienia automatu i audytów</h2><p class="order-detail-lead">Każdy produkt jest objęty pozycjonowaniem od razu. Limit 1–50 określa liczbę kart codziennie kontrolowanych, poprawianych i zgłaszanych bezpłatnym kanałom.</p></div><button class="btn" type="submit">💾 Zapisz</button></div><div class="seo-settings-grid"><label class="check"><input type="checkbox" checked disabled> Każdy aktywny produkt automatycznie wszędzie — zawsze aktywne</label><label class="check"><input type="checkbox" name="enabled" ${seoUstawienia.enabled?"checked":""}> Automatyczne audyty aktywne</label><label class="check"><input type="checkbox" name="autoFillMissing" ${seoUstawienia.autoFillMissing!==false?"checked":""}> Uzupełniaj bezpieczne metadane</label><label class="check"><input type="checkbox" name="preferBestsellers" ${seoUstawienia.preferBestsellers!==false?"checked":""}> Najpierw produkty z dodatkowym priorytetem i bestsellery</label><label class="check"><input type="checkbox" name="indexNowEnabled" ${seoUstawienia.indexNowEnabled!==false?"checked":""}> Zgłaszaj poprawione produkty bezpłatnie przez IndexNow</label><label>Dzienny limit automatycznej partii<input name="dailyLimit" type="number" min="1" max="50" value="${esc(limit)}"><span class="seo-limit-presets"><button type="button" onclick="seoUstawLimit(10)">10</button><button type="button" onclick="seoUstawLimit(20)">20</button><button type="button" onclick="seoUstawLimit(50)">50</button></span></label></div><h3>Stan bezpłatnych kanałów</h3><div class="seo-settings-grid"><label class="check"><input type="checkbox" name="searchConsoleReady" ${seoUstawienia.searchConsoleReady?"checked":""}> Search Console skonfigurowane</label><label class="check"><input type="checkbox" name="merchantCenterReady" ${seoUstawienia.merchantCenterReady?"checked":""}> Merchant Center / bezpłatne informacje skonfigurowane</label><label class="check"><input type="checkbox" checked disabled> allsklep.pl podpięty jako adres marketingowy 301</label></div><div class="backend-note"><b>Wyłącznie darmowe rozwiązania.</b> Wszystkie aktywne produkty automatycznie otrzymują tytuł, opis i frazy oraz trafiają do mapy strony, feedu Google, danych Product/Offer i zgłoszeń IndexNow. Drugi adres prowadzi do tej samej domeny kanonicznej, więc nie tworzy duplikatów SEO. Moduł nie uruchamia reklam i nie wymaga płatnego API. Ostatni audyt: ${seoUstawienia.lastRunAt?esc(allegroDataTxt(seoUstawienia.lastRunAt)):"jeszcze nie było"}.</div></form></div>`);
-}
-async function zapiszCzescUstawien(obj){
-  const zmiany={},usunKlucze=[],next={...ustawienia};
-  for(const [key,value] of Object.entries(obj||{})){
-    if(value===undefined){delete next[key];usunKlucze.push(key);}
-    else{next[key]=value;zmiany[key]=value;}
-  }
-  ustawienia = next;
-  zapiszLS("artway_ustawienia", ustawienia,{synchronizuj:false});
-  zastosujUstawienia(); zbudujProdukty(); odswiezMenu(); odswiezKoszyk();
-  loguj("info","Zabezpieczono zmianę ustawień w trwałej kolejce");
-  toast("Zapisywanie na serwerze…"); renderuj();
-  const zapisane=await chmuraDodajMutacjePolUstawien(zmiany,usunKlucze);
-  if(zapisane){
-    loguj("info",`Serwer potwierdził zapis pól ustawień: ${[...Object.keys(zmiany),...usunKlucze].join(", ")}`);
-    toast("Zapisane na serwerze i aktywne wszędzie ✅");
-  }else{
-    loguj("ostrzezenie","Zmiana ustawień oczekuje w trwałej kolejce na potwierdzenie serwera");
-    toast("⚠️ Zmiana jest zabezpieczona i oczekuje na potwierdzenie serwera");
-  }
-  return zapisane;
-}
 
 /* Anonimowy pomiar efektów SEO. Zapisuje wyłącznie dzienne sumy kanałów, domen wejścia i konwersji. */
-function seoEfektyDzien(value=new Date()){const d=value instanceof Date?value:new Date(value);if(!Number.isFinite(d.getTime()))return "";const p=new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Warsaw",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(d),get=t=>p.find(x=>x.type===t)?.value||"";return `${get("year")}-${get("month")}-${get("day")}`;}
-function seoEfektyPrzesunDzien(day,offset){const d=new Date(`${day}T12:00:00Z`);d.setUTCDate(d.getUTCDate()+offset);return d.toISOString().slice(0,10);}
-const SEO_EFEKTY_DZIS=seoEfektyDzien();
-let seoEfektyFiltry={preset:"30",from:seoEfektyPrzesunDzien(SEO_EFEKTY_DZIS,-29),to:SEO_EFEKTY_DZIS,domain:"all",channel:"all",metric:"landing",search:""};
-let seoEfektyStan={loading:false,loadedAt:0,error:"",days:30,range:{from:seoEfektyFiltry.from,to:seoEfektyFiltry.to,days:30},totals:{landing:0,product_view:0,add_to_cart:0,order:0,revenue:0},comparison:{},channels:{},domains:{},landingPages:[],campaigns:[],referrers:[],timeline:[],products:[],updatedAt:null};
-let seoEfektySearchTimer=0;
-let seoEfektyRequestId=0;
 const SEO_DOMENY=new Set(["artwaytm.pl","allsklep.pl"]);
 function seoNormalizujDomene(value=""){const host=String(value||"").toLowerCase().replace(/^www\./,"").split(":")[0];return SEO_DOMENY.has(host)?host:"";}
 function seoBezpiecznaSciezka(value="/"){const path=String(value||"/").split(/[?#]/)[0].replace(/[\u0000-\u001f\u007f]/g,"").slice(0,180);return path.startsWith("/")?path:"/";}
@@ -5406,39 +5240,6 @@ function seoSledzZamowienie(value,orderId="",items=[]){
   const safeId=String(orderId||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80),key=`artway_seo_order_sent_${safeId||"current"}`;
   try{if(sessionStorage.getItem(key))return;sessionStorage.setItem(key,"1");}catch(e){}
   seoWyslijZdarzenie("order",{value,items:(Array.isArray(items)?items:[]).map(item=>({productId:item?.id||"",units:Number(item?.ilosc)||1,revenue:Number(item?.wartosc)||0}))});
-}
-function seoEfektyOdswiezPanel(options={}){
-  const current=document.querySelector("[data-seo-effects-workspace]");if(!current)return;
-  const fragment=dokumentTymczasowyHTML(seoEfektyPanelHTML()),next=fragment.querySelector("[data-seo-effects-workspace]");if(!next)return;
-  current.replaceWith(next);if(options.focusSearch){const input=next.querySelector("[data-seo-effects-search]");input?.focus();if(input)input.setSelectionRange(input.value.length,input.value.length);}
-}
-async function seoPobierzEfekty(days=seoEfektyStan.days||30,force=false){
-  if(!force&&(seoEfektyStan.loading||Date.now()-seoEfektyStan.loadedAt<60_000))return;
-  const requestId=++seoEfektyRequestId;
-  seoEfektyStan={...seoEfektyStan,loading:true,error:"",days:Number(days)||seoEfektyStan.days||30};seoEfektyOdswiezPanel();
-  try{
-    const params=new URLSearchParams({from:seoEfektyFiltry.from,to:seoEfektyFiltry.to,domain:seoEfektyFiltry.domain,channel:seoEfektyFiltry.channel,days:String(Math.max(1,Math.min(400,Number(days)||30)))});
-    const response=await fetch(`/api/seo/performance?${params}`,{cache:"no-store",headers:chmuraNaglowki(false),credentials:"same-origin"});
-    if(!response.ok)throw new Error(`HTTP ${response.status}`);
-    const data=await response.json();if(requestId!==seoEfektyRequestId)return;seoEfektyStan={...seoEfektyStan,...data,loading:false,loadedAt:Date.now(),error:""};
-  }catch(error){if(requestId!==seoEfektyRequestId)return;seoEfektyStan={...seoEfektyStan,loading:false,loadedAt:Date.now(),error:String(error?.message||error)};}
-  if(trasa()==="/admin/seo/efekty")seoEfektyOdswiezPanel();
-}
-function seoEfektyUstawOkres(preset){
-  const today=seoEfektyDzien(),days=Math.max(1,Math.min(400,Number(preset)||30));seoEfektyFiltry={...seoEfektyFiltry,preset:String(preset),from:seoEfektyPrzesunDzien(today,-(days-1)),to:today};seoEfektyStan.loadedAt=0;void seoPobierzEfekty(days,true);
-}
-function seoEfektyUstawDzien(day){seoEfektyFiltry={...seoEfektyFiltry,preset:"custom",from:day,to:day};seoEfektyStan.loadedAt=0;void seoPobierzEfekty(1,true);}
-function seoEfektyZmienDate(field,value){if(!/^\d{4}-\d{2}-\d{2}$/.test(String(value||"")))return;const next={...seoEfektyFiltry,preset:"custom",[field]:value};if(next.from>next.to){if(field==="from")next.to=value;else next.from=value;}seoEfektyFiltry=next;seoEfektyStan.loadedAt=0;void seoPobierzEfekty(30,true);}
-function seoEfektyUstawFiltr(field,value){if(!["domain","channel"].includes(field))return;seoEfektyFiltry={...seoEfektyFiltry,[field]:String(value||"all")};seoEfektyStan.loadedAt=0;void seoPobierzEfekty(seoEfektyStan.days,true);}
-function seoEfektyUstawMetryke(metric){if(!["landing","product_view","add_to_cart","order","revenue"].includes(metric))return;seoEfektyFiltry={...seoEfektyFiltry,metric};seoEfektyOdswiezPanel();}
-function seoEfektySzukaj(value){seoEfektyFiltry={...seoEfektyFiltry,search:String(value||"")};clearTimeout(seoEfektySearchTimer);seoEfektySearchTimer=setTimeout(()=>seoEfektyOdswiezPanel({focusSearch:true}),180);}
-function seoEfektyWyczyscFiltry(){const today=seoEfektyDzien();seoEfektyFiltry={preset:"30",from:seoEfektyPrzesunDzien(today,-29),to:today,domain:"all",channel:"all",metric:"landing",search:""};seoEfektyStan.loadedAt=0;void seoPobierzEfekty(30,true);}
-function seoEfektyEksportuj(typ="dni"){
-  const state=seoEfektyStan||{},name=`seo-efekty-${typ}-${state.range?.from||seoEfektyFiltry.from}-${state.range?.to||seoEfektyFiltry.to}.csv`;
-  if(typ==="dni")return adminEksportujCSV(name,["dzien","wejscia","karty_produktow","koszyk","zamowienia","sprzedaz","wejscia_do_produktu_proc","koszyk_z_produktu_proc","konwersja_proc","koszyk_do_zamowienia_proc","srednie_zamowienie"],(state.timeline||[]).map(x=>[x.day,x.landing,x.product_view,x.add_to_cart,x.order,x.revenue,x.productViewRate,x.cartRate,x.orderRate,x.cartToOrderRate,x.averageOrderValue]));
-  if(typ==="domeny")return adminEksportujCSV(name,["domena","wejscia","produkty","koszyk","zamowienia","sprzedaz"],Object.entries(state.domains||{}).map(([key,x])=>[key,x.landing,x.product_view,x.add_to_cart,x.order,x.revenue]));
-  if(typ==="kanaly")return adminEksportujCSV(name,["kanal","wejscia","produkty","koszyk","zamowienia","sprzedaz"],Object.entries(state.channels||{}).map(([key,x])=>[key,x.landing,x.product_view,x.add_to_cart,x.order,x.revenue]));
-  return adminEksportujCSV(name,["produkt_id","wyswietlenia","koszyk","zamowienia","sprzedane_sztuki","wartosc_pozycji","skutecznosc_koszyka_proc","konwersja_zamowienia_proc"],(state.products||[]).map(x=>[x.productId,x.views,x.carts,x.orders,x.units,x.revenue,x.effectiveness,x.orderRate]));
 }
 
 /* ═══════════ KOSZYK ═══════════ */

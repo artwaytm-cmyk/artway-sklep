@@ -198,7 +198,9 @@ function testyDiagnostyczne(){
     :stanBazyCentralnej.error||"Połącz backend, aby sprawdzić i zsynchronizować wspólną bazę");
   const ipDiag=stanBramki.inpost||{};
   const avDiag=ipDiag.serviceAvailability||{};
-  dodaj("Integracje","InPost ShipX API",!integracjeSprawdzone?"pending":ipDiag.configured&&ipDiag.authenticated?((avDiag.locker===false||avDiag.courier===false)?"warn":"ok"):"warn",!integracjeSprawdzone?"Trwa kontrola tokenu, organizacji i usług":ipDiag.configured
+  dodaj("Integracje","InPost ShipX API",!integracjeSprawdzone?"pending":ipDiag.configured&&ipDiag.authenticated?((avDiag.locker===false||avDiag.courier===false)?"warn":"ok"):"warn",!integracjeSprawdzone?"Trwa kontrola tokenu, organizacji i usług":ipDiag.testError
+    ?`Konfiguracja jest zapisana, ale ostatni test API nie przeszedł: ${ipDiag.testError}`
+    :ipDiag.configured
     ?`Token i Organization ID są ustawione${ipDiag.geowidgetConfigured?" • Geowidget aktywny":" • brakuje tylko Geowidget"}${ipDiag.webhookConfigured?" • webhook aktywny":" • webhook do konfiguracji"}${avDiag.locker===false?" • brak usługi paczkomatowej":""}${avDiag.courier===false?" • kurier InPost nieaktywny":""}`
     :`Brakuje: ${((ipDiag.missingEnv&&ipDiag.missingEnv.length?ipDiag.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", "))}`);
   const emailDiag=!!stanBramki.email?.authenticated;
@@ -226,7 +228,7 @@ function testyDiagnostyczne(){
 }
 function diagnostykaProblemyDoAgenta(testy=testyDiagnostyczne()){
   return testy
-    .filter(item=>["bad","warn"].includes(item.status)&&item.nazwa!=="Centralny rejestr błędów")
+    .filter(item=>["bad","warn"].includes(item.status)&&item.nazwa!=="Centralny rejestr błędów"&&!(item.nazwa==="InPost ShipX API"&&stanBramki.inpost?.testError))
     .map(item=>({
       level:item.status==="bad"?"blad":"ostrzezenie",
       message:`${item.nazwa}: ${item.szczegoly}`,

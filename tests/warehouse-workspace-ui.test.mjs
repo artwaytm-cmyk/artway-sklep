@@ -28,9 +28,10 @@ test('każda podstrona magazynu używa wspólnego kontekstu i stanu bazy', () =>
 });
 
 test('wspólny wygląd magazynu jest responsywny i ładowany wyłącznie z panelem', () => {
-  const admin = ASSET_BUNDLES.find(bundle => bundle.output === 'assets/admin.css');
+  const admin = ASSET_BUNDLES.find(bundle => bundle.output === 'assets/admin-warehouse.css');
   const publicStyles = ASSET_BUNDLES.find(bundle => bundle.output === 'assets/styles.css');
   assert.ok(admin.sources.includes('src/styles/21-warehouse-workspace.css'));
+  assert.ok(!ASSET_BUNDLES.find(bundle => bundle.output === 'assets/admin.css').sources.includes('src/styles/21-warehouse-workspace.css'));
   assert.ok(!publicStyles.sources.includes('src/styles/21-warehouse-workspace.css'));
   assert.match(styles, /@media\(max-width:760px\)/);
   assert.match(styles, /warehouse-module-links/);

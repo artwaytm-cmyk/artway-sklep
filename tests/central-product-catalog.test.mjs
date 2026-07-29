@@ -293,11 +293,13 @@ test('Asortyment korzysta z paginacji serwerowej i zachowuje tryb awaryjny', asy
 });
 
 test('sklep publiczny używa tej samej centralnej paginacji i pobiera szczegół dopiero po wejściu', async () => {
-  const [cloud, storefront, pull] = await Promise.all([
+  const [cloudCore, cloudPersistence, storefront, pull] = await Promise.all([
     readFile('src/frontend/03-cloud-sync.js', 'utf8'),
+    readFile('src/frontend/03d-cloud-persistence-runtime.js', 'utf8'),
     readFile('src/frontend/06b-storefront-catalog.js', 'utf8'),
     readFile('src/backend/lib/domain/store-data-pull.mjs', 'utf8'),
   ]);
+  const cloud = `${cloudCore}\n${cloudPersistence}`;
   assert.match(cloud, /catalogMode:trybAdmina\?"legacy":"central"/);
   assert.match(cloud, /chmuraKatalogCentralnyPubliczny/);
   assert.match(storefront, /sklepKatalogCentralnyPobierz/);

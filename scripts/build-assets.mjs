@@ -20,6 +20,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/01b-storage-foundation.js',
       'src/frontend/02-runtime-state.js',
       'src/frontend/03-cloud-sync.js',
+      'src/frontend/03d-cloud-persistence-runtime.js',
       'src/frontend/03b-settings-field-mutations.js',
       'src/frontend/03a-company-payments-and-product-ids.js',
       'src/frontend/04-accounts-orders-settings.js',
@@ -31,7 +32,7 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/06a-storefront-home.js',
       'src/frontend/06b-storefront-catalog.js',
       'src/frontend/07b-shipping-integrations.js',
-      'src/frontend/09-seo.js',
+      'src/frontend/09-seo-public.js',
       'src/frontend/09a-seo-analytics.js',
       'src/frontend/17-cart-and-checkout.js',
       'src/frontend/17a-checkout-and-delivery.js',
@@ -84,8 +85,10 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/11-allegro-operations.js',
       'src/frontend/11-allegro-communications.js',
       'src/frontend/11-allegro-workspace.js',
+      'src/frontend/11b-von-halsky-product-quality.js',
       'src/frontend/11b-von-halsky-workspace.js',
       'src/frontend/11-inpost-order-contract-quote.js',
+      'src/frontend/11-store-order-readiness.js',
       'src/frontend/11-store-orders.js',
       'src/frontend/11-agent-ai-workspace.js',
       'src/frontend/11-allegro-settings.js',
@@ -94,6 +97,8 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/12-assortment-index.js',
       'src/frontend/12e-infakt-shipping-billing.js',
       'src/frontend/12-infakt-admin.js',
+      'src/frontend/09-seo.js',
+      'src/frontend/09c-seo-effects-state.js',
       'src/frontend/09b-seo-effects-panel.js',
       'src/frontend/12-warehouse-views.js',
       'src/frontend/12-warehouse-main-view.js',
@@ -151,12 +156,6 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/styles/15-product-actions.css',
       'src/styles/16-supplier-receipt.css',
       'src/styles/17-product-link-review.css',
-      'src/styles/18-warehouse-documents.css',
-      'src/styles/19-warehouse-qr.css',
-      'src/styles/20-warehouse-locations.css',
-      // Nawigacja i układ magazynu są krytyczne dla całego panelu. Trzymamy
-      // je w bazowym arkuszu, aby stara karta nie pokazała surowych linków.
-      'src/styles/21-warehouse-workspace.css',
       'src/styles/22-home-promotions.css',
       'src/styles/23-banner-icon-studio.css',
       'src/styles/24-campaign-studio-pro.css',
@@ -180,6 +179,16 @@ export const ASSET_BUNDLES = Object.freeze([
     output: 'assets/admin-agent.css',
     banner: '/* GENERATED ADMIN AGENT STYLES — loaded on demand */',
     sources: ['src/styles/28-agent-ai-workspace.css', 'src/styles/33-agent-observability.css'],
+  },
+  {
+    output: 'assets/admin-warehouse.css',
+    banner: '/* GENERATED ADMIN WAREHOUSE STYLES — loaded on demand */',
+    sources: [
+      'src/styles/18-warehouse-documents.css',
+      'src/styles/19-warehouse-qr.css',
+      'src/styles/20-warehouse-locations.css',
+      'src/styles/21-warehouse-workspace.css',
+    ],
   },
   {
     output: 'assets/admin-von-halsky.css',
@@ -266,10 +275,15 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
       'src/frontend/11-allegro-operations.js',
       'src/frontend/11-allegro-workspace.js',
       'src/frontend/11-inpost-order-contract-quote.js',
+      'src/frontend/11-store-order-readiness.js',
       'src/frontend/11-store-orders.js',
       'src/frontend/11-agent-ai-workspace.js',
-      'src/frontend/11-allegro-settings.js',
     ],
+  },
+  {
+    output: 'assets/admin-commerce-settings.js',
+    banner: '/* GENERATED ADMIN COMMERCE SETTINGS — loaded only for integration settings */',
+    sources: ['src/frontend/11-allegro-settings.js'],
   },
   {
     output: 'assets/admin-communications.js',
@@ -282,6 +296,7 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
     output: 'assets/admin-von-halsky.js',
     banner: '/* GENERATED ADMIN VON HALSKY — loaded on demand */',
     sources: [
+      'src/frontend/11b-von-halsky-product-quality.js',
       'src/frontend/11b-von-halsky-workspace.js',
     ],
   },
@@ -294,7 +309,6 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
       'src/frontend/12-assortment-index.js',
       'src/frontend/12e-infakt-shipping-billing.js',
       'src/frontend/12-infakt-admin.js',
-      'src/frontend/09b-seo-effects-panel.js',
       'src/frontend/12-warehouse-assortment-card.js',
       'src/frontend/12-warehouse-assortment-view.js',
       'src/frontend/12a-product-actions.js',
@@ -302,6 +316,15 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
       'src/frontend/12c-commerce-catalog-actions.js',
       'src/frontend/13-product-admin.js',
       'src/frontend/13a-product-import-export.js',
+    ],
+  },
+  {
+    output: 'assets/admin-seo.js',
+    banner: '/* GENERATED ADMIN SEO — loaded only for the SEO workspace */',
+    sources: [
+      'src/frontend/09-seo.js',
+      'src/frontend/09c-seo-effects-state.js',
+      'src/frontend/09b-seo-effects-panel.js',
     ],
   },
   {
@@ -350,7 +373,11 @@ async function renderBundle(bundle) {
     const content = await readFile(path.join(ROOT, source), 'utf8');
     return content.replace(/^\uFEFF/, '').replace(/\s+$/u, '');
   }));
-  return `${bundle.banner}\n${parts.join('\n\n')}\n`;
+  const source = `${parts.join('\n\n')}\n`;
+  // Artefakty pozostają czytelne i deterministyczne. Wydajność zapewnia
+  // podział trasowy, kompresja HTTP i cache, a nie zaciemnianie wspólnego
+  // kontraktu globalnych funkcji pomiędzy paczkami.
+  return `${bundle.banner}\n${source.replace(/\s+$/u, '')}\n`;
 }
 
 export async function buildAssets({ check = false } = {}) {

@@ -1,9 +1,9 @@
 /* ═══════════ ROUTER (podstrony) ═══════════ */
 const ADMIN_MODULY_RUNTIME = Object.freeze({
-  core:"admin-core",shell:"admin-shell",ui:"admin-ui",agent:"admin-agent",warehouse:"admin-warehouse",shipping:"admin-shipping",commerce:"admin-commerce",communications:"admin-communications",
-  inventory:"admin-inventory",productEditor:"admin-product-editor",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system",vonHalsky:"admin-von-halsky"
+  core:"admin-core",shell:"admin-shell",ui:"admin-ui",agent:"admin-agent",warehouse:"admin-warehouse",shipping:"admin-shipping",commerce:"admin-commerce",commerceSettings:"admin-commerce-settings",communications:"admin-communications",
+  inventory:"admin-inventory",seo:"admin-seo",productEditor:"admin-product-editor",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system",vonHalsky:"admin-von-halsky"
 });
-const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",commerce:"admin-commerce",vonHalsky:"admin-von-halsky"});
+const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",warehouse:"admin-warehouse",commerce:"admin-commerce",vonHalsky:"admin-von-halsky"});
 const SKLEP_MODULY_RUNTIME = Object.freeze({account:"store-account",content:"store-content"});
 const adminZaladowaneModuly = new Set();
 const adminObietniceModulow = new Map();
@@ -31,7 +31,7 @@ function adminModulyDlaTrasy(route=""){
   const t=String(route||"").split("?")[0],moduly=["core","ui"],add=(...items)=>items.forEach(item=>{if(!moduly.includes(item))moduly.push(item);});
   add("shell");
   if((t.startsWith("/admin")||t==="/diagnostyka")&&typeof jestAdmin==="function"&&!jestAdmin()){add("system");return moduly;}
-  if(t==="/diagnostyka"||t==="/admin/system/diagnostyka")add("agent","warehouse","shipping","commerce","communications","inventory","catalog","personalization","system","vonHalsky");
+  if(t==="/diagnostyka"||t==="/admin/system/diagnostyka")add("agent","warehouse","shipping","commerce","commerceSettings","communications","inventory","seo","catalog","personalization","system","vonHalsky");
   else if(t.startsWith("/admin/system"))add("system");
   else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("shipping","commerce","communications","inventory","system");
   else if(t.startsWith("/admin/agent-ai"))add("agent","warehouse","commerce","communications","inventory","productEditor");
@@ -42,10 +42,10 @@ function adminModulyDlaTrasy(route=""){
   else if(t.startsWith("/admin/wysylki"))add("agent","warehouse","shipping","commerce","inventory");
   else if(t.startsWith("/admin/von-halsky"))add("inventory","vonHalsky");
   else if(["/admin/allegro/komunikacja","/admin/allegro/wiadomosci","/admin/allegro/dyskusje"].includes(t))add("agent","warehouse","commerce","communications","inventory");
-  else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","communications","inventory","productEditor");
+  else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/klient")){add("agent","warehouse","commerce","communications","inventory","productEditor");if(t==="/admin/allegro/ustawienia")add("commerceSettings");}
   else if(t.startsWith("/admin/infakt"))add("inventory");
   else if(t==="/admin/asortyment"||t==="/admin/asortyment/produkty")add("commerce","inventory");
-  else if(t.startsWith("/admin/produkty/edytuj/")||t==="/admin/produkty/dodaj"||t==="/admin/produkty/z-linku")add("agent","commerce","inventory","productEditor");
+  else if(t.startsWith("/admin/produkty/edytuj/")||t==="/admin/produkty/dodaj"||t==="/admin/produkty/z-linku")add("agent","commerce","inventory","seo","productEditor");
   else if(t.startsWith("/admin/asortyment")||t.startsWith("/admin/produkty")||t==="/admin/kategorie"||t==="/admin/mapowanie"||t==="/admin/opinie"){
     add("commerce","inventory","catalog");
     if(t==="/admin/asortyment/rabaty")add("personalization");
@@ -56,7 +56,7 @@ function adminModulyDlaTrasy(route=""){
   }
   else if(t.startsWith("/admin/eksport"))add("inventory","catalog","personalization");
   else if(t.startsWith("/admin/aktualizacja")||t.startsWith("/admin/publikacja"))add("system");
-  else if(t.startsWith("/admin/seo"))add("inventory");
+  else if(t.startsWith("/admin/seo"))add("inventory","seo");
   else if(t.startsWith("/admin"))add("agent","warehouse","commerce","inventory","catalog","personalization","system");
   return moduly;
 }

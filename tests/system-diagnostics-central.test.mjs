@@ -104,6 +104,21 @@ test('rozwiązany problem wraca automatycznie po ponownym wystąpieniu', async (
   assert.equal(record().items[0].count, 2);
 });
 
+test('udany test integracji automatycznie zamyka powiązany błąd backendu i kontrolę autotestu', async () => {
+  const { service, record } = fixture();
+  await service.record([
+    { level: 'ostrzezenie', message: 'inpost_network_error: Nie udało się połączyć z InPost ShipX.', source: 'backend:inpost-test', route: '/api/store', kind: 'backend' },
+    { level: 'ostrzezenie', message: 'InPost ShipX API: konfiguracja zapisana, test nieudany', source: 'autotest:Integracje', route: '/#/admin/system/diagnostyka', kind: 'autotest' },
+  ], { trusted: true });
+  const result = await service.resolveMatching([
+    { source: 'backend:inpost-test', route: '/api/store' },
+    { source: 'autotest:Integracje', messageIncludes: 'InPost ShipX API' },
+  ], { resolution: 'Ponowny test InPost zakończył się powodzeniem.' });
+  assert.equal(result.changed, 2);
+  assert.ok(record().items.every((item) => item.status === 'resolved'));
+  assert.ok(record().items.every((item) => /powodzeniem/i.test(item.resolution)));
+});
+
 test('powtórne wysłanie starego zdarzenia nie otwiera ponownie rozwiązanego problemu', async () => {
   const { service, record } = fixture();
   const event = {

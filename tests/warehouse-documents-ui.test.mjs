@@ -83,9 +83,11 @@ test('PZ i WZ wybierają półkę z mapy zamiast z długiej listy rozwijanej', a
 
 test('moduł i responsywne style są częścią budowanego panelu administratora', () => {
   const admin = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.js');
-  const styles = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.css');
+  const baseStyles = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.css');
+  const warehouseStyles = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin-warehouse.css');
   assert.ok(admin.sources.includes('src/frontend/10-warehouse-documents.js'));
-  assert.ok(styles.sources.includes('src/styles/18-warehouse-documents.css'));
+  assert.ok(warehouseStyles.sources.includes('src/styles/18-warehouse-documents.css'));
+  assert.ok(!baseStyles.sources.includes('src/styles/18-warehouse-documents.css'));
 });
 
 test('telefon ma stały, prosty pasek obsługi aktywnego dokumentu', async () => {

@@ -221,7 +221,7 @@ async function testujInPost(cicho=false){
     if(!maUprawnieniaZapisuChmury()){ if(!cicho)chmuraUstawToken(); return false; }
     const d=await chmura("inpost-test",{timeout:15000});
     const ip=d.inpost||cfg||{};
-    stanBramki={...stanBramki,inpost:ip,error:""};
+    stanBramki={...stanBramki,inpost:{...ip,testError:"",lastTestAt:new Date().toISOString()},error:""};
     const org=ip.organization?.id?` • organizacja ${ip.organization.id}`:"";
     const uslugi=ip.organization?.services?.length?` • usługi: ${ip.organization.services.slice(0,3).join(", ")}`:"";
     const av=ip.serviceAvailability||{};
@@ -232,7 +232,7 @@ async function testujInPost(cicho=false){
     return true;
   }catch(bl){
     const ip=bl.inpost||stanBramki.inpost||{};
-    stanBramki={...stanBramki,inpost:ip,error:bl.message};
+    stanBramki={...stanBramki,inpost:{...ip,authenticated:false,testError:String(bl.message||"Test API nieudany"),testErrorCode:String(bl.code||"inpost_test_failed"),lastTestAt:new Date().toISOString()},error:bl.message};
     if(!cicho){
       if(bl.code==="inpost_not_configured") toast("InPost niegotowy — brakuje: "+((bl.missingEnv&&bl.missingEnv.length?bl.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", ")));
       else toast("Test InPost: "+bl.message);

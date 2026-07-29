@@ -1,33 +1,4 @@
 /* GENERATED ADMIN VON HALSKY — loaded on demand */
-const vonHalskyStan={
-  loaded:false,loading:false,error:"",lastLoadAttemptAt:"",config:{configured:false,missingEnv:[]},
-  settings:{integrationMethod:"api",integrator:"",channelAlias:"VH",merchantStoreName:"Artway-TM",notificationEmail:"",minimumStock:1,maximumStock:25,syncIntervalMinutes:15,automaticPriceSync:true,automaticStockSync:true,automaticResume:true,agentPreparationEnabled:true,agentCategoryAutoMatchEnabled:true,agentAttributeAutoMatchEnabled:true,agentMinimumConfidence:.82,newOfferPublicationMode:"manual_selection",catalogAutomationEnabled:false,customerZone:true,onboarding:{}},
-  sync:{status:"not_connected",lastConnectionAt:null,lastCatalogAt:null,lastCatalogCount:0,lastOrdersAt:null,lastError:"",lastRequestId:""},
-  diagnostics:[],offers:[],orders:[],returns:[],claims:[],events:[],commands:[],categories:[],preview:null,operation:"",
-  preparation:{active:false,total:0,completed:0,currentIndex:0,currentProductId:"",currentName:"",startedAt:"",finishedAt:"",results:[],error:""}
-};
-let vonHalskySzukaj="",vonHalskyEtap="wszystkie",vonHalskyFiltr="wszystkie",vonHalskyAgentFiltr="wszystkie",vonHalskyStatusKanalu="wszystkie",vonHalskyDostepnosc="wszystkie",vonHalskyProducent="wszyscy",vonHalskyKategoria="wszystkie",vonHalskyProblem="wszystkie",vonHalskyCena="wszystkie",vonHalskySort="jakosc",vonHalskyStrona=1,vonHalskyNaStronie=25;
-const vonHalskyZaznaczone=new Set();
-const vonHalskyAgentWToku=new Set();
-let vonHalskyProduktyRenderCache=null,vonHalskyOcenaRenderCache=new WeakMap();
-
-async function vonHalskyLaduj(force=false){
-  if(vonHalskyStan.loading||(!force&&vonHalskyStan.loaded))return;
-  vonHalskyStan.loading=true;vonHalskyStan.error="";vonHalskyStan.lastLoadAttemptAt=new Date().toISOString();
-  try{
-    const data=await chmura("von-halsky-overview",{timeout:20000});
-    Object.assign(vonHalskyStan,{loaded:true,config:data.config||{},settings:{...vonHalskyStan.settings,...(data.settings||{})},sync:data.sync||vonHalskyStan.sync,diagnostics:Array.isArray(data.diagnostics)?data.diagnostics:[],offers:Array.isArray(data.offers)?data.offers:[],orders:Array.isArray(data.orders)?data.orders:[],returns:Array.isArray(data.returns)?data.returns:[],claims:Array.isArray(data.claims)?data.claims:[],events:Array.isArray(data.events)?data.events:[],commands:Array.isArray(data.commands)?data.commands:[],updatedAt:data.updatedAt||null});
-  }catch(error){
-    // Nie uruchamiamy automatycznie kolejnego żądania przy każdym renderze.
-    // Gdy API jest chwilowo niedostępne, zachowujemy ostatni stan widoku,
-    // pokazujemy błąd i czekamy na świadome użycie „Odśwież status”.
-    vonHalskyStan.loaded=true;
-    vonHalskyStan.error=String(error?.message||error);
-  }
-  vonHalskyStan.loading=false;
-  if(String(trasa()).startsWith("/admin/von-halsky"))renderuj();
-}
-
 function vonHalskyPrezentacjaProduktu(product={}){
   const custom=String(product.vonHalskyContentMode||"").toLowerCase()==="custom";
   const storeName=String(product.nazwa||product.name||"").trim(),storeShort=String(product.opisKrotki||product.krotkiOpis||product.shortDescription||"").trim(),storeLong=String(product.opis||product.dlugiOpis||product.description||"").trim();
@@ -86,6 +57,36 @@ function vonHalskyProdukty(){
   vonHalskyProduktyRenderCache=produktyDoAdministracji().filter(product=>!czyProduktAdminWKoszu(product)&&!deleted.has(String(product.id)));
   return vonHalskyProduktyRenderCache;
 }
+
+const vonHalskyStan={
+  loaded:false,loading:false,error:"",lastLoadAttemptAt:"",config:{configured:false,missingEnv:[]},
+  settings:{integrationMethod:"api",integrator:"",channelAlias:"VH",merchantStoreName:"Artway-TM",notificationEmail:"",minimumStock:1,maximumStock:25,syncIntervalMinutes:15,automaticPriceSync:true,automaticStockSync:true,automaticResume:true,agentPreparationEnabled:true,agentCategoryAutoMatchEnabled:true,agentAttributeAutoMatchEnabled:true,agentMinimumConfidence:.82,newOfferPublicationMode:"manual_selection",catalogAutomationEnabled:false,customerZone:true,onboarding:{}},
+  sync:{status:"not_connected",lastConnectionAt:null,lastCatalogAt:null,lastCatalogCount:0,lastOrdersAt:null,lastError:"",lastRequestId:""},
+  diagnostics:[],offers:[],orders:[],returns:[],claims:[],events:[],commands:[],categories:[],preview:null,operation:"",
+  preparation:{active:false,total:0,completed:0,currentIndex:0,currentProductId:"",currentName:"",startedAt:"",finishedAt:"",results:[],error:""}
+};
+let vonHalskySzukaj="",vonHalskyEtap="wszystkie",vonHalskyFiltr="wszystkie",vonHalskyAgentFiltr="wszystkie",vonHalskyStatusKanalu="wszystkie",vonHalskyDostepnosc="wszystkie",vonHalskyProducent="wszyscy",vonHalskyKategoria="wszystkie",vonHalskyProblem="wszystkie",vonHalskyCena="wszystkie",vonHalskySort="jakosc",vonHalskyStrona=1,vonHalskyNaStronie=25;
+const vonHalskyZaznaczone=new Set();
+const vonHalskyAgentWToku=new Set();
+let vonHalskyProduktyRenderCache=null,vonHalskyOcenaRenderCache=new WeakMap();
+
+async function vonHalskyLaduj(force=false){
+  if(vonHalskyStan.loading||(!force&&vonHalskyStan.loaded))return;
+  vonHalskyStan.loading=true;vonHalskyStan.error="";vonHalskyStan.lastLoadAttemptAt=new Date().toISOString();
+  try{
+    const data=await chmura("von-halsky-overview",{timeout:20000});
+    Object.assign(vonHalskyStan,{loaded:true,config:data.config||{},settings:{...vonHalskyStan.settings,...(data.settings||{})},sync:data.sync||vonHalskyStan.sync,diagnostics:Array.isArray(data.diagnostics)?data.diagnostics:[],offers:Array.isArray(data.offers)?data.offers:[],orders:Array.isArray(data.orders)?data.orders:[],returns:Array.isArray(data.returns)?data.returns:[],claims:Array.isArray(data.claims)?data.claims:[],events:Array.isArray(data.events)?data.events:[],commands:Array.isArray(data.commands)?data.commands:[],updatedAt:data.updatedAt||null});
+  }catch(error){
+    // Nie uruchamiamy automatycznie kolejnego żądania przy każdym renderze.
+    // Gdy API jest chwilowo niedostępne, zachowujemy ostatni stan widoku,
+    // pokazujemy błąd i czekamy na świadome użycie „Odśwież status”.
+    vonHalskyStan.loaded=true;
+    vonHalskyStan.error=String(error?.message||error);
+  }
+  vonHalskyStan.loading=false;
+  if(String(trasa()).startsWith("/admin/von-halsky"))renderuj();
+}
+
 function vonHalskyEtapOferty(product={},quality=vonHalskyOcenaProduktu(product)){
   const status=String(quality.offerStatus||"").toUpperCase();
   if(!quality.dostepny||["CLOSED","SOLDOUT","INACTIVE"].includes(status))return "wstrzymane";

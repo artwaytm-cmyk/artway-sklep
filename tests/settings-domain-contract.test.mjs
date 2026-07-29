@@ -58,7 +58,7 @@ test('trasa HTTP przyjmuje i wersjonuje plan cyklu Agenta', async () => {
 });
 
 test('stały błąd domeny nie tworzy pętli zapisu co 1,2 sekundy', async () => {
-  const frontend = await readFile('src/frontend/03-cloud-sync.js', 'utf8');
+  const frontend = `${await readFile('src/frontend/03-cloud-sync.js', 'utf8')}\n${await readFile('src/frontend/03d-cloud-persistence-runtime.js', 'utf8')}`;
   assert.match(frontend, /CHMURA_ODRZUCONA_DOMENA_RETRY_MS = 15\*60\*1000/);
   assert.match(frontend, /Number\(e\.status\)===422/);
   assert.match(frontend, /chmuraWstrzymaneDomeny\.set\(key,Date\.now\(\)\+CHMURA_ODRZUCONA_DOMENA_RETRY_MS\)/);

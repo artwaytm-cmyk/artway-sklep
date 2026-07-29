@@ -574,7 +574,6 @@ const supplierOrderRoute = createSupplierOrderRoute({
   syncProcurement: synchronizujEtapyZakupoweZlecen,
   text: tekst,
 });
-
 function czyAdmin(request, url) {
   return czyAdminToken(request, url) || requestSession(request)?.role === 'admin';
 }
@@ -583,14 +582,12 @@ function ograniczRuch(request, name, limit, windowMs) {
   if (result.ok) return null;
   return odpowiedz({ ok: false, error: 'Zbyt wiele prób. Spróbuj ponownie później.', code: 'rate_limit', retryAfter: result.retryAfter }, 429);
 }
-
 const inventoryStockRoute = createInventoryStockRoute({ isAdmin: czyAdmin, rateLimit: ograniczRuch, readVersioned: czytajWersjonowane, reconciliation: storeOrderSupplierReconciliation, refreshOrderReadiness: () => allegroPrzeliczZamowieniaPoMapowaniu({ reconcile: false, source: 'warehouse-document-confirm' }), respond: odpowiedz, sessionOf: requestSession, settingsLimit: LIMIT_USTAWIEN, writeIfVersion: zapiszJesliWersja, mergeSettings: (data) => productLinkImport.mergeSettings(data) });
 const inventoryDecisionRoute = createInventoryDecisionRoute({ decisions: inventoryDecisions, isAdmin: czyAdmin, rateLimit: ograniczRuch, readVersioned: czytajWersjonowane, reconciliation: storeOrderSupplierReconciliation, respond: odpowiedz, sessionOf: requestSession, text: tekst });
 const {
   customerProfile: profilKlienta,
   safeReview: bezpiecznaOpinia,
 } = createStoreDataInputSanitizers(tekst);
-
 function producentEmailZlecenia(order = {}, supplier = {}) {
   return renderSupplierOrderEmail(order, supplier);
 }
@@ -3751,7 +3748,10 @@ export default async (req) => {
     if (allegroMappingResponse) return allegroMappingResponse;
 
     const inpostResponse = await inpostRoute(req, url, action);
-    if (inpostResponse) return inpostResponse;
+    if (inpostResponse) {
+      if (action === 'inpost-test' && inpostResponse.status < 400) { const inpostChecks = [{ source: 'backend:inpost-test', route: url.pathname }, { source: 'autotest:Integracje', messageIncludes: 'InPost ShipX API' }]; await systemDiagnostics.resolveMatching(inpostChecks, { actor: requestSession(req)?.email || 'automatyczny test InPost', resolution: 'Ponowny test serwerowy potwierdził token, organizację i dostępność API InPost ShipX.' }).catch(() => {}); }
+      return inpostResponse;
+    }
     const inpostServiceShipmentResponse = await inpostServiceShipmentRoute(req, url, action);
     if (inpostServiceShipmentResponse) return inpostServiceShipmentResponse;
     const vonHalskyResponse = await vonHalskyRoute(req, url, action);
@@ -3769,7 +3769,7 @@ export default async (req) => {
     const status = Number(e?.status) >= 400 && Number(e?.status) < 600 ? Number(e.status) : 500;
     if (status >= 500) {
       await systemDiagnostics.record([{
-        level: 'blad',
+        level: e?.transient ? 'ostrzezenie' : 'blad',
         message: `${e?.code || 'server_error'}: ${e?.message || String(e)}`,
         source: `backend:${action}`,
         route: url.pathname,

@@ -24,7 +24,7 @@ test('wygenerowane assets odpowiadają modułom źródłowym', async () => {
 });
 
 test('każdy źródłowy moduł widoku i stylu należy do jawnej paczki', async () => {
-  const declared = new Set(ASSET_BUNDLES.flatMap((bundle) => bundle.sources));
+  const declared = new Set([...ASSET_BUNDLES, ...ADMIN_RUNTIME_BUNDLES].flatMap((bundle) => bundle.sources));
   const frontendSources = [
     ...(await sourceFiles('src/frontend')),
     ...(await sourceFiles('src/styles')),

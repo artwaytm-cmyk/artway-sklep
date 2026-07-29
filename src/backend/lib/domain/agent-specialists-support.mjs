@@ -6,75 +6,11 @@ import { decisionFingerprint, decisionSubjectKey, normalizeDecisionReceipt } fro
 import { professionalDescriptionQuality } from './product-content-layout.mjs';
 import { editorialProductContentReport, editorialSourceNoiseReport } from './product-editorial-safety.mjs';
 import { SPECIALISTS } from './agent-specialist-definitions.mjs';
-import { SPECIALIST_PLAYBOOK_VERSION } from './agent-specialist-playbooks.mjs';
-
-const STATE_KEY = 'agent_specialists_state';
-const MAX_HISTORY = 240;
-const MAX_DECISIONS = 240;
-const MAX_DECISION_RECEIPTS = 2000;
-const MAX_WRITE_ATTEMPTS = 8;
-const DEFAULT_CONFIG = Object.freeze({
-  enabled: true,
-  automaticEnabled: true,
-  // Tymczasowo brak sztucznych limitów liczby uruchomień i tokenów.
-  // Nadal obowiązują blokady duplikatów, cache identycznych wejść oraz
-  // pojedynczy wykonawca cyklu, więc wyłączenie limitu nie powoduje
-  // wielokrotnego wykonywania tego samego zadania.
-  limitsEnabled: false,
-  dailyLimit: 240,
-  automaticDailyLimit: 80,
-  automaticBatchSize: 3,
-  automaticInputTokenLimit: 180_000,
-  automaticOutputTokenLimit: 70_000,
-  cacheHours: 72,
-  safeAutoApply: true,
-  autoApplyProductEditorial: true,
-  autoUpdateLinkedAllegroContent: true,
-  autoPrepareCustomerReplyDrafts: true,
-  autoAuditCatalogIdentity: true,
-  confidenceThreshold: 0.92,
-  learningEnabled: true,
-  approvalWarmupCount: 0,
-  learnedAutoApplyThreshold: 0.86,
-  decisionRetentionDays: 30,
-});
-
-const PROMPT_VERSION = SPECIALIST_PLAYBOOK_VERSION;
-const PRODUCT_OUTPUT_TO_FIELD = Object.freeze({ title: 'nazwa', short_description: 'opisKrotki', long_description: 'opis', seo_title: 'seoTitle', seo_description: 'seoDescription', seo_keywords: 'seoKeywords', allegro_title: 'allegroTitle', allegro_description: 'allegroDescription', von_halsky_title: 'vonHalskyTitle', von_halsky_short_description: 'vonHalskyShortDescription', von_halsky_description: 'vonHalskyDescription' });
-
-const RESULT_SCHEMA = Object.freeze({
-  type: 'object',
-  properties: {
-    title: { type: 'string', description: 'Krótka nazwa przygotowanego szkicu.' },
-    summary: { type: 'string', description: 'Jednozdaniowe podsumowanie wykonanej pracy.' },
-    content: { type: 'string', description: 'Główna treść szkicu albo najważniejszy rezultat.' },
-    fields: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          key: { type: 'string' },
-          label: { type: 'string' },
-          value: { type: 'string' },
-          current_value: { type: 'string', description: 'Bieżąca wartość przekazana w faktach albo pusty tekst.' },
-          reason: { type: 'string', description: 'Konkretna przyczyna proponowanej zmiany.' },
-          evidence: { type: 'string', description: 'Fakt źródłowy będący podstawą zmiany albo informacja, że jest to redakcja istniejącej treści.' },
-        },
-        required: ['key', 'label', 'value', 'current_value', 'reason', 'evidence'],
-        additionalProperties: false,
-      },
-    },
-    suggestions: { type: 'array', items: { type: 'string' } },
-    warnings: { type: 'array', items: { type: 'string' } },
-    missingFacts: { type: 'array', items: { type: 'string' } },
-    factsUsed: { type: 'array', items: { type: 'string' } },
-    confidence: { type: 'number', minimum: 0, maximum: 1 },
-    readyForApproval: { type: 'boolean' },
-    complianceStatus: { type: 'string', enum: ['ready', 'needs_review', 'blocked_missing_facts'] },
-  },
-  required: ['title', 'summary', 'content', 'fields', 'suggestions', 'warnings', 'missingFacts', 'factsUsed', 'confidence', 'readyForApproval', 'complianceStatus'],
-  additionalProperties: false,
-});
+import {
+  DEFAULT_CONFIG, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_HISTORY, MAX_WRITE_ATTEMPTS,
+  PRODUCT_OUTPUT_TO_FIELD, PROMPT_VERSION, RESULT_SCHEMA, STATE_KEY,
+} from './agent-specialists-contract.mjs';
+import { evaluateProductEditorialAutomaticEligibility } from './agent-editorial-eligibility.mjs';
 
 function clean(value = '', limit = 1000) {
   return String(value ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, limit);
@@ -625,52 +561,7 @@ function productEditorialState(product = {}) {
 }
 
 function productEditorialAutomaticEligibility(product = {}, editorial = productEditorialState(product)) {
-  const offerId = clean(product.allegroOfferId || product.offerId || product?._catalog?.channels?.allegro?.offerId, 120);
-  const offerStatus = clean(
-    product.allegroStatus || product.allegroPublicationStatus || product?._catalog?.channels?.allegro?.status,
-    80,
-  ).toUpperCase();
-  const activeListing = Boolean(offerId) && !['ENDED', 'INACTIVE', 'ARCHIVED', 'DELETED'].includes(offerStatus);
-  const explicitRequest = product.forceEditorialRefresh === true
-    || product.allegroPublicationIntent === true
-    || ['queued', 'preparing'].includes(clean(product.allegroAgentPreparationStatus || product.allegroPreparationStatus, 40).toLowerCase());
-  const complianceRepair = Boolean(
-    clean(product.allegroComplianceError || product.allegroPublicationLastErrorCode, 300)
-    || (!activeListing && ['failed', 'needs_attention'].includes(clean(product.allegroAgentPreparationStatus, 40).toLowerCase())),
-  );
-  const receipt = product.contentEditorial && typeof product.contentEditorial === 'object' ? product.contentEditorial : {};
-  const channelStates = receipt.channelStates && typeof receipt.channelStates === 'object' ? receipt.channelStates : {};
-  const hasEditorialReceipt = Boolean(clean(receipt.inputFingerprint, 160)) || Object.keys(channelStates).length > 0;
-  // Zmiana wersji promptu nie jest zmianą produktu. Osobny odcisk materiału
-  // źródłowego zapobiega przepisywaniu poprawnych ofert po aktualizacji Agenta.
-  const savedSourceFingerprint = clean(receipt.sourceFingerprint, 160);
-  const sourceChanged = Boolean(savedSourceFingerprint)
-    && savedSourceFingerprint !== clean(editorial.sourceFingerprint, 160);
-  const sourceUpdateQueued = clean(receipt.status, 60).toLowerCase() === 'queued'
-    && clean(receipt.queuedReason, 100).toLowerCase() === 'source_updated';
-  const hasStoredAllegroContent = Boolean(
-    clean(product.allegroTitle, 300)
-    && clean(product.allegroDescription, 30_000),
-  );
-  const unsafeExistingContent = hasStoredAllegroContent
-    && !allegroContentCompliance({
-      allegroTitle: product.allegroTitle,
-      allegroDescription: product.allegroDescription,
-    }).ok;
-  if (editorial.current) return { eligible: false, reason: 'editorial_current', activeListing };
-  if (!activeListing) return { eligible: true, reason: explicitRequest ? 'explicit_request' : 'not_listed_or_inactive', activeListing };
-  if (explicitRequest) return { eligible: true, reason: 'explicit_request', activeListing };
-  if (complianceRepair) return { eligible: true, reason: 'compliance_or_publication_repair', activeListing };
-  if (unsafeExistingContent) return { eligible: true, reason: 'unsafe_existing_content', activeListing };
-  if (sourceUpdateQueued || sourceChanged) return { eligible: true, reason: 'source_changed_after_editorial', activeListing };
-  // Aktywne, poprawnie powiązane oferty pozostają w lekkiej kontroli statusu.
-  // Brak nowego technicznego pokwitowania albo sama zmiana promptu nie może
-  // ponownie uruchamiać kosztownej redakcji treści.
-  return {
-    eligible: false,
-    reason: hasEditorialReceipt ? 'active_listing_verification_only' : 'legacy_active_listing_grandfathered',
-    activeListing,
-  };
+  return evaluateProductEditorialAutomaticEligibility(product, editorial);
 }
 
 function providerQuotaUnavailable(error) {

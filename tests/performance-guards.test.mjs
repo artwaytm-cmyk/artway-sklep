@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 test('ciężka synchronizacja działa co 15 minut i nie odświeża widoku bez zmian', async () => {
-  const cloud = await readFile('src/frontend/03-cloud-sync.js', 'utf8');
+  const cloud = `${await readFile('src/frontend/03-cloud-sync.js', 'utf8')}\n${await readFile('src/frontend/03d-cloud-persistence-runtime.js', 'utf8')}`;
   const shipping = await readFile('assets/app.js', 'utf8');
   const allegro = await readFile('src/frontend/11-allegro-refresh-runtime.js', 'utf8');
   assert.match(cloud, /const CHMURA_AUTO_SYNC_MS = 15\*60\*1000;/);
@@ -42,11 +42,13 @@ test('techniczne przywracanie pozycji panelu nie uruchamia kosztownego płynnego
 });
 
 test('powtórne wejście do panelu pobiera tylko rewizję zamiast wielomegabajtowego snapshotu', async () => {
-  const [cloud, backend, pull] = await Promise.all([
+  const [cloudCore, cloudPersistence, backend, pull] = await Promise.all([
     readFile('src/frontend/03-cloud-sync.js', 'utf8'),
+    readFile('src/frontend/03d-cloud-persistence-runtime.js', 'utf8'),
     readFile('src/backend/lib/store-data-route.mjs', 'utf8'),
     readFile('src/backend/lib/domain/store-data-pull.mjs', 'utf8'),
   ]);
+  const cloud = `${cloudCore}\n${cloudPersistence}`;
   assert.match(cloud, /settingsRev:lokalnaRewizja/);
   assert.match(pull, /settings_unchanged: true/);
   assert.match(pull, /excluded\.includes\(key\)/);
@@ -59,7 +61,7 @@ test('powtórne wejście do panelu pobiera tylko rewizję zamiast wielomegabajto
 });
 
 test('importowany katalog ma trwały cache IndexedDB i nie wraca z API po każdym uruchomieniu', async () => {
-  const cloud = await readFile('src/frontend/03-cloud-sync.js', 'utf8');
+  const cloud = `${await readFile('src/frontend/03-cloud-sync.js', 'utf8')}\n${await readFile('src/frontend/03d-cloud-persistence-runtime.js', 'utf8')}`;
   assert.match(cloud, /const CHMURA_KATALOG_CACHE_DB = "artway-runtime-cache"/);
   assert.match(cloud, /indexedDB\.open\(CHMURA_KATALOG_CACHE_DB,1\)/);
   assert.match(cloud, /String\(cache\.revision\|\|""\)===revision/);
@@ -83,7 +85,7 @@ test('moduły aktywnej podstrony panelu są pobierane deterministycznie po rdzen
 test('lista asortymentu nie ładuje agenta, magazynu ani narzędzi katalogowych', async () => {
   const router = await readFile('assets/app.js', 'utf8');
   assert.match(router, /t==="\/admin\/asortyment"\|\|t==="\/admin\/asortyment\/produkty"\)add\("commerce","inventory"\)/);
-  assert.match(router, /t\.startsWith\("\/admin\/produkty\/edytuj\/"\).*add\("agent","commerce","inventory","productEditor"\)/);
+  assert.match(router, /t\.startsWith\("\/admin\/produkty\/edytuj\/"\).*add\("agent","commerce","inventory","seo","productEditor"\)/);
 });
 
 test('lekkie podstrony lokalizacji i QR nie uruchamiają Allegro, Agenta ani całego edytora', async () => {

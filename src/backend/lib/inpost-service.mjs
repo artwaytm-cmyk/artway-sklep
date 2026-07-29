@@ -53,6 +53,34 @@ export function createInpostService({ read, write, onOrderStatusTransition }) {
       optionalEnv: ['INPOST_GEOWIDGET_TOKEN', 'INPOST_WEBHOOK_SECRET', 'INPOST_ENV=production', 'INPOST_SENDING_METHOD=parcel_locker', 'INPOST_LOCKER_SERVICE', 'INPOST_COURIER_SERVICE'],
     };
   }
+  function inpostBladSieci(error) {
+    const causeCode = tekst(error?.cause?.code || error?.code || '', 80).trim();
+    const timeout = error?.name === 'TimeoutError' || error?.name === 'AbortError'
+      || /timeout/i.test(`${causeCode} ${error?.message || ''}`);
+    const message = timeout
+      ? 'InPost ShipX nie odpowiedział w wymaganym czasie.'
+      : 'Nie udało się połączyć z InPost ShipX.';
+    const detail = causeCode ? ` Kod połączenia: ${causeCode}.` : '';
+    const failure = new Error(`${message}${detail} Test zostanie bezpiecznie ponowiony; token nie został ujawniony ani zmieniony.`);
+    failure.code = 'inpost_network_error';
+    failure.status = 503;
+    failure.transient = true;
+    failure.causeCode = causeCode;
+    return failure;
+  }
+  async function inpostFetch(url, options = {}, { retry = false } = {}) {
+    const attempts = retry ? 2 : 1;
+    let lastError = null;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await fetch(url, { ...options, signal: AbortSignal.timeout(15_000) });
+      } catch (error) {
+        lastError = error;
+        if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+    throw inpostBladSieci(lastError);
+  }
   async function inpostWywolaj(path, { method = 'GET', bodyObj = null, accept = 'application/json' } = {}) {
     const c = inpostKonfiguracja();
     if (!c.configured) {
@@ -72,7 +100,11 @@ export function createInpostService({ read, write, onOrderStatusTransition }) {
     };
     const body = bodyObj === null ? undefined : JSON.stringify(bodyObj);
     if (body) headers['Content-Type'] = 'application/json';
-    const r = await fetch(new URL(path, c.baseUrl).toString(), { method, headers, body });
+    const r = await inpostFetch(
+      new URL(path, c.baseUrl).toString(),
+      { method, headers, body },
+      { retry: method === 'GET' },
+    );
     const ct = r.headers.get('content-type') || '';
     if (accept === 'application/pdf' || ct.includes('application/pdf') || ct.includes('octet-stream')) {
       if (!r.ok) {

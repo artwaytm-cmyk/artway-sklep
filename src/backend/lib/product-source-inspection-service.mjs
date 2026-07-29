@@ -3,6 +3,7 @@ import { createProductSourceMatching } from './product-source-matching.mjs';
 import { synchronizeProductIdentifierAliases } from './domain/product-identifiers.mjs';
 import { SOURCE_IMAGE_POLICY_VERSION } from './domain/source-product-images.mjs';
 import { responsibleProducerFromSourceText } from './domain/von-halsky-responsible-producer.mjs';
+import { createProductSourceResultCache, productSourceCacheKey } from './product-source-result-cache.mjs';
 
 export function createProductSourceInspectionService({ read, write, normalizeKey, nameSimilarity }) {
   const czytaj = read;
@@ -556,58 +557,16 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
   async function inspectProductUrlViaReader(target = '') {
     return pobierzProduktZCzytnika(target);
   }
-  function kluczCacheLinkuProduktu(value = '') {
-    try {
-      const raw = String(value || '').trim().replace(/https\/\//gi, 'https://').replace(/http\/\//gi, 'http://');
-      const u = new URL(raw);
-      ['query_id', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid'].forEach((key) => u.searchParams.delete(key));
-      u.hash = '';
-      return u.toString().replace(/\/$/, '').toLowerCase();
-    } catch { return String(value || '').trim().toLowerCase(); }
-  }
-  function aliasyCacheWynikuLinku(target = '', result = {}) {
-    return [...new Set([
-      target,
-      result.requestedUrl,
-      result.resolvedUrl,
-      result.canonicalUrl,
-      ...(Array.isArray(result.alternatives) ? result.alternatives.flatMap((x) => [x?.url, x?.product?.sourceUrl, x?.product?.producentUrl]) : []),
-    ].map(kluczCacheLinkuProduktu).filter(Boolean))].slice(0, 20);
-  }
-  async function pobierzProduktProducentaZPamiecia(target = '') {
-    const cacheRec = await czytaj('product_url_cache', { items: {}, updated_at: null });
-    const items = cacheRec.items && typeof cacheRec.items === 'object' ? { ...cacheRec.items } : {};
-    const key = kluczCacheLinkuProduktu(target);
-    try {
-      const result = await pobierzProduktProducenta(target);
-      const now = new Date().toISOString();
-      items[key] = { key, aliases: aliasyCacheWynikuLinku(target, result), fetchedAt: now, result };
-      const trimmed = Object.fromEntries(Object.entries(items).sort((a, b) => String(b[1]?.fetchedAt || '').localeCompare(String(a[1]?.fetchedAt || ''))).slice(0, 250));
-      await zapisz('product_url_cache', { items: trimmed, updated_at: now });
-      return { ...result, fromCache: false, cacheSavedAt: now };
-    } catch (error) {
-      const cached = items[key] || Object.values(items).find((x) => Array.isArray(x?.aliases) && x.aliases.includes(key));
-      const ageMs = cached?.fetchedAt ? Date.now() - new Date(cached.fetchedAt).getTime() : Infinity;
-      if (cached?.result && ageMs <= 30 * 86400000 && ['product_link_unavailable', 'fetch_error'].includes(String(error?.code || 'product_link_unavailable'))) {
-        const previous = cached.result;
-        return {
-          ...previous,
-          fromCache: true,
-          stale: true,
-          cacheSavedAt: cached.fetchedAt,
-          cacheAgeHours: Math.max(0, Math.round(ageMs / 360000) / 10),
-          diagnostics: {
-            ...(previous.diagnostics || {}),
-            cacheFallback: true,
-            retryRecommended: true,
-            liveFailure: { message: tekst(error?.message || error, 500), code: tekst(error?.code || '', 120), attempts: error?.linkDiagnostics?.attempts || [] },
-          },
-        };
-      }
-      throw error;
-    }
-  }
-  const { produktLinkDuplikaty, produktLinkKategoriaSklepu } = createProductSourceMatching({ normalizeKey: allegroNormalizujKlucz, nameSimilarity: allegroPodobienstwoIstotne, cacheKey: kluczCacheLinkuProduktu });
+  const pobierzProduktProducentaZPamiecia = createProductSourceResultCache({
+    read: czytaj,
+    write: zapisz,
+    inspectLive: pobierzProduktProducenta,
+  });
+  const { produktLinkDuplikaty, produktLinkKategoriaSklepu } = createProductSourceMatching({
+    normalizeKey: allegroNormalizujKlucz,
+    nameSimilarity: allegroPodobienstwoIstotne,
+    cacheKey: productSourceCacheKey,
+  });
 
   return {
     pobierzProduktProducenta,

@@ -75,7 +75,10 @@ test('mutator nie tworzy rewizji, gdy aktualizacja nie ma już nic do zapisania'
 });
 
 test('zwykły zapis wysyła tylko zmienione dziedziny i serwer scala je warunkowo', () => {
-  const frontend = fs.readFileSync(new URL('../src/frontend/03-cloud-sync.js', import.meta.url), 'utf8');
+  const frontend = [
+    fs.readFileSync(new URL('../src/frontend/03-cloud-sync.js', import.meta.url), 'utf8'),
+    fs.readFileSync(new URL('../src/frontend/03d-cloud-persistence-runtime.js', import.meta.url), 'utf8'),
+  ].join('\n');
   const backend = fs.readFileSync(new URL('../src/backend/lib/store-data-route.mjs', import.meta.url), 'utf8');
   assert.match(frontend, /chmuraBrudneKlucze = new Set\(\)/);
   assert.match(frontend, /body:\{mode:"patch",patch,expectedRev,mutationId\}/);

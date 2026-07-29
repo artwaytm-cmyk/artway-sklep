@@ -127,7 +127,7 @@ function adminMenuStatystyki(){
   const komunikacjaDoObslugi=typeof allegroKomunikacjaStaty==="function"?Number(allegroKomunikacjaStaty().totalNeed||0):Number(allegroPodsumowanie?.communication?.needReply||0);
   const zadaniaAgenta=typeof agentAIAnalizaAktywna==="function"&&typeof agentAIAnaliza==="function"?agentAIAnalizaAktywna(agentAIAnaliza()).length:0;
   const brakiDoZamowien=typeof rezerwacjeMagazynowe==="function"?potrzebyZatowarowania().length:0;
-  const jakoscKatalogu=typeof produktyDoAdministracji==="function"?seoKolejkaProduktow().filter(x=>x.score<85).length:0;
+  const jakoscKatalogu=typeof seoKolejkaProduktow==="function"?seoKolejkaProduktow().filter(x=>x.score<85).length:0;
   const powiadomienia={
     "/admin/zamowienia": pobierzZamowienia().filter(z=>z.status==="nowe").length,
     "/admin/allegro": allegroDoObslugi+komunikacjaDoObslugi,

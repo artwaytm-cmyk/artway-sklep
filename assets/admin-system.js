@@ -199,7 +199,9 @@ function testyDiagnostyczne(){
     :stanBazyCentralnej.error||"Połącz backend, aby sprawdzić i zsynchronizować wspólną bazę");
   const ipDiag=stanBramki.inpost||{};
   const avDiag=ipDiag.serviceAvailability||{};
-  dodaj("Integracje","InPost ShipX API",!integracjeSprawdzone?"pending":ipDiag.configured&&ipDiag.authenticated?((avDiag.locker===false||avDiag.courier===false)?"warn":"ok"):"warn",!integracjeSprawdzone?"Trwa kontrola tokenu, organizacji i usług":ipDiag.configured
+  dodaj("Integracje","InPost ShipX API",!integracjeSprawdzone?"pending":ipDiag.configured&&ipDiag.authenticated?((avDiag.locker===false||avDiag.courier===false)?"warn":"ok"):"warn",!integracjeSprawdzone?"Trwa kontrola tokenu, organizacji i usług":ipDiag.testError
+    ?`Konfiguracja jest zapisana, ale ostatni test API nie przeszedł: ${ipDiag.testError}`
+    :ipDiag.configured
     ?`Token i Organization ID są ustawione${ipDiag.geowidgetConfigured?" • Geowidget aktywny":" • brakuje tylko Geowidget"}${ipDiag.webhookConfigured?" • webhook aktywny":" • webhook do konfiguracji"}${avDiag.locker===false?" • brak usługi paczkomatowej":""}${avDiag.courier===false?" • kurier InPost nieaktywny":""}`
     :`Brakuje: ${((ipDiag.missingEnv&&ipDiag.missingEnv.length?ipDiag.missingEnv:["INPOST_TOKEN","INPOST_ORG_ID"]).join(", "))}`);
   const emailDiag=!!stanBramki.email?.authenticated;
@@ -227,7 +229,7 @@ function testyDiagnostyczne(){
 }
 function diagnostykaProblemyDoAgenta(testy=testyDiagnostyczne()){
   return testy
-    .filter(item=>["bad","warn"].includes(item.status)&&item.nazwa!=="Centralny rejestr błędów")
+    .filter(item=>["bad","warn"].includes(item.status)&&item.nazwa!=="Centralny rejestr błędów"&&!(item.nazwa==="InPost ShipX API"&&stanBramki.inpost?.testError))
     .map(item=>({
       level:item.status==="bad"?"blad":"ostrzezenie",
       message:`${item.nazwa}: ${item.szczegoly}`,
@@ -640,7 +642,7 @@ function adminPulpitDane(){
   const teraz=Date.now(),siedem=7*86400000,sklep7=sklep.filter(z=>String(z.status||"").toLowerCase()!=="anulowane"&&pulpitDataMs(z)>=teraz-siedem),sklepPoprzednie7=sklep.filter(z=>String(z.status||"").toLowerCase()!=="anulowane"&&pulpitDataMs(z)>=teraz-2*siedem&&pulpitDataMs(z)<teraz-siedem),allegro7=allegro.filter(z=>!["CANCELLED","RETURNED"].includes(allegroStatusKolejki(z))&&pulpitDataMs(z)>=teraz-siedem);
   adminPulpitZapiszSnapshot(sklep,allegro,allegroPelne);
   const sprzedazSklep7=sklep7.reduce((s,z)=>s+kwotaNum(z.razem),0),sprzedazAllegro7=allegroPelne?allegro7.reduce((s,z)=>s+pulpitKwotaAllegro(z),0):(pulpitSnapshotMaDane("allegro",7)?pulpitSumaSnapshot("allegro",7):allegro7.reduce((s,z)=>s+pulpitKwotaAllegro(z),0)),sprzedazPoprzednie7=sklepPoprzednie7.reduce((s,z)=>s+kwotaNum(z.razem),0);
-  const seoKrytyczne=seoKolejkaProduktow().filter(x=>x.score<60).length,agentAktywne=typeof agentAIAnalizaAktywna==="function"?agentAIAnalizaAktywna(agentAIAnaliza()).length:0,systemy=pulpitSystemy(),systemBledy=systemy.filter(x=>x.status==="blad").length;
+  const seoKrytyczne=typeof seoKolejkaProduktow==="function"?seoKolejkaProduktow().filter(x=>x.score<60).length:0,agentAktywne=typeof agentAIAnalizaAktywna==="function"?agentAIAnalizaAktywna(agentAIAnaliza()).length:0,systemy=pulpitSystemy(),systemBledy=systemy.filter(x=>x.status==="blad").length;
   return {sklep,sklepAktywne,noweSklep:sklepAktywne.filter(z=>z.status==="nowe").length,allegro,allegroPelne,allegroAktywne,komunikacja,plan,wysylkiBezNumeru,firmoweBezFaktury,sklep7,allegro7,sprzedazSklep7,sprzedazAllegro7,sprzedaz7:sprzedazSklep7+sprzedazAllegro7,sprzedazPoprzednie7,trend:pulpitZmianaProcent(sprzedazSklep7,sprzedazPoprzednie7),seoKrytyczne,agentAktywne,systemy,systemBledy,klienci:pobierzUzytkownikow().filter(u=>!kontoMaRoleAdmin(u.email)).length};
 }
 

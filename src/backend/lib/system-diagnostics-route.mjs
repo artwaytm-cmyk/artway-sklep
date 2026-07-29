@@ -340,6 +340,46 @@ export function createSystemDiagnosticsRoute({
     return { accepted: events.length, opened, record: recordValue };
   }
 
+  async function resolveMatching(matchers = [], {
+    actor = 'automatyczny test naprawczy',
+    resolution = 'Ponowny test potwierdził prawidłowe działanie.',
+  } = {}) {
+    const rules = (Array.isArray(matchers) ? matchers : [matchers])
+      .map((rule) => ({
+        source: clean(rule?.source, 180),
+        route: safeRoute(rule?.route),
+        messageIncludes: clean(rule?.messageIncludes, 300).toLowerCase(),
+        kind: clean(rule?.kind, 60),
+      }))
+      .filter((rule) => rule.source || rule.route || rule.messageIncludes || rule.kind);
+    if (!rules.length) return { changed: 0, record: safeRecord(await readVersioned(RECORD_KEY, {}).then((entry) => entry.value)) };
+    const at = now().toISOString();
+    let changed = 0;
+    const updated = await change((recordValue) => ({
+      ...recordValue,
+      items: recordValue.items.map((item) => {
+        if (!OPEN_STATUSES.has(item.status)) return item;
+        const matches = rules.some((rule) => (
+          (!rule.source || item.source === rule.source)
+          && (!rule.route || item.route === rule.route)
+          && (!rule.kind || item.kind === rule.kind)
+          && (!rule.messageIncludes || item.message.toLowerCase().includes(rule.messageIncludes))
+        ));
+        if (!matches) return item;
+        changed += 1;
+        return safeItem({
+          ...item,
+          status: 'resolved',
+          resolvedAt: at,
+          resolvedBy: clean(actor, 180),
+          resolution: clean(resolution, 500),
+        });
+      }),
+      updatedAt: at,
+    }));
+    return { changed, record: updated };
+  }
+
   async function route(req, url, action) {
     if (!['diagnostics-ingest', 'diagnostics-checks-sync', 'diagnostics-central', 'diagnostics-central-update', 'diagnostics-central-analyze'].includes(action)) return null;
     if (action === 'diagnostics-ingest') {
@@ -458,5 +498,5 @@ export function createSystemDiagnosticsRoute({
     return respond({ ok: true, changed: ids.size, status, summary: summary(updated.items), updatedAt: updated.updatedAt });
   }
 
-  return Object.freeze({ route, record, summary });
+  return Object.freeze({ route, record, resolveMatching, summary });
 }
