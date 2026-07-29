@@ -23,6 +23,7 @@ function allegroUstawieniaPanelHTML(){
   const sync=allegroStan.offerSyncState||{},maintenance=allegroStan.catalogMaintenance||{},agent=allegroStan.autonomousAgent||{};
   const dataLabel=value=>value&&Number.isFinite(Date.parse(value))?esc(new Date(value).toLocaleString("pl-PL")):"jeszcze nie wykonano";
   const option=(value,current,label)=>`<option value="${value}" ${Number(current)===Number(value)?"selected":""}>${label}</option>`;
+  setTimeout(()=>void allegroPobierzWarunkiDoEdytora(),0);
   return `<div class="panel allegro-section-panel allegro-integration-settings">
     <div class="order-section-head">
       <div><span class="order-pro-label">Allegro API</span><h2>⚙️ Ustawienia integracji</h2><p class="order-detail-lead">Jedno miejsce do ustawienia automatycznego mapowania, rytmu synchronizacji, aktualizacji ofert i domyślnych danych.</p></div>
@@ -58,6 +59,21 @@ function allegroUstawieniaPanelHTML(){
       <section class="allegro-settings-section">
         <div class="allegro-settings-section-head"><div><span>📦</span><div><h3>Domyślne dane oferty</h3><p>Stan ofertowy pozostaje niezależny od fizycznego stanu magazynu. Automatyczne wznawianie jest zawsze aktywne.</p></div></div></div>
         <div class="allegro-settings-grid"><label>Domyślny stan każdej oferty<input name="defaultStock" type="number" min="1" max="99999" step="1" required value="${offerStock}"><small>Nowe i aktualizowane oferty otrzymają tę wartość. Domyślny istniejący cennik dostawy: <b>${esc(settings.shippingRateName||"artway2")}</b>.</small></label><label>Znani producenci i aliasy<textarea name="producers" rows="4" required>${esc(allegroListaProducentow().join("\n"))}</textarea><small>Lista pomaga rozpoznawać nazwy w tekście. Nie ogranicza innych producentów zapisanych w kartotece lub źródle.</small></label></div>
+        <div class="product-channel-block allegro-sales-conditions allegro-default-sales-conditions" data-allegro-sales-conditions>
+          <div class="product-channel-block-head"><div><small>Domyślne dla nowych i aktualizowanych ofert</small><h3>Dostawa, zwroty, reklamacje i gwarancja</h3></div><button class="btn ghost" type="button" onclick="allegroPobierzWarunkiDoEdytora(this)">↻ Odśwież z Allegro</button></div>
+          <p class="muted">Wybierasz istniejące ustawienia konta Allegro. Produkt może mieć własny wyjątek; w pozostałych przypadkach system zawsze zastosuje poniższe wartości.</p>
+          <input type="hidden" name="shippingRateName" value="${esc(settings.shippingRateName||"artway2")}">
+          <input type="hidden" name="returnPolicyName" value="${esc(settings.returnPolicyName||"")}">
+          <input type="hidden" name="impliedWarrantyName" value="${esc(settings.impliedWarrantyName||"")}">
+          <input type="hidden" name="warrantyName" value="${esc(settings.warrantyName||"")}">
+          <div class="product-sales-condition-grid">
+            <label class="f-group"><span>Domyślny cennik dostawy *</span><select name="shippingRateId" data-name-field="shippingRateName" data-allegro-condition="shippingRates" data-current="${esc(settings.shippingRateId||"")}"><option value="${esc(settings.shippingRateId||"")}">${esc(settings.shippingRateName||"artway2")}</option></select></label>
+            <label class="f-group"><span>Domyślne warunki zwrotu *</span><select name="returnPolicyId" data-name-field="returnPolicyName" data-allegro-condition="returnPolicies" data-current="${esc(settings.returnPolicyId||"")}"><option value="${esc(settings.returnPolicyId||"")}">${esc(settings.returnPolicyName||"pobierz z konta")}</option></select></label>
+            <label class="f-group"><span>Domyślne warunki reklamacji *</span><select name="impliedWarrantyId" data-name-field="impliedWarrantyName" data-allegro-condition="impliedWarranties" data-current="${esc(settings.impliedWarrantyId||"")}"><option value="${esc(settings.impliedWarrantyId||"")}">${esc(settings.impliedWarrantyName||"pobierz z konta")}</option></select></label>
+            <label class="f-group"><span>Domyślna gwarancja</span><select name="warrantyId" data-name-field="warrantyName" data-allegro-condition="warranties" data-current="${esc(settings.warrantyId||"")}"><option value="${esc(settings.warrantyId||"")}">${esc(settings.warrantyName||"brak lub pobierz z konta")}</option></select></label>
+          </div>
+          <div data-allegro-sales-condition-status class="backend-note">Pobieram bieżące opcje bezpośrednio z konta Allegro…</div>
+        </div>
         <label class="check allegro-apply-existing"><input type="checkbox" name="applyExisting"> Zastosuj stan i wznawianie także do wszystkich ${allegroOferty.length} istniejących ofert</label>
         ${audit.length?`<small class="allegro-settings-audit">Ostatni audyt: ${audit.length-auditOpen} bez problemu • ${auditOpen} wymaga uzupełnienia.</small>`:""}
       </section>

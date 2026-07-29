@@ -297,13 +297,19 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
       'src/frontend/09b-seo-effects-panel.js',
       'src/frontend/12-warehouse-assortment-card.js',
       'src/frontend/12-warehouse-assortment-view.js',
-      'src/frontend/12-product-editor-workspace.js',
-      'src/frontend/12-product-editor.js',
       'src/frontend/12a-product-actions.js',
       'src/frontend/12b-allegro-listing-workspace.js',
       'src/frontend/12c-commerce-catalog-actions.js',
       'src/frontend/13-product-admin.js',
       'src/frontend/13a-product-import-export.js',
+    ],
+  },
+  {
+    output: 'assets/admin-product-editor.js',
+    banner: '/* GENERATED ADMIN PRODUCT EDITOR — loaded only for product and channel editing */',
+    sources: [
+      'src/frontend/12-product-editor-workspace.js',
+      'src/frontend/12-product-editor.js',
     ],
   },
   {

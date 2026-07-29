@@ -12,7 +12,7 @@ function produktRoboczyAllegroZFormularza(form,id,poprzedni={}){
   const cenaAllegro=parseFloat(String(fd.get("cenaAllegro")||poprzedni.cenaAllegro||"0").replace(",","."));
   const cenaZakupu=parseFloat(String(fd.get("cenaZakupu")||poprzedni.cenaZakupu||"0").replace(",","."));
   const p={...poprzedni,id,nazwa:String(fd.get("nazwa")||poprzedni.nazwa||"").trim(),kategoria:String(fd.get("kategoria")||poprzedni.kategoria||"").trim(),cena:Number.isFinite(cena)?cena:0,...(cenaAllegro>0?{cenaAllegro:+cenaAllegro.toFixed(2)}:{}),...(cenaZakupu>=0&&String(fd.get("cenaZakupu")||"").trim()?{cenaZakupu:+cenaZakupu.toFixed(2)}:{}),opisKrotki:String(fd.get("opisKrotki")||poprzedni.opisKrotki||"").trim(),opis:String(fd.get("opis")||poprzedni.opis||"").trim()};
-  for(const [pole,nazwa] of [["gtin","gtin"],["ean","gtin"],["externalId","externalId"],["mpn","mpn"],["producent","producent"],["marka","marka"],["kodProducenta","kodProducenta"],["allegroCategoryId","allegroCategoryId"],["allegroProductId","allegroProductId"],["allegroOfferId","allegroOfferId"],["allegroCategoryPhrase","allegroCategoryPhrase"],["sourceUrl","sourceUrl"],["producentUrl","producentUrl"]]){
+  for(const [pole,nazwa] of [["gtin","gtin"],["ean","gtin"],["externalId","externalId"],["mpn","mpn"],["producent","producent"],["marka","marka"],["kodProducenta","kodProducenta"],["allegroCategoryId","allegroCategoryId"],["allegroProductId","allegroProductId"],["allegroOfferId","allegroOfferId"],["allegroCategoryPhrase","allegroCategoryPhrase"],["allegroShippingRateId","allegroShippingRateId"],["allegroShippingRateName","allegroShippingRateName"],["allegroReturnPolicyId","allegroReturnPolicyId"],["allegroReturnPolicyName","allegroReturnPolicyName"],["allegroImpliedWarrantyId","allegroImpliedWarrantyId"],["allegroImpliedWarrantyName","allegroImpliedWarrantyName"],["allegroWarrantyId","allegroWarrantyId"],["allegroWarrantyName","allegroWarrantyName"],["sourceUrl","sourceUrl"],["producentUrl","producentUrl"]]){
     const v=String(fd.get(nazwa)||poprzedni[pole]||"").trim();
     if(v)p[pole]=v;
   }
@@ -71,6 +71,31 @@ function allegroPokazKategorieWFormularzu(d){
   const id=d?.selected?.id;
   const form=document.querySelector("form.product-editor-form");
   if(id&&form?.elements?.allegroCategoryId&&!String(form.elements.allegroCategoryId.value||"").trim()) form.elements.allegroCategoryId.value=String(id);
+}
+let allegroWarunkiEdytorCache={loaded:false,loading:false,data:null,error:""};
+function allegroWypelnijWarunkiEdytora(container,data={}){
+  const sales=data.salesConditions||data,defaults=sales.defaults||{},defaultKeys={shippingRates:"shippingRateId",returnPolicies:"returnPolicyId",impliedWarranties:"impliedWarrantyId",warranties:"warrantyId"};
+  for(const select of container.querySelectorAll("[data-allegro-condition]")){
+    const key=select.dataset.allegroCondition,items=Array.isArray(sales[key])?sales[key]:[],current=String(select.dataset.current||select.value||"").trim(),preferred=current||String(defaults[defaultKeys[key]]||"").trim();
+    const selectedItem=items.find(item=>String(item.id)===preferred),extra=preferred&&!selectedItem?[{id:preferred,name:select.options?.[0]?.textContent||preferred}]:[];
+    select.innerHTML=[...extra,...items].map(item=>`<option value="${esc(item.id)}" ${String(item.id)===preferred?"selected":""}>${esc(item.name||item.id)}</option>`).join("")||`<option value="${esc(preferred)}">${esc(select.options?.[0]?.textContent||"brak opcji na koncie")}</option>`;
+    const syncName=()=>{const nameField=select.dataset.nameField&&select.form?.elements?.[select.dataset.nameField];if(nameField)nameField.value=select.selectedOptions?.[0]?.textContent||"";};
+    select.onchange=syncName;syncName();
+  }
+  const status=container.querySelector("[data-allegro-sales-condition-status]"),errors=Array.isArray(sales.errors)?sales.errors:[];
+  if(status)status.innerHTML=errors.length?`<b>⚠️ Część danych nie została pobrana.</b> ${errors.map(error=>esc(error.message||error.key||"błąd API")).join(" • ")}`:`<b>✓ Pobrano bezpośrednio z Allegro.</b> Cenniki: ${Number(sales.shippingRates?.length)||0} • zwroty: ${Number(sales.returnPolicies?.length)||0} • reklamacje: ${Number(sales.impliedWarranties?.length)||0} • gwarancje: ${Number(sales.warranties?.length)||0}.`;
+}
+async function allegroPobierzWarunkiDoEdytora(button=null){
+  const container=button?.closest?.("[data-allegro-sales-conditions]")||document.querySelector("[data-allegro-sales-conditions]");if(!container)return;
+  if(allegroWarunkiEdytorCache.loading)return;
+  if(allegroWarunkiEdytorCache.loaded&&allegroWarunkiEdytorCache.data){allegroWypelnijWarunkiEdytora(container,allegroWarunkiEdytorCache.data);return;}
+  allegroWarunkiEdytorCache.loading=true;if(button)button.disabled=true;
+  const status=container.querySelector("[data-allegro-sales-condition-status]");if(status)status.innerHTML="<b>⏳ Pobieram warunki sprzedaży z Allegro…</b>";
+  try{
+    const categoryId=String(container.closest("form")?.elements?.allegroCategoryId?.value||"").trim(),data=await chmura("allegro-offer-support",{params:{categoryId},timeout:30000});
+    allegroWarunkiEdytorCache={loaded:true,loading:false,data,error:""};allegroWypelnijWarunkiEdytora(container,data);
+  }catch(error){allegroWarunkiEdytorCache={loaded:false,loading:false,data:null,error:String(error?.message||error)};if(status)status.innerHTML=`<b>Nie pobrano warunków:</b> ${esc(error?.message||error)}`;}
+  finally{if(button)button.disabled=false;}
 }
 async function allegroDobierzKategorieProduktu(id=0,btn=null){
   const form=document.querySelector("form.product-editor-form");
@@ -270,6 +295,7 @@ function agentAIUzupelnijFormularzZLinku(form,p={},d={},overwrite=false,url=""){
   uzupelnijPoleFormularza(form,"nazwa",p.nazwa,overwrite);uzupelnijPoleFormularza(form,"kategoria",p.kategoria,overwrite);uzupelnijPoleFormularza(form,"opisKrotki",p.opisKrotki||agentAIUtworzOpisKrotki(p),overwrite);uzupelnijPoleFormularza(form,"opis",p.opis,overwrite);uzupelnijPoleFormularza(form,"cena",p.cena,overwrite);uzupelnijPoleFormularza(form,"zdjecie",p.zdjecie,overwrite);(p.zdjecia||[]).slice(0,15).forEach((z,i)=>uzupelnijPoleFormularza(form,"zdjecie"+(i+2),z,overwrite));uzupelnijPoleFormularza(form,"gtin",p.gtin||p.ean,overwrite);uzupelnijPoleFormularza(form,"mpn",p.mpn||p.kodProducenta,overwrite);uzupelnijPoleFormularza(form,"kodProducenta",p.kodProducenta||p.mpn,overwrite);uzupelnijPoleFormularza(form,"externalId",p.externalId,overwrite);
   const canonicalProducer=allegroProducentKanoniczny({...p,sourceUrl:p.sourceUrl||url,producentUrl:url});uzupelnijPoleFormularza(form,"marka",p.marka||canonicalProducer||p.producent,overwrite);uzupelnijPoleFormularza(form,"producent",canonicalProducer||p.producent||p.marka,overwrite||!!canonicalProducer);uzupelnijPoleFormularza(form,"rozmiar",p.rozmiar,overwrite);uzupelnijPoleFormularza(form,"dostepnoscProducenta",p.dostepnoscProducenta,overwrite);uzupelnijPoleFormularza(form,"producentUrl",p.producentUrl||p.sourceUrl||url,overwrite);uzupelnijPoleFormularza(form,"sourceUrl",p.sourceUrl||p.producentUrl||url,overwrite);uzupelnijPoleFormularza(form,"allegroCategoryId",p.allegroCategoryId,overwrite);uzupelnijPoleFormularza(form,"allegroProductId",p.allegroProductId,overwrite);for(const field of ["stanProducenta","stanProducentaZrodlo","producentStatus","producentSprawdzonoAt"])uzupelnijPoleFormularza(form,field,p[field],true);if(form.elements.stanProducentaDokladny)form.elements.stanProducentaDokladny.value=p.stanProducentaDokladny?"1":"";
   form.dataset.agentLinkConfidence=String(d.confidence||0);form.dataset.agentLinkSource=String(d.canonicalUrl||d.resolvedUrl||url||"");form.dataset.agentCategoryConfidence=String(category.confidence||0);
+  if(typeof productEditorUzupelnijKanalyZDanychWspolnych==="function")productEditorUzupelnijKanalyZDanychWspolnych(form);
   const pg=document.getElementById("podgladZdjecia");if(pg&&form.elements.zdjecie?.value)pg.innerHTML=`<img src="${esc(form.elements.zdjecie.value)}" alt="Podgląd zdjęcia produktu" style="width:90px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--line);margin-bottom:.6rem">`;
   produktDodawanieAktualizuj(form);
   return brakiDanychProducenta(p,d);

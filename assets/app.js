@@ -3668,7 +3668,7 @@ async function wczytajProdukty(){ await pobierzBazoweProdukty(); finalizujWczyta
 /* ═══════════ ROUTER (podstrony) ═══════════ */
 const ADMIN_MODULY_RUNTIME = Object.freeze({
   core:"admin-core",shell:"admin-shell",ui:"admin-ui",agent:"admin-agent",warehouse:"admin-warehouse",shipping:"admin-shipping",commerce:"admin-commerce",communications:"admin-communications",
-  inventory:"admin-inventory",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system",vonHalsky:"admin-von-halsky"
+  inventory:"admin-inventory",productEditor:"admin-product-editor",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system",vonHalsky:"admin-von-halsky"
 });
 const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",commerce:"admin-commerce",vonHalsky:"admin-von-halsky"});
 const SKLEP_MODULY_RUNTIME = Object.freeze({account:"store-account",content:"store-content"});
@@ -3701,7 +3701,7 @@ function adminModulyDlaTrasy(route=""){
   if(t==="/diagnostyka"||t==="/admin/system/diagnostyka")add("agent","warehouse","shipping","commerce","communications","inventory","catalog","personalization","system","vonHalsky");
   else if(t.startsWith("/admin/system"))add("system");
   else if(t==="/admin"||t.startsWith("/admin/pulpit"))add("shipping","commerce","communications","inventory","system");
-  else if(t.startsWith("/admin/agent-ai"))add("agent","warehouse","commerce","communications","inventory");
+  else if(t.startsWith("/admin/agent-ai"))add("agent","warehouse","commerce","communications","inventory","productEditor");
   else if(["/admin/magazyn/lokalizacje","/admin/magazyn/etykiety-qr"].includes(t))add("warehouse");
   else if(t==="/admin/magazyn/ruchy")add("warehouse","inventory");
   else if(t==="/admin/magazyn/stany")add("warehouse","commerce","inventory");
@@ -3709,10 +3709,10 @@ function adminModulyDlaTrasy(route=""){
   else if(t.startsWith("/admin/wysylki"))add("agent","warehouse","shipping","commerce","inventory");
   else if(t.startsWith("/admin/von-halsky"))add("inventory","vonHalsky");
   else if(["/admin/allegro/komunikacja","/admin/allegro/wiadomosci","/admin/allegro/dyskusje"].includes(t))add("agent","warehouse","commerce","communications","inventory");
-  else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","communications","inventory");
+  else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/klient"))add("agent","warehouse","commerce","communications","inventory","productEditor");
   else if(t.startsWith("/admin/infakt"))add("inventory");
   else if(t==="/admin/asortyment"||t==="/admin/asortyment/produkty")add("commerce","inventory");
-  else if(t.startsWith("/admin/produkty/edytuj/")||t==="/admin/produkty/dodaj"||t==="/admin/produkty/z-linku")add("agent","commerce","inventory");
+  else if(t.startsWith("/admin/produkty/edytuj/")||t==="/admin/produkty/dodaj"||t==="/admin/produkty/z-linku")add("agent","commerce","inventory","productEditor");
   else if(t.startsWith("/admin/asortyment")||t.startsWith("/admin/produkty")||t==="/admin/kategorie"||t==="/admin/mapowanie"||t==="/admin/opinie"){
     add("commerce","inventory","catalog");
     if(t==="/admin/asortyment/rabaty")add("personalization");

@@ -1898,7 +1898,12 @@ async function allegroDraftZAutoKategoria(req, product = {}, opt = {}) {
   }
   const categoryId = tekst(options.categoryId || product.allegroCategoryId || product.categoryId || '', 80).trim();
   const [salesConditions, catalogLookup] = await Promise.all([
-    allegroWarunkiSprzedazy(req, { shippingRateId: offerSettings.shippingRateId }),
+    allegroWarunkiSprzedazy(req, {
+      shippingRateId: product.allegroShippingRateId || offerSettings.shippingRateId,
+      returnPolicyId: product.allegroReturnPolicyId || offerSettings.returnPolicyId,
+      impliedWarrantyId: product.allegroImpliedWarrantyId || offerSettings.impliedWarrantyId,
+      warrantyId: product.allegroWarrantyId || offerSettings.warrantyId,
+    }),
     allegroZnajdzProduktKatalogu(req, product),
   ]);
   const catalogMatch = options.catalogMatchOverride?.selected ? options.catalogMatchOverride : catalogLookup;
@@ -3414,8 +3419,14 @@ export default async (req) => {
     if (action === 'allegro-offer-support') {
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const categoryId = tekst(url.searchParams.get('categoryId') || '', 80).trim();
+      const offerSettings = await allegroPobierzUstawieniaOfert();
       const [salesConditions, categoryParameters] = await Promise.all([
-        allegroWarunkiSprzedazy(req),
+        allegroWarunkiSprzedazy(req, {
+          shippingRateId: offerSettings.shippingRateId,
+          returnPolicyId: offerSettings.returnPolicyId,
+          impliedWarrantyId: offerSettings.impliedWarrantyId,
+          warrantyId: offerSettings.warrantyId,
+        }),
         allegroParametryKategorii(req, categoryId),
       ]);
       return odpowiedz({ ok: true, salesConditions, categoryParameters: categoryParameters.parameters, errors: [...(salesConditions.errors || []), ...(categoryParameters.errors || [])] });

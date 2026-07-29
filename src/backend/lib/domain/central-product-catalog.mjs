@@ -24,6 +24,10 @@ export const CENTRAL_ALLEGRO_PREPARATION_FIELDS = Object.freeze([
   'zdjecia', 'sourceEvidence', 'allegroCategoryId', 'allegroProductId',
   'allegroParameters', 'allegroDescriptionSections', 'allegroSafetyInformation',
   'allegroResponsibleProducer', 'allegroShippingSubsidy',
+  'allegroShippingRateId', 'allegroShippingRateName',
+  'allegroReturnPolicyId', 'allegroReturnPolicyName',
+  'allegroImpliedWarrantyId', 'allegroImpliedWarrantyName',
+  'allegroWarrantyId', 'allegroWarrantyName',
 ]);
 
 function stableJson(value) {

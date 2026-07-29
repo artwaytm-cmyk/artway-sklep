@@ -83,7 +83,7 @@ test('moduły aktywnej podstrony panelu są pobierane deterministycznie po rdzen
 test('lista asortymentu nie ładuje agenta, magazynu ani narzędzi katalogowych', async () => {
   const router = await readFile('assets/app.js', 'utf8');
   assert.match(router, /t==="\/admin\/asortyment"\|\|t==="\/admin\/asortyment\/produkty"\)add\("commerce","inventory"\)/);
-  assert.match(router, /t\.startsWith\("\/admin\/produkty\/edytuj\/"\).*add\("agent","commerce","inventory"\)/);
+  assert.match(router, /t\.startsWith\("\/admin\/produkty\/edytuj\/"\).*add\("agent","commerce","inventory","productEditor"\)/);
 });
 
 test('lekkie podstrony lokalizacji i QR nie uruchamiają Allegro, Agenta ani całego edytora', async () => {

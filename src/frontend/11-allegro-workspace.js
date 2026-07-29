@@ -172,6 +172,14 @@ async function allegroZapiszUstawieniaOfert(form){
   try{
     const d=await chmura("allegro-offer-settings",{method:"POST",body:{
       defaultStock,producers,
+      shippingRateId:String(fd.get("shippingRateId")||"").trim(),
+      shippingRateName:String(fd.get("shippingRateName")||"").trim(),
+      returnPolicyId:String(fd.get("returnPolicyId")||"").trim(),
+      returnPolicyName:String(fd.get("returnPolicyName")||"").trim(),
+      impliedWarrantyId:String(fd.get("impliedWarrantyId")||"").trim(),
+      impliedWarrantyName:String(fd.get("impliedWarrantyName")||"").trim(),
+      warrantyId:String(fd.get("warrantyId")||"").trim(),
+      warrantyName:String(fd.get("warrantyName")||"").trim(),
       autoMapping:fd.get("autoMapping")==="on",
       mappingMinScore:Number(fd.get("mappingMinScore")||88),
       lightSyncMinutes:Number(fd.get("lightSyncMinutes")||15),
@@ -187,6 +195,7 @@ async function allegroZapiszUstawieniaOfert(form){
       autoResolveDuplicateMinScore:Number(fd.get("autoResolveDuplicateMinScore")||97)
     },timeout:12000});
     allegroStan={...allegroStan,offerSettings:d.settings||{defaultStock,republish:true}};
+    if(typeof allegroWarunkiEdytorCache!=="undefined")allegroWarunkiEdytorCache={loaded:false,loading:false,data:null,error:""};
     toast(`Zapisano automatykę Allegro i ${producers.length} producentów.`);renderuj();
     if(allegroStan.offerSettings.autoMapping!==false)await allegroUruchomAutomatyczneMapowanie(true);
     if(applyExisting)await allegroZastosujUstawieniaDoIstniejacych();

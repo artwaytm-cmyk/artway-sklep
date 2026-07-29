@@ -25,7 +25,10 @@ export function createAllegroSalesConditionsLoader({ call, cacheMs = 5 * 60_000 
   if (typeof call !== 'function') throw new TypeError('Brak klienta Allegro dla warunków sprzedaży.');
   let cache = { expiresAt: 0, value: null };
   return async function load(req, options = {}) {
-    const cacheKey = safeText(options.shippingRateId, 120) || 'automatic';
+    const cacheKey = [
+      options.shippingRateId, options.returnPolicyId,
+      options.impliedWarrantyId, options.warrantyId,
+    ].map((value) => safeText(value, 120)).join('|') || 'automatic';
     if (cache.value?.cacheKey === cacheKey && cache.expiresAt > Date.now()) return structuredClone(cache.value.result);
     const errors = [];
     const safe = async (path, key) => {
@@ -53,9 +56,9 @@ export function createAllegroSalesConditionsLoader({ call, cacheMs = 5 * 60_000 
       ...data,
       defaults: {
         shippingRateId: firstId(data.shippingRates, options.shippingRateId),
-        returnPolicyId: firstId(data.returnPolicies),
-        impliedWarrantyId: firstId(data.impliedWarranties),
-        warrantyId: firstId(data.warranties),
+        returnPolicyId: firstId(data.returnPolicies, options.returnPolicyId),
+        impliedWarrantyId: firstId(data.impliedWarranties, options.impliedWarrantyId),
+        warrantyId: firstId(data.warranties, options.warrantyId),
       },
       errors,
     };

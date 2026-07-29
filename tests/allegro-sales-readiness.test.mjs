@@ -42,6 +42,29 @@ test('przygotowanie wybiera wskazany istniejący cennik artway2 zamiast pierwsze
   assert.equal(result.defaults.shippingRateId, 'artway-2');
 });
 
+test('kartoteka produktu może wybrać wszystkie istniejące warunki sprzedaży Allegro', async () => {
+  const load = createAllegroSalesConditionsLoader({
+    call: async (_req, path) => {
+      if (path === '/sale/shipping-rates') return { shippingRates: [{ id: 'ship-default' }, { id: 'ship-product' }] };
+      if (path.includes('return-policies')) return { returnPolicies: [{ id: 'return-default' }, { id: 'return-product' }] };
+      if (path.includes('implied-warranties')) return { impliedWarranties: [{ id: 'claim-default' }, { id: 'claim-product' }] };
+      return { warranties: [{ id: 'warranty-default' }, { id: 'warranty-product' }] };
+    },
+  });
+  const result = await load({}, {
+    shippingRateId: 'ship-product',
+    returnPolicyId: 'return-product',
+    impliedWarrantyId: 'claim-product',
+    warrantyId: 'warranty-product',
+  });
+  assert.deepEqual(result.defaults, {
+    shippingRateId: 'ship-product',
+    returnPolicyId: 'return-product',
+    impliedWarrantyId: 'claim-product',
+    warrantyId: 'warranty-product',
+  });
+});
+
 test('status oferty jest potwierdzany na rzeczywistej ofercie, nie tylko operacji pośredniej', async () => {
   let checks = 0;
   const wait = createAllegroOfferStatusWaiter({

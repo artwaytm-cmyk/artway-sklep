@@ -14,6 +14,7 @@ const files = [
   'assets/admin-warehouse.js',
   'assets/admin-commerce.js',
   'assets/admin-inventory.js',
+  'assets/admin-product-editor.js',
   'assets/admin-catalog.js',
   'assets/admin-personalization.js',
   'assets/admin-system.js',
