@@ -77,7 +77,21 @@ function adminMenuMobilneHTML(aktywna,powiadomienia,kontekst){
   return `<details class="admin-mobile-menu" ontoggle="if(!this.open&&this.classList.contains('pwa-sheet-open'))pwaZamknijMenuAdmina()"><summary><span><i>☰</i><small>Menu panelu</small><b>${kontekst.ikona} ${esc(kontekst.nazwa)}</b></span><em>⌄</em></summary><div class="admin-mobile-menu-body" onclick="if(event.target.closest('a'))pwaZamknijMenuAdmina()">${adminMenuLinkHTML(MENU_ADMINA_PULPIT,aktywna,powiadomienia,"admin-mobile-home")}${MENU_ADMINA.map(grupa=>`<section><header><span>${grupa.ikona}</span><div><b>${esc(grupa.nazwa)}</b><small>${esc(grupa.opis||"")}</small></div></header><div>${grupa.elementy.map(p=>adminMenuLinkHTML(p,aktywna,powiadomienia,"admin-mobile-link")).join("")}</div></section>`).join("")}</div></details>`;
 }
 function adminPwaDolneMenuPozycjaHTML(href,icon,label,aktywna,powiadomienia){const active=adminMenuPozycjaAktywna(aktywna,href),count=powiadomienia[href]||0;return `<a href="#${href}" class="pwa-admin-bottom-link ${active?"active":""}" ${active?'aria-current="page"':""} onclick="pwaZamknijMenuAdmina()"><i>${icon}</i><span>${esc(label)}</span>${count?`<b>${count}</b>`:""}</a>`;}
-function adminPwaDolneMenuHTML(aktywna,powiadomienia){return `<nav class="pwa-admin-bottom-nav" aria-label="Menu aplikacji administratora">${adminPwaDolneMenuPozycjaHTML("/admin","📊","Pulpit",aktywna,powiadomienia)}${adminPwaDolneMenuPozycjaHTML("/admin/zamowienia","📦","Zamówienia",aktywna,powiadomienia)}${adminPwaDolneMenuPozycjaHTML("/admin/magazyn","🏬","Magazyn",aktywna,powiadomienia)}<button type="button" class="pwa-admin-bottom-link" onclick="pwaZamknijMenuAdmina();magazynGlobalnySkanerOtworz()"><i>📷</i><span>Skanuj</span></button><button type="button" class="pwa-admin-bottom-link pwa-admin-more" onclick="pwaPrzelaczMenuAdmina(this)" aria-expanded="false"><i>☰</i><span>Menu</span></button></nav>`;}
+async function adminOtworzGlobalnySkaner(){
+  pwaZamknijMenuAdmina();
+  if(typeof magazynGlobalnySkanerOtworz==="function")return magazynGlobalnySkanerOtworz();
+  try{
+    const version=document.querySelector('meta[name="artway-version"]')?.content||"dev";
+    await zaladujAdminModul("warehouse",version);
+    if(typeof magazynGlobalnySkanerOtworz!=="function")throw new Error("Moduł skanera nie udostępnił funkcji startowej");
+    return magazynGlobalnySkanerOtworz();
+  }catch(error){
+    toast("Otwieram stronę skanowania magazynu");
+    location.hash="#/admin/magazyn/etykiety-qr";
+    return null;
+  }
+}
+function adminPwaDolneMenuHTML(aktywna,powiadomienia){return `<nav class="pwa-admin-bottom-nav" aria-label="Menu aplikacji administratora">${adminPwaDolneMenuPozycjaHTML("/admin","📊","Pulpit",aktywna,powiadomienia)}${adminPwaDolneMenuPozycjaHTML("/admin/zamowienia","📦","Zamówienia",aktywna,powiadomienia)}${adminPwaDolneMenuPozycjaHTML("/admin/magazyn","🏬","Magazyn",aktywna,powiadomienia)}<button type="button" class="pwa-admin-bottom-link" onclick="adminOtworzGlobalnySkaner()"><i>📷</i><span>Skanuj</span></button><button type="button" class="pwa-admin-bottom-link pwa-admin-more" onclick="pwaPrzelaczMenuAdmina(this)" aria-expanded="false"><i>☰</i><span>Menu</span></button></nav>`;}
 function pwaZamknijMenuAdmina(){const menu=document.querySelector(".admin-mobile-menu");if(menu){menu.open=false;menu.classList.remove("pwa-sheet-open");}document.body.classList.remove("pwa-admin-menu-open");document.querySelector(".pwa-admin-more")?.setAttribute("aria-expanded","false");}
 function pwaPrzelaczMenuAdmina(button){const menu=document.querySelector(".admin-mobile-menu");if(!menu)return;const open=!menu.classList.contains("pwa-sheet-open");menu.open=open;menu.classList.toggle("pwa-sheet-open",open);document.body.classList.toggle("pwa-admin-menu-open",open);button?.setAttribute("aria-expanded",String(open));}
 function adminMenuOtwartaGrupa(){return String(wczytajLS("artway_admin_menu_otwarta_v2","")||"");}
