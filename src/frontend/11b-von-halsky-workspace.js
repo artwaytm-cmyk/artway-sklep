@@ -15,6 +15,7 @@ const vonHalskyZaznaczone=new Set();
 const vonHalskyAgentWToku=new Set();
 let vonHalskyProduktyRenderCache=null,vonHalskyOcenaRenderCache=new WeakMap();
 let vonHalskyWznowProces=null,vonHalskyLiveTimer=null,vonHalskyReconcilePromise=null,vonHalskyProcesSygnatura="",vonHalskyOstatniOdczytKanalu=0,vonHalskyOdswiezenieWToku=false,vonHalskyNastepneUzgodnienieAt=0;
+let vonHalskyFiltrTimer=null;
 let vonHalskyUstawieniaSekcja="identity";
 
 function vonHalskyMigawkaFiltrow(){
@@ -176,7 +177,21 @@ function vonHalskyResetujFiltry(){
   vonHalskySzukaj="";vonHalskyEtap="wszystkie";vonHalskyFiltr="wszystkie";vonHalskyAgentFiltr="wszystkie";
   vonHalskyStatusKanalu="wszystkie";vonHalskyDostepnosc="wszystkie";vonHalskyProducent="wszyscy";
   vonHalskyKategoria="wszystkie";vonHalskyProblem="wszystkie";vonHalskyCena="wszystkie";
-  vonHalskySort="jakosc";vonHalskyStrona=1;renderuj();
+  vonHalskySort="jakosc";vonHalskyStrona=1;vonHalskyOdswiezFiltrowanyWidok({filters:true});
+}
+function vonHalskyOdswiezFiltrowanyWidok({filters=false}={}){
+  if(filters)vonHalskyPodmienWyspe('[data-admin-search-panel="von-halsky-products"]',vonHalskyFiltryHTML(vonHalskyWiersze()));
+  vonHalskyPodmienWyspe("[data-vh-stage-filters]",vonHalskyEtapySprzedazyHTML());
+  vonHalskyPodmienWyspe("[data-vh-results-region]",vonHalskyWynikiHTML());
+}
+function vonHalskyZmienFiltr(){
+  vonHalskyStrona=1;
+  vonHalskyOdswiezFiltrowanyWidok();
+}
+function vonHalskySzukajPoWpisaniu(value){
+  vonHalskySzukaj=String(value||"");vonHalskyStrona=1;
+  clearTimeout(vonHalskyFiltrTimer);
+  vonHalskyFiltrTimer=setTimeout(()=>vonHalskyOdswiezFiltrowanyWidok(),250);
 }
 function vonHalskyWiersze(){
   const q=normalizujSzukanyTekst(vonHalskySzukaj),terms=q.split(" ").filter(Boolean);
@@ -264,7 +279,7 @@ function vonHalskyPulpitHTML(){
 }
 function vonHalskyUstawZaznaczenie(ids=[],checked=true){
   for(const id of ids)checked?vonHalskyZaznaczone.add(String(id)):vonHalskyZaznaczone.delete(String(id));
-  requestAnimationFrame(()=>vonHalskyAktualizujWystawianieDOM());
+  requestAnimationFrame(()=>vonHalskyAktualizujWystawianieDOM({stages:false,truth:false}));
 }
 function vonHalskyEksportuj(scope="selected"){
   const allowed=scope==="selected"?vonHalskyZaznaczone:null;
@@ -341,18 +356,18 @@ function vonHalskyFiltryHTML(rows){
   const {producers,categories}=vonHalskyOpcjeFiltrow(),active=vonHalskyLiczbaAktywnychFiltrow();
   const options=(items,current)=>items.map(([value,label])=>`<option value="${esc(value)}" ${current===value?"selected":""}>${esc(label)}</option>`).join("");
   const fields=`<div class="allegro-listing-advanced-grid admin-search-full von-halsky-filter-grid">
-    <label class="allegro-listing-search-wide"><span>Produkt, oferta lub identyfikator</span><input placeholder="Nazwa, EAN, EXTERNAL_ID, SKU, kod producenta, ID oferty…" value="${esc(vonHalskySzukaj)}" oninput="vonHalskySzukaj=this.value;vonHalskyStrona=1;zaplanujRenderPoWpisaniu()"></label>
-    <label><span>Etap sprzedaży</span><select onchange="vonHalskyEtap=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Wszystkie etapy"],["sprzedaz","W sprzedaży"],["publikowanie","W publikacji / weryfikacji"],["wystawienie","Do wystawienia"],["przygotowanie","Do przygotowania"],["aktualizacja","Do aktualizacji"],["wstrzymane","Wstrzymane"]],vonHalskyEtap)}</select></label>
-    <label><span>Problem do rozwiązania</span><select onchange="vonHalskyProblem=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Każdy problem"],["identyfikacja","Brak identyfikacji"],["zdjecie","Brak zdjęcia"],["opis","Nazwa lub opis"],["kategoria","Brak kategorii"],["gpsr","Niekompletny GPSR"],["cena","Brak ceny"]],vonHalskyProblem)}</select></label>
-    <label><span>Jakość danych</span><select onchange="vonHalskyFiltr=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Każdy poziom"],["gotowe","Gotowe do publikacji"],["braki","Wymagają uzupełnienia"],["ean","Z poprawnym EAN"],["bez-ean","Bez poprawnego EAN"],["kategoria","Z kategorią kanału"],["bez-kategorii","Bez kategorii kanału"],["gpsr","Z kompletnym GPSR"],["bez-gpsr","Bez kompletnego GPSR"]],vonHalskyFiltr)}</select></label>
-    <label><span>Praca Agenta</span><select onchange="vonHalskyAgentFiltr=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Każdy stan"],["w-toku","Wykonywane teraz"],["gotowe","Potwierdzone zapisem"],["wymaga-danych","Wymagają danych"],["ponowienie","Zaplanowane ponowienie"],["blad","Błąd wykonania"],["oczekuje","Jeszcze niesprawdzone"]],vonHalskyAgentFiltr)}</select></label>
-    <label><span>Status kanału</span><select onchange="vonHalskyStatusKanalu=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Każdy status"],["aktywne","Potwierdzone PUBLISHED"],["weryfikacja","PENDING / w weryfikacji"],["odrzucone","Odrzucone przez kanał"],["niewystawione","Brak oferty w API"]],vonHalskyStatusKanalu)}</select></label>
-    <label><span>Producent</span><select onchange="vonHalskyProducent=this.value;vonHalskyStrona=1;renderuj()"><option value="wszyscy">Wszyscy producenci</option>${producers.map(item=>`<option value="${esc(item.id)}" ${vonHalskyProducent===item.id?"selected":""}>${esc(item.label)} (${item.count})</option>`).join("")}</select></label>
-    <label><span>Kategoria sklepu</span><select onchange="vonHalskyKategoria=this.value;vonHalskyStrona=1;renderuj()"><option value="wszystkie">Wszystkie kategorie</option>${categories.map(item=>`<option value="${esc(item.id)}" ${vonHalskyKategoria===item.id?"selected":""}>${esc(item.label)} (${item.count})</option>`).join("")}</select></label>
-    <label><span>Cena kanału</span><select onchange="vonHalskyCena=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Z ceną i bez ceny"],["z-cena","Cena ustalona"],["bez-ceny","Brak ceny"]],vonHalskyCena)}</select></label>
-    <label><span>Dostępność</span><select onchange="vonHalskyDostepnosc=this.value;vonHalskyStrona=1;renderuj()">${options([["wszystkie","Każdy stan"],["dostepne","Dostępne w sprzedaży"],["wstrzymane","Wstrzymane"]],vonHalskyDostepnosc)}</select></label>
-    <label><span>Sortowanie</span><select onchange="vonHalskySort=this.value;vonHalskyStrona=1;renderuj()">${options([["jakosc","Najpierw wymagające pracy"],["nazwa","Nazwa A–Z"],["ean","EAN / GTIN"],["cena","Cena malejąco"]],vonHalskySort)}</select></label>
-    <label><span>Na stronie</span><select onchange="vonHalskyNaStronie=Number(this.value)||50;vonHalskyStrona=1;renderuj()">${[25,50,100,250,500,1000].map(value=>`<option value="${value}" ${vonHalskyNaStronie===value?"selected":""}>${value}</option>`).join("")}</select></label>
+    <label class="allegro-listing-search-wide"><span>Produkt, oferta lub identyfikator</span><input placeholder="Nazwa, EAN, EXTERNAL_ID, SKU, kod producenta, ID oferty…" value="${esc(vonHalskySzukaj)}" oninput="vonHalskySzukajPoWpisaniu(this.value)"></label>
+    <label><span>Etap sprzedaży</span><select onchange="vonHalskyEtap=this.value;vonHalskyZmienFiltr()">${options([["wszystkie","Wszystkie etapy"],["sprzedaz","W sprzedaży"],["publikowanie","W publikacji / weryfikacji"],["wystawienie","Do wystawienia"],["przygotowanie","Do przygotowania"],["aktualizacja","Do aktualizacji"],["wstrzymane","Wstrzymane"]],vonHalskyEtap)}</select></label>
+    <label><span>Problem do rozwiązania</span><select onchange="vonHalskyProblem=this.value;vonHalskyZmienFiltr()">${options([["wszystkie","Każdy problem"],["identyfikacja","Brak identyfikacji"],["zdjecie","Brak zdjęcia"],["opis","Nazwa lub opis"],["kategoria","Brak kategorii"],["gpsr","Niekompletny GPSR"],["cena","Brak ceny"]],vonHalskyProblem)}</select></label>
+    <label><span>Jakość danych</span><select onchange="vonHalskyFiltr=this.value;vonHalskyZmienFiltr()">${options([["wszystkie","Każdy poziom"],["gotowe","Gotowe do publikacji"],["braki","Wymagają uzupełnienia"],["ean","Z poprawnym EAN"],["bez-ean","Bez poprawnego EAN"],["kategoria","Z kategorią kanału"],["bez-kategorii","Bez kategorii kanału"],["gpsr","Z kompletnym GPSR"],["bez-gpsr","Bez kompletnego GPSR"]],vonHalskyFiltr)}</select></label>
+    <label><span>Praca Agenta</span><select onchange="vonHalskyAgentFiltr=this.value;vonHalskyZmienFiltr()">${options([["wszystkie","Każdy stan"],["w-toku","Wykonywane teraz"],["gotowe","Potwierdzone zapisem"],["wymaga-danych","Wymagają danych"],["ponowienie","Zaplanowane ponowienie"],["blad","Błąd wykonania"],["oczekuje","Jeszcze niesprawdzone"]],vonHalskyAgentFiltr)}</select></label>
+    <label><span>Status kanału</span><select onchange="vonHalskyStatusKanalu=this.value;vonHalskyZmienFiltr()">${options([["wszystkie","Każdy status"],["aktywne","Potwierdzone PUBLISHED"],["weryfikacja","PENDING / w weryfikacji"],["odrzucone","Odrzucone przez kanał"],["niewystawione","Brak oferty w API"]],vonHalskyStatusKanalu)}</select></label>
+    <label><span>Producent</span><select onchange="vonHalskyProducent=this.value;vonHalskyZmienFiltr()"><option value="wszyscy">Wszyscy producenci</option>${producers.map(item=>`<option value="${esc(item.id)}" ${vonHalskyProducent===item.id?"selected":""}>${esc(item.label)} (${item.count})</option>`).join("")}</select></label>
+    <label><span>Kategoria sklepu</span><select onchange="vonHalskyKategoria=this.value;vonHalskyZmienFiltr()"><option value="wszystkie">Wszystkie kategorie</option>${categories.map(item=>`<option value="${esc(item.id)}" ${vonHalskyKategoria===item.id?"selected":""}>${esc(item.label)} (${item.count})</option>`).join("")}</select></label>
+    <label><span>Cena kanału</span><select onchange="vonHalskyCena=this.value;vonHalskyZmienFiltr()">${options([["wszystkie","Z ceną i bez ceny"],["z-cena","Cena ustalona"],["bez-ceny","Brak ceny"]],vonHalskyCena)}</select></label>
+    <label><span>Dostępność</span><select onchange="vonHalskyDostepnosc=this.value;vonHalskyZmienFiltr()">${options([["wszystkie","Każdy stan"],["dostepne","Dostępne w sprzedaży"],["wstrzymane","Wstrzymane"]],vonHalskyDostepnosc)}</select></label>
+    <label><span>Sortowanie</span><select onchange="vonHalskySort=this.value;vonHalskyZmienFiltr()">${options([["jakosc","Najpierw wymagające pracy"],["nazwa","Nazwa A–Z"],["ean","EAN / GTIN"],["cena","Cena malejąco"]],vonHalskySort)}</select></label>
+    <label><span>Na stronie</span><select onchange="vonHalskyNaStronie=Number(this.value)||50;vonHalskyZmienFiltr()">${[25,50,100,250,500,1000].map(value=>`<option value="${value}" ${vonHalskyNaStronie===value?"selected":""}>${value}</option>`).join("")}</select></label>
     <button class="btn ghost allegro-listing-reset" type="button" onclick="vonHalskyResetujFiltry()" ${active?"":"disabled"}>Wyczyść filtry${active?` (${active})`:""}</button>
   </div>`;
   return adminWyszukiwaniePanelHTML({id:"von-halsky-products",title:"Wyszukiwanie i filtry ofert",description:"Łącz identyfikatory, problem, jakość, Agenta, producenta, kategorię, cenę i dostępność. Etap sprzedaży wybierasz kafelkami powyżej.",fields,results:rows.length,active:active>0,open:true});
@@ -385,7 +400,7 @@ function vonHalskyWynikiHTML(){
     ${vonHalskyPublikacjaWyboruHTML(rows)}
     <div class="allegro-listing-results-head"><div><b>${rows.length} produktów w aktywnym widoku</b><small>Pokazano ${shownFrom}–${shownTo} • strona ${vonHalskyStrona} z ${pages}</small></div><span><b>${selected.length}</b> zaznaczonych</span></div>
     <div class="admin-standard-table-wrap von-halsky-table-wrap"><table class="admin-standard-table admin-responsive-table von-halsky-table"><colgroup><col class="von-halsky-col-select"><col class="von-halsky-col-product"><col class="von-halsky-col-identity"><col class="von-halsky-col-quality"><col class="von-halsky-col-channel"><col class="von-halsky-col-actions"></colgroup><thead><tr><th><input type="checkbox" aria-label="Zaznacz produkty na stronie" ${visible.length&&visible.every(({product})=>vonHalskyZaznaczone.has(String(product.id)))?"checked":""} onchange="vonHalskyUstawZaznaczenieZakres('strona',this.checked)"></th><th>Produkt</th><th>Identyfikacja</th><th>Gotowość</th><th>Cena i kanał</th><th>Akcje</th></tr></thead><tbody>${visible.map(vonHalskyTabelaWierszHTML).join("")||'<tr><td data-label="" colspan="6"><div class="allegro-listing-empty"><span>⌕</span><b>Brak produktów w tym widoku</b><small>Zmień filtry albo wyczyść wyszukiwanie.</small></div></td></tr>'}</tbody></table></div>
-    ${pages>1?`<nav class="allegro-listing-pagination von-halsky-pagination" aria-label="Paginacja produktów"><button class="btn ghost" ${vonHalskyStrona<=1?"disabled":""} onclick="vonHalskyStrona--;renderuj()">← Poprzednia</button><span>Strona <b>${vonHalskyStrona}</b> z <b>${pages}</b></span><button class="btn ghost" ${vonHalskyStrona>=pages?"disabled":""} onclick="vonHalskyStrona++;renderuj()">Następna →</button></nav>`:""}
+    ${pages>1?`<nav class="allegro-listing-pagination von-halsky-pagination" aria-label="Paginacja produktów"><button class="btn ghost" ${vonHalskyStrona<=1?"disabled":""} onclick="vonHalskyStrona--;vonHalskyOdswiezFiltrowanyWidok()">← Poprzednia</button><span>Strona <b>${vonHalskyStrona}</b> z <b>${pages}</b></span><button class="btn ghost" ${vonHalskyStrona>=pages?"disabled":""} onclick="vonHalskyStrona++;vonHalskyOdswiezFiltrowanyWidok()">Następna →</button></nav>`:""}
   </div>`;
 }
 function vonHalskyWystawianieHTML(){
@@ -479,7 +494,7 @@ async function vonHalskySynchronizujKatalog(){
   if(vonHalskyStan.config?.configured!==true){toast("Najpierw uzupełnij prywatny kontrakt API Von Halsky.");return;}
   if(vonHalskyStan.sync?.status!=="connected"){toast("Najpierw wykonaj poprawny test połączenia API.");return;}
   const filterSnapshot=vonHalskyMigawkaFiltrow();
-  vonHalskyStan.operation="catalog";renderuj();
+  vonHalskyStan.operation="catalog";vonHalskyAktualizujWystawianieDOM();
   try{
     const data=await chmura("von-halsky-sync-catalog",{method:"POST",body:{publish:true,batchSize:50,productIds},timeout:180000});
     vonHalskyStan.sync={...vonHalskyStan.sync,...(data.sync||{})};
@@ -487,12 +502,13 @@ async function vonHalskySynchronizujKatalog(){
     vonHalskyZastosujAktualizacjeProduktow(data.productUpdates||[]);
     vonHalskyZaznaczone.clear();
     vonHalskyPrzywrocFiltry(filterSnapshot);
-    toast(`API przyjęło: nowe ${data.created||0} • aktualizacje ${data.updated||0}. Status sprzedaży pojawi się dopiero po odczycie PUBLISHED.`);
+    const unconfirmed=Number(data.unconfirmed)||0;
+    toast(`API potwierdziło przyjęcie: ${data.accepted??data.created??0} • bez potwierdzenia: ${unconfirmed} • aktualizacje: ${data.updated||0}. Sprzedaż liczymy dopiero po odczycie PUBLISHED.`);
     await vonHalskyUzgodnijKatalog({silent:true,repeat:true});
   }catch(error){
     toast("Synchronizacja Von Halsky: "+(error.message||error));
     await vonHalskyLaduj(true);
-  }finally{vonHalskyStan.operation="";vonHalskyPrzywrocFiltry(filterSnapshot);renderuj();}
+  }finally{vonHalskyStan.operation="";vonHalskyPrzywrocFiltry(filterSnapshot);vonHalskyAktualizujWystawianieDOM();}
 }
 function vonHalskyDiagnostykaHTML(){
   const latestByOperation=new Map();

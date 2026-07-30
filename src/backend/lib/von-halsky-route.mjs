@@ -87,7 +87,7 @@ function channelOperationalSummary(state = {}) {
   const truth = vonHalskyCatalogTruthSummary(state.offers);
   const commands = Array.isArray(state.commands) ? state.commands : [];
   const pendingCommands = commands.filter((item) => (
-    !['SUCCESS', 'FAILURE', 'FAILED', 'CANCELLED'].includes(String(item?.status || 'PENDING').toUpperCase())
+    !['SUCCESS', 'FAILURE', 'FAILED', 'CANCELLED', 'NOT_FOUND'].includes(String(item?.status || 'PENDING').toUpperCase())
   ));
   return {
     source: 'inpost-von-halsky-api',
@@ -185,6 +185,8 @@ export function createVonHalskyRoute({
   isAdmin,
   readVersioned,
   writeIfVersion,
+  readOverview,
+  readStatus,
   env = () => process.env,
   fetchImpl = globalThis.fetch,
   loadCatalog = async () => [],
@@ -335,7 +337,10 @@ export function createVonHalskyRoute({
 
     if (action === 'von-halsky-overview') {
       if (req.method !== 'GET') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const state = cleanState((await readVersioned(STORE_KEY, initialState())).value);
+      const snapshot = typeof readOverview === 'function'
+        ? await readOverview(initialState())
+        : (await readVersioned(STORE_KEY, initialState())).value;
+      const state = cleanState(snapshot);
       const channel = channelOperationalSummary(state);
       return respond({
         ok: true,
@@ -349,11 +354,28 @@ export function createVonHalskyRoute({
         claims: state.claims,
         events: state.events,
         commands: state.commands,
-        categoryCount: state.categories.length,
+        categoryCount: Number(snapshot?.categoryCount) || state.categories.length,
         updatedAt: state.updatedAt,
         truth: channel.truth,
         channelStatus: channel,
         channel: 'InPost Von Halsky',
+      });
+    }
+
+    if (action === 'von-halsky-status') {
+      if (req.method !== 'GET') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const snapshot = typeof readStatus === 'function'
+        ? await readStatus(initialState())
+        : (await readVersioned(STORE_KEY, initialState())).value;
+      const state = cleanState(snapshot);
+      const channel = channelOperationalSummary(state);
+      return respond({
+        ok: true,
+        config: vonHalskyPublicConfig(env()),
+        sync: state.sync,
+        truth: channel.truth,
+        channelStatus: channel,
+        updatedAt: state.updatedAt,
       });
     }
 

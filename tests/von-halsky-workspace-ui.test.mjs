@@ -89,10 +89,13 @@ test("wynik przygotowania i publikacji aktualizuje widok bez pełnego renderu st
   assert.doesNotMatch(source,/current\.outerHTML=vonHalskyWystawianieHTML\(\)/);
   assert.match(source,/vonHalskyZastosujAktualizacjeProduktow\(data\.productUpdates\|\|\[\]\)/);
   assert.match(source,/if\(Array\.isArray\(data\.offers\)\)vonHalskyStan\.offers=data\.offers/);
-  assert.match(source,/setInterval\(async\(\)=>\{/);
+  assert.match(source,/chmura\("von-halsky-status"/);
+  assert.match(source,/setTimeout\(tick,vonHalskyNastepnyInterwal\(\)\)/);
+  assert.match(source,/document\.hidden/);
   assert.match(source,/product-catalog-query/);
   assert.match(source,/ids:\[\.\.\.new Set\(ids\)\]\.join\(","\)/);
-  assert.match(source,/},5000\)/);
+  assert.doesNotMatch(source,/},5000\)/);
+  assert.match(source,/results:false,stages:false,truth:false/);
   assert.doesNotMatch(source,/sort:"najnowsze",page:1,limit:100/);
 });
 

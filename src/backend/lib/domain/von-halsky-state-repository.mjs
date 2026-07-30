@@ -46,6 +46,37 @@ function hydrateState(row = {}, records = []) {
   };
 }
 
+async function readSnapshot(pool, namespace, fallback, kinds = COLLECTIONS) {
+  const selected = [...new Set(array(kinds).filter((kind) => COLLECTIONS.includes(kind)))];
+  const result = await pool.query(`
+    SELECT s.settings,s.sync,s.version,s.updated_at,
+      (SELECT COUNT(*)::integer
+       FROM artway_von_halsky_records categories
+       WHERE categories.namespace=s.namespace AND categories.kind='categories') category_count,
+      COALESCE(
+        jsonb_agg(
+          jsonb_build_object('kind',r.kind,'ordinal',r.ordinal,'data',r.data)
+          ORDER BY r.kind,r.ordinal
+        ) FILTER (WHERE r.record_id IS NOT NULL),
+        '[]'::jsonb
+      ) records
+    FROM artway_von_halsky_state s
+    LEFT JOIN artway_von_halsky_records r
+      ON r.namespace=s.namespace AND r.kind=ANY($2::text[])
+    WHERE s.namespace=$1
+    GROUP BY s.namespace,s.settings,s.sync,s.version,s.updated_at
+  `, [namespace, selected]);
+  if (!result.rowCount) return { ...clone(fallback), categoryCount: 0 };
+  const row = result.rows[0];
+  return {
+    ...hydrateState({
+      ...row,
+      meta: { channel: 'InPost Von Halsky' },
+    }, row.records || []),
+    categoryCount: Number(row.category_count) || 0,
+  };
+}
+
 async function tableAvailable(pool) {
   const result = await pool.query("SELECT to_regclass('public.artway_von_halsky_state') IS NOT NULL AS available");
   return result.rows[0]?.available === true;
@@ -94,6 +125,18 @@ export function createVonHalskyStateRepository({
         COLLECTIONS.map((kind) => [kind, fingerprint(value[kind])]),
       ),
     };
+  }
+
+  async function readOverview(fallback) {
+    if (!await available()) return (await legacy.readVersioned(VON_HALSKY_STORE_KEY, fallback)).value;
+    // Widok panelu nie potrzebuje ośmiotysięcznego drzewa kategorii. Samo
+    // pominięcie tej kolekcji zmniejsza odczyt początkowy o ponad 1,7 MB.
+    return readSnapshot(pool, namespace, fallback, COLLECTIONS.filter((kind) => kind !== 'categories'));
+  }
+
+  async function readStatus(fallback) {
+    if (!await available()) return (await legacy.readVersioned(VON_HALSKY_STORE_KEY, fallback)).value;
+    return readSnapshot(pool, namespace, fallback, ['offers', 'commands']);
   }
 
   async function replaceCollection(client, kind, items) {
@@ -174,5 +217,5 @@ export function createVonHalskyStateRepository({
     }
   }
 
-  return Object.freeze({ readVersioned, writeIfVersion, available });
+  return Object.freeze({ readVersioned, writeIfVersion, readOverview, readStatus, available });
 }

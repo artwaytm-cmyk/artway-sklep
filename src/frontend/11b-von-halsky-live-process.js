@@ -29,39 +29,61 @@ function vonHalskyPodmienWyspe(selector,html){
   template.innerHTML=String(html||"").trim();
   const next=template.content.firstElementChild;
   if(!next)return false;
+  const scrollX=window.scrollX,scrollY=window.scrollY;
   current.replaceWith(next);
+  requestAnimationFrame(()=>window.scrollTo(scrollX,scrollY));
   return true;
 }
-function vonHalskyAktualizujWystawianieDOM(){
+function vonHalskyAktualizujWystawianieDOM({results=true,stages=true,truth=true}={}){
   if(!String(trasa()).startsWith("/admin/von-halsky/wystawianie"))return false;
   vonHalskyAktualizujPostepDOM();
-  const truth=vonHalskyPodmienWyspe("[data-vh-channel-truth]",vonHalskyKanalPrawdyHTML());
-  const stages=vonHalskyPodmienWyspe("[data-vh-stage-filters]",vonHalskyEtapySprzedazyHTML());
-  const results=vonHalskyPodmienWyspe("[data-vh-results-region]",vonHalskyWynikiHTML());
-  return truth||stages||results;
+  const truthChanged=truth&&vonHalskyPodmienWyspe("[data-vh-channel-truth]",vonHalskyKanalPrawdyHTML());
+  const stagesChanged=stages&&vonHalskyPodmienWyspe("[data-vh-stage-filters]",vonHalskyEtapySprzedazyHTML());
+  const resultsChanged=results&&vonHalskyPodmienWyspe("[data-vh-results-region]",vonHalskyWynikiHTML());
+  return truthChanged||stagesChanged||resultsChanged;
+}
+async function vonHalskyPobierzLekkiStatus(){
+  const data=await chmura("von-halsky-status",{timeout:15000});
+  if(data.sync)vonHalskyStan.sync={...vonHalskyStan.sync,...data.sync};
+  if(data.truth)vonHalskyStan.truth=data.truth;
+  if(data.channelStatus)vonHalskyStan.channelStatus=data.channelStatus;
+  if(data.config)vonHalskyStan.config=data.config;
+  return data;
+}
+function vonHalskyNastepnyInterwal(){
+  if(document.hidden)return 60000;
+  const queue=vonHalskyStan.preparationQueue||{},work=vonHalskyStan.agentRuntime?.currentWork||{};
+  return queue.running||queue.active||work.status==="running"?15000:60000;
 }
 function vonHalskyUruchomOdswiezanieNaZywo(){
   if(vonHalskyLiveTimer)return;
-  vonHalskyLiveTimer=setInterval(async()=>{
-    if(!String(trasa()).startsWith("/admin/von-halsky")||vonHalskyStan.loading||vonHalskyOdswiezenieWToku)return;
-    vonHalskyOdswiezenieWToku=true;
+  const tick=async()=>{
+    vonHalskyLiveTimer=null;
     try{
+      if(!String(trasa()).startsWith("/admin/von-halsky")||document.hidden||vonHalskyStan.loading||vonHalskyOdswiezenieWToku)return;
+      vonHalskyOdswiezenieWToku=true;
+      const previousCompletion=String(vonHalskyStan.preparationQueue?.recent?.[0]?.completedAt||"");
       await vonHalskyPobierzStanProcesow();
       const signature=vonHalskySygnaturaProcesu(),changed=signature!==vonHalskyProcesSygnatura;
       if(changed){
-        const queue=vonHalskyStan.preparationQueue||{},ids=[queue.active?.productId,...(queue.recent||[]).slice(0,12).map(item=>item.productId)].filter(Boolean);
-        if(ids.length){
+        const queue=vonHalskyStan.preparationQueue||{},completion=String(queue.recent?.[0]?.completedAt||"");
+        const completedNow=Boolean(completion&&completion!==previousCompletion);
+        const ids=completedNow?[queue.recent?.[0]?.productId].filter(Boolean):[];
+        if(completedNow&&ids.length){
           const catalog=await chmura("product-catalog-query",{params:{audience:"admin",ids:[...new Set(ids)].join(","),page:1,limit:50},timeout:30000});
           vonHalskyZastosujAktualizacjeProduktow((catalog?.items||[]).map(product=>({productId:product.id,product})));
+          vonHalskyAktualizujWystawianieDOM();
+        }else{
+          // Postęp procesu zmienia się często. Aktualizujemy tylko jego mały
+          // panel, aby tabela, filtry, zaznaczenie i przewinięcie nie skakały.
+          vonHalskyAktualizujWystawianieDOM({results:false,stages:false,truth:false});
         }
-        vonHalskyAktualizujWystawianieDOM();
         vonHalskyProcesSygnatura=signature;
       }
-      const interval=Math.max(15,Number(vonHalskyStan.settings?.syncIntervalMinutes)||15)*60000;
-      if(Date.now()-vonHalskyOstatniOdczytKanalu>=interval){
+      if(Date.now()-vonHalskyOstatniOdczytKanalu>=60000){
         vonHalskyOstatniOdczytKanalu=Date.now();
-        await vonHalskyLaduj(true,{render:false,processes:false});
-        vonHalskyAktualizujWystawianieDOM();
+        await vonHalskyPobierzLekkiStatus();
+        vonHalskyAktualizujWystawianieDOM({results:false,stages:false,truth:true});
       }
       const pendingRemote=Number(vonHalskyStan.truth?.pending||0);
       if(pendingRemote>0&&Date.now()>=vonHalskyNastepneUzgodnienieAt){
@@ -70,6 +92,10 @@ function vonHalskyUruchomOdswiezanieNaZywo(){
         vonHalskyAktualizujWystawianieDOM();
       }
     }catch(error){console.warn("von_halsky_live_refresh",error);}
-    finally{vonHalskyOdswiezenieWToku=false;}
-  },5000);
+    finally{
+      vonHalskyOdswiezenieWToku=false;
+      if(!vonHalskyLiveTimer)vonHalskyLiveTimer=setTimeout(tick,vonHalskyNastepnyInterwal());
+    }
+  };
+  vonHalskyLiveTimer=setTimeout(tick,15000);
 }

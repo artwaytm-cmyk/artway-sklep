@@ -3,6 +3,59 @@ import {
   reconcileVonHalskyCatalog,
 } from './von-halsky-catalog-reconciliation.mjs';
 
+export function vonHalskyCreateReceipts(payload = {}) {
+  const direct = Array.isArray(payload) ? payload : null;
+  const nested = [
+    payload?.data,
+    payload?.commands,
+    payload?.results,
+    payload?.items,
+    payload?.offers,
+  ].find(Array.isArray);
+  const rows = direct || nested || (payload && typeof payload === 'object' ? [payload] : []);
+  return rows.filter((item) => item && typeof item === 'object').map((item) => ({
+    ...item,
+    commandId: String(item.commandId || item.command?.id || item.operationId || ''),
+    offerId: String(item.offerId || item.offer?.id || ''),
+    externalId: String(item.externalId || item.offer?.externalId || ''),
+  }));
+}
+
+export function reconcileVonHalskyCommands(commands = [], remoteOffers = [], timestamp = new Date().toISOString(), graceMs = 10 * 60_000) {
+  const remote = preferredVonHalskyOffers(remoteOffers).byExternalId;
+  const now = Date.parse(timestamp) || Date.now();
+  return (Array.isArray(commands) ? commands : []).map((command) => {
+    const offer = remote.get(String(command?.externalId || ''));
+    const status = String(offer?.status || '').toUpperCase();
+    let nextStatus = String(command?.status || 'PENDING').toUpperCase();
+    let error = String(command?.error || '');
+    if (status === 'PUBLISHED' || ['CLOSED', 'SOLDOUT', 'INACTIVE'].includes(status)) {
+      nextStatus = 'SUCCESS';
+      error = '';
+    } else if (['REJECTED', 'ERROR'].includes(status)) {
+      nextStatus = 'FAILED';
+      error = [...(offer.validationErrors || []), ...(offer.rejectionReasons || [])]
+        .map((item) => String(item?.validationMessage || item?.message || item?.code || '').trim())
+        .filter(Boolean).join(' • ').slice(0, 800) || 'Oferta została odrzucona przez kanał.';
+    } else if (['PENDING', 'PROCESSING'].includes(status)) {
+      nextStatus = 'PENDING';
+    } else {
+      const age = now - Date.parse(String(command?.updatedAt || command?.createdAt || ''));
+      if (Number.isFinite(age) && age >= graceMs) {
+        nextStatus = 'NOT_FOUND';
+        error = 'Po upływie czasu kontrolnego oferta nie pojawiła się w katalogu API.';
+      }
+    }
+    return {
+      ...command,
+      status: nextStatus,
+      error,
+      remoteStatus: status || 'NOT_FOUND',
+      checkedAt: timestamp,
+    };
+  });
+}
+
 export function createVonHalskyCatalogRoute(context = {}) {
   const {
     respond, readVersioned, STORE_KEY, initialState, cleanState, api, mutate,
@@ -65,6 +118,10 @@ export function createVonHalskyCatalogRoute(context = {}) {
         });
         const updated = await mutate((current) => {
           current.offers = remoteOffers;
+          current.commands = reconcileVonHalskyCommands(current.commands, remoteOffers, timestamp);
+          const pendingCommandCount = current.commands.filter((item) => (
+            !['SUCCESS', 'FAILURE', 'FAILED', 'CANCELLED', 'NOT_FOUND'].includes(String(item?.status || 'PENDING').toUpperCase())
+          )).length;
           current.sync = {
             ...current.sync,
             status: 'connected',
@@ -75,6 +132,7 @@ export function createVonHalskyCatalogRoute(context = {}) {
             publishedOfferCount: reconciliation.truth.published,
             pendingOfferCount: reconciliation.truth.pending,
             rejectedOfferCount: reconciliation.truth.rejected,
+            pendingCommandCount,
             lastError: '',
             lastRequestId: remoteResult.requestId || '',
           };
@@ -144,7 +202,7 @@ export function createVonHalskyCatalogRoute(context = {}) {
         duplicates: deduplicated.conflicts.length,
       });
       const batchSize = Math.max(1, Math.min(100, Number(body.batchSize) || 50));
-      let sent = 0, created = 0, updatedCount = 0, closed = 0, reopened = 0, skippedNew = 0;
+      let sent = 0, created = 0, unconfirmed = 0, updatedCount = 0, closed = 0, reopened = 0, skippedNew = 0;
       let lastRequestId = '';
       let activeBatchProducts = [];
       const pendingCommands = [];
@@ -265,13 +323,34 @@ export function createVonHalskyCatalogRoute(context = {}) {
           const proposals = batch.map((item) => vonHalskyOfferProposal(item));
           const result = await api.createOffers(proposals);
           lastRequestId = result.requestId || lastRequestId;
-          const receipts = Array.isArray(result.payload) ? result.payload : [];
+          const receipts = vonHalskyCreateReceipts(result.payload);
           sent += proposals.length;
-          created += proposals.length;
           const at = new Date().toISOString();
-          for (const product of activeBatchProducts) {
+          const confirmedReceipts = new Map();
+          for (const [productIndex, product] of activeBatchProducts.entries()) {
             const externalId = vonHalskyOfferProjection(product, state.settings).externalId;
-            const receipt = receipts.find((item) => String(item?.externalId || '') === externalId) || receipts[activeBatchProducts.indexOf(product)] || {};
+            const receipt = receipts.find((item) => String(item?.externalId || '') === externalId) || receipts[productIndex] || {};
+            const receiptId = String(receipt.commandId || receipt.offerId || '');
+            if (!receiptId) {
+              unconfirmed += 1;
+              const error = 'API przyjęło żądanie HTTP, ale nie zwróciło identyfikatora polecenia ani oferty. Produkt nie został oznaczony jako wysłany.';
+              rememberProductUpdates(await updateProductPublication([product], 'retry', {
+                timestamp: at,
+                error,
+                nextRetryAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+              }));
+              await progress({
+                id: `editorial:${product.id}:vonHalsky:${String(product.vonHalskyEditorialSyncRunId || product.vonHalskyEditorialSyncPendingAt || Date.now()).slice(0, 64)}`,
+                runId: product.vonHalskyEditorialSyncRunId, productId: String(product.id), productName: String(product.nazwa || product.name || '').slice(0, 180),
+                channel: 'vonHalsky', action: 'publikacja treści w kanale', phase: 'provider_receipt_missing', status: 'failed',
+                target: 'katalog InPost Von Halsky', targetRef: externalId,
+                error, nextRetryAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+                message: error,
+              });
+              continue;
+            }
+            created += 1;
+            confirmedReceipts.set(String(product.id), { ...receipt, externalId });
             if (receipt.offerId && typeof saveProductFields === 'function') {
               const linkFields = {
                 vonHalskyOfferId: String(receipt.offerId),
@@ -300,24 +379,30 @@ export function createVonHalskyCatalogRoute(context = {}) {
             });
             rememberProductUpdates(await updateProductPublication([product], 'publishing', {
               timestamp: at,
-              receiptId: String(receipt.commandId || result.requestId || lastRequestId),
+              receiptId,
               targetRef: String(receipt.offerId || externalId),
             }));
           }
-          await Promise.all(activeBatchProducts.map((product) => progress({
-            id: `editorial:${product.id}:vonHalsky:${String(product.vonHalskyEditorialSyncRunId || product.vonHalskyEditorialSyncPendingAt || Date.now()).slice(0, 64)}`,
-            runId: product.vonHalskyEditorialSyncRunId, productId: String(product.id), productName: String(product.nazwa || product.name || '').slice(0, 180),
-            channel: 'vonHalsky', action: 'publikacja treści w kanale', phase: 'accepted_by_von_halsky', status: 'running',
-            target: 'katalog InPost Von Halsky', targetRef: product.externalId || product.sku || String(product.id),
-            receiptId: result.requestId || lastRequestId,
-            message: 'API przyjęło polecenie. Oferta pozostaje w weryfikacji do chwili potwierdzenia przez aktualny katalog kanału.',
-          })));
+          await Promise.all(activeBatchProducts.filter((product) => confirmedReceipts.has(String(product.id))).map((product) => {
+            const receipt = confirmedReceipts.get(String(product.id));
+            return progress({
+              id: `editorial:${product.id}:vonHalsky:${String(product.vonHalskyEditorialSyncRunId || product.vonHalskyEditorialSyncPendingAt || Date.now()).slice(0, 64)}`,
+              runId: product.vonHalskyEditorialSyncRunId, productId: String(product.id), productName: String(product.nazwa || product.name || '').slice(0, 180),
+              channel: 'vonHalsky', action: 'publikacja treści w kanale', phase: 'accepted_by_von_halsky', status: 'running',
+              target: 'katalog InPost Von Halsky', targetRef: receipt.offerId || receipt.externalId,
+              receiptId: receipt.commandId || receipt.offerId,
+              message: 'API przyjęło polecenie. Oferta pozostaje w weryfikacji do chwili potwierdzenia przez aktualny katalog kanału.',
+            });
+          }));
           activeBatchProducts = [];
         }
         const at = new Date().toISOString();
         const updated = await mutate((current) => {
           current.offers = remoteOffers;
           current.commands = mergeBy(current.commands, pendingCommands, (item) => item?.commandId).slice(0, 500);
+          const pendingCommandCount = current.commands.filter((item) => (
+            !['SUCCESS', 'FAILURE', 'FAILED', 'CANCELLED', 'NOT_FOUND'].includes(String(item?.status || 'PENDING').toUpperCase())
+          )).length;
           const truth = {
             total: remoteOffers.length,
             published: remoteOffers.filter((item) => String(item.status).toUpperCase() === 'PUBLISHED').length,
@@ -333,17 +418,17 @@ export function createVonHalskyCatalogRoute(context = {}) {
             remoteOfferCount: truth.total,
             publishedOfferCount: truth.published,
             pendingOfferCount: truth.pending,
-            pendingCommandCount: pendingCommands.length,
+            pendingCommandCount,
             rejectedOfferCount: truth.rejected,
             lastError: '',
             lastRequestId,
           };
           return current;
         });
-        const message = `Nowe ${created}, aktualizacje ${updatedCount}, zamknięte ${closed}, wznowione ${reopened}; pominięte nowe ${skippedNew}.`;
+        const message = `Potwierdzone przyjęcie ${created}, bez potwierdzenia ${unconfirmed}, aktualizacje ${updatedCount}, zamknięte ${closed}, wznowione ${reopened}; pominięte nowe ${skippedNew}.`;
         await recordDiagnostic({ operation: 'catalog-sync', status: 'ok', message, requestId: lastRequestId });
         return respond({
-          ok: true, sent, created, updated: updatedCount, closed, reopened, skippedNew,
+          ok: true, sent, created, accepted: created, unconfirmed, updated: updatedCount, closed, reopened, skippedNew,
           publicationMode: 'manual_selection',
           blocked: deduplicated.items.length - eligible.length,
           duplicates: deduplicated.conflicts.length,
@@ -373,7 +458,7 @@ export function createVonHalskyCatalogRoute(context = {}) {
           message: safe.message,
           requestId: String(safe.details?.requestId || ''),
         });
-        return respond({ ok: false, sent, created, updated: updatedCount, closed, reopened, skippedNew, error: safe.message, code: safe.code, details: safe.details }, safe.status);
+        return respond({ ok: false, sent, created, accepted: created, unconfirmed, updated: updatedCount, closed, reopened, skippedNew, error: safe.message, code: safe.code, details: safe.details }, safe.status);
       }
     }
 

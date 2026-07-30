@@ -321,7 +321,7 @@ const agentEvents = createAgentEventSystem({
 const { queue: agentEventQueue, emit: emitAgentEvent } = agentEvents;
 const vonHalskyRoute = createVonHalskyRoute({
   respond: odpowiedz, isAdmin: czyAdmin, readVersioned: vonHalskyRepository.readVersioned, writeIfVersion: vonHalskyRepository.writeIfVersion,
-  saveProductFields: (input) => zapiszIOpublikujPolaProduktuCentralnie(input),
+  readOverview: vonHalskyRepository.readOverview, readStatus: vonHalskyRepository.readStatus, saveProductFields: (input) => zapiszIOpublikujPolaProduktuCentralnie(input),
   reportProgress: (work) => agentRuntime.report({ event: 'work_progress', source: 'von-halsky-api', work }),
   prepareProductWithAgent: (productId, actor, options) => agentSpecialists.prepareVonHalskyProposal(productId, actor, options),
   inspectSource: pobierzProduktProducentaZPamiecia,

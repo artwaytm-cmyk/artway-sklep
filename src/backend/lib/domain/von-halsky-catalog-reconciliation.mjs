@@ -225,13 +225,16 @@ export async function reconcileVonHalskyCatalog({
       continue;
     }
     const localPublicationState = text(product.vonHalskyEditorialSyncState, 80).toLowerCase();
-    const hasLocalOperation = Boolean(localOfferId || text(product.vonHalskyCommandId, 200) || product.vonHalskyEditorialSyncPending === true);
+    const localCommandId = text(product.vonHalskyCommandId, 200);
+    const hasProviderReceipt = Boolean(localOfferId || localCommandId);
+    const hasLocalOperation = Boolean(hasProviderReceipt || product.vonHalskyEditorialSyncPending === true);
     if (!hasLocalOperation) {
       counts.unchanged += 1;
       continue;
     }
     const attemptedAt = lastPublicationAttemptAt(product);
-    const stillInGrace = ['queued', 'publishing'].includes(localPublicationState)
+    const stillInGrace = hasProviderReceipt
+      && ['queued', 'publishing'].includes(localPublicationState)
       && Number.isFinite(attemptedAt)
       && currentMs - attemptedAt >= 0
       && currentMs - attemptedAt < pendingGraceMs;
@@ -243,7 +246,7 @@ export async function reconcileVonHalskyCatalog({
           status: 'publishing',
           timestamp,
           targetRef: localOfferId || externalId,
-          receiptId: text(product.vonHalskyCommandId, 200),
+          receiptId: localCommandId,
         }),
         vonHalskyRemoteStatus: 'VERIFYING',
         vonHalskyRemotePresent: false,

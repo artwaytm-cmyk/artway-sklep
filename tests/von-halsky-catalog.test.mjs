@@ -13,6 +13,10 @@ import {
 } from '../src/backend/lib/domain/von-halsky-catalog.mjs';
 import { createVonHalskyApiClient } from '../src/backend/lib/domain/von-halsky-api-client.mjs';
 import { createVonHalskyRoute } from '../src/backend/lib/von-halsky-route.mjs';
+import {
+  reconcileVonHalskyCommands,
+  vonHalskyCreateReceipts,
+} from '../src/backend/lib/domain/von-halsky-catalog-route.mjs';
 import { vonHalskyCheckEditorial, VON_HALSKY_CONTENT_POLICY } from '../src/backend/lib/domain/von-halsky-compliance.mjs';
 import {
   compileVonHalskyCategoryIndex,
@@ -28,6 +32,42 @@ import {
   reconcileVonHalskyCatalog,
   vonHalskyCatalogTruthSummary,
 } from '../src/backend/lib/domain/von-halsky-catalog-reconciliation.mjs';
+
+test('potwierdzenia publikacji Von Halsky są rozpoznawane także w opakowanej odpowiedzi API', () => {
+  assert.deepEqual(vonHalskyCreateReceipts({
+    data: [{
+      command: { id: 'COMMAND-1' },
+      offer: { id: 'OFFER-1', externalId: 'EXT-1' },
+    }],
+  }), [{
+    command: { id: 'COMMAND-1' },
+    offer: { id: 'OFFER-1', externalId: 'EXT-1' },
+    commandId: 'COMMAND-1',
+    offerId: 'OFFER-1',
+    externalId: 'EXT-1',
+  }]);
+  assert.deepEqual(vonHalskyCreateReceipts({ message: 'accepted' })[0], {
+    message: 'accepted',
+    commandId: '',
+    offerId: '',
+    externalId: '',
+  });
+});
+
+test('polecenia publikacji kończą się wyłącznie na podstawie odczytu katalogu API', () => {
+  const checked = reconcileVonHalskyCommands([
+    { commandId: 'C-1', externalId: 'EXT-1', status: 'PENDING', updatedAt: '2026-07-30T07:00:00.000Z' },
+    { commandId: 'C-2', externalId: 'EXT-2', status: 'PENDING', updatedAt: '2026-07-30T07:00:00.000Z' },
+    { commandId: 'C-3', externalId: 'EXT-3', status: 'PENDING', updatedAt: '2026-07-30T07:00:00.000Z' },
+  ], [
+    { offerId: 'O-1', externalId: 'EXT-1', status: 'PUBLISHED' },
+    { offerId: 'O-2', externalId: 'EXT-2', status: 'REJECTED', validationErrors: [{ code: 'CATEGORY_INCORRECT' }] },
+  ], '2026-07-30T08:00:00.000Z');
+  assert.equal(checked[0].status, 'SUCCESS');
+  assert.equal(checked[1].status, 'FAILED');
+  assert.match(checked[1].error, /CATEGORY_INCORRECT/);
+  assert.equal(checked[2].status, 'NOT_FOUND');
+});
 
 test('osobna bramka Von Halsky blokuje logistykę, linki i nieobsługiwany HTML', () => {
   const safe = vonHalskyCheckEditorial({
@@ -1043,6 +1083,56 @@ test('publikacja wskazanego produktu czeka na odczyt API, a potem zapisuje trwa�
   assert.equal(saved.contentEditorial.channelStates.vonHalsky.publicationStatus, 'confirmed');
   assert.equal(saved.contentEditorial.channelStates.vonHalsky.publicationReceipt, '22222222-2222-4222-8222-222222222222');
   assert.equal(reconciled.body.productUpdates[0].fields.vonHalskyEditorialSyncPending, false);
+});
+
+test('HTTP 2xx bez identyfikatora API nie tworzy fałszywego sukcesu publikacji', async () => {
+  const records = new Map(), revisions = new Map(), products = new Map();
+  const product = {
+    id: 'P-NO-RECEIPT', externalId: 'EXT-NO-RECEIPT', nazwa: 'Alexander Gra edukacyjna',
+    opis: 'Pełny opis produktu zawiera najważniejsze cechy, przeznaczenie, zawartość zestawu oraz informacje przydatne klientowi podczas świadomego wyboru gry edukacyjnej.',
+    ean: '5906018000030', producent: 'Alexander', zdjecie: '/one.webp', cena: 39.9, stan: 8,
+    vonHalskyCategoryId: '33333333-3333-4333-8333-333333333333',
+  };
+  products.set(product.id, structuredClone(product));
+  const route = createVonHalskyRoute({
+    respond: (body, status = 200) => ({ body, status }), isAdmin: () => true,
+    readVersioned: async (key, fallback) => ({ value: structuredClone(records.get(key) ?? fallback), revision: revisions.get(key) || 0 }),
+    writeIfVersion: async (key, value) => { records.set(key, structuredClone(value)); revisions.set(key, (revisions.get(key) || 0) + 1); return { modified: true }; },
+    env: () => ({
+      INPOST_VON_HALSKY_API_BASE_URL: 'https://api.example.test',
+      INPOST_VON_HALSKY_AUTH_URL: 'https://auth.example.test/token',
+      INPOST_VON_HALSKY_CLIENT_ID: 'client',
+      INPOST_VON_HALSKY_CLIENT_SECRET: 'secret',
+      INPOST_VON_HALSKY_MERCHANT_ID: 'merchant',
+      INPOST_VON_HALSKY_HEALTH_PATH: '/health',
+      INPOST_VON_HALSKY_CATALOG_PATH: '/catalog',
+      INPOST_VON_HALSKY_ORDERS_PATH: '/orders',
+      INPOST_VON_HALSKY_CONTRACT_VERSION: '2026-01',
+    }),
+    fetchImpl: async (url, options = {}) => {
+      if (String(url).includes('/token')) return new Response(JSON.stringify({ access_token: 'token', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if ((options.method || 'GET') === 'GET') return new Response(JSON.stringify({ data: [], page: { limit: 30, offset: 0, total: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ message: 'accepted' }), { status: 202, headers: { 'content-type': 'application/json', 'x-request-id': 'no-receipt-request' } });
+    },
+    loadCatalog: async () => [...products.values()].map((item) => structuredClone(item)),
+    saveProductFields: async ({ productId, fields = {}, remove = [] }) => {
+      const next = { ...(products.get(String(productId)) || { id: productId }), ...structuredClone(fields) };
+      for (const field of remove) delete next[field];
+      products.set(String(productId), next);
+      return { product: structuredClone(next), publication: { readbackConfirmed: true } };
+    },
+  });
+  const request = new Request('https://artwaytm.pl/api?action=von-halsky-sync-catalog', {
+    method: 'POST', body: JSON.stringify({ publish: true, productIds: [product.id] }),
+  });
+  const result = await route(request, new URL(request.url), 'von-halsky-sync-catalog');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.sent, 1);
+  assert.equal(result.body.created, 0);
+  assert.equal(result.body.accepted, 0);
+  assert.equal(result.body.unconfirmed, 1);
+  assert.equal(products.get(product.id).vonHalskyEditorialSyncState, 'retry');
+  assert.notEqual(products.get(product.id).vonHalskyRemoteStatus, 'PUBLISHED');
 });
 
 test('uzgodnienie katalogu liczy wyłącznie zdalne PUBLISHED i usuwa fałszywe lokalne powiązania', async () => {

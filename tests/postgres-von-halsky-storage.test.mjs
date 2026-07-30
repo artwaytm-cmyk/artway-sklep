@@ -18,6 +18,10 @@ test('Von Halsky ma wersjonowane migracje i rekordowy magazyn PostgreSQL', async
   assert.doesNotMatch(migration, /DELETE FROM artway_kv_store/i);
   assert.match(repository, /IS DISTINCT FROM EXCLUDED\.data/);
   assert.match(repository, /collectionFingerprints/);
+  assert.match(repository, /async function readOverview/);
+  assert.match(repository, /async function readStatus/);
+  assert.match(repository, /kind=ANY\(\$2::text\[\]\)/);
+  assert.match(repository, /kind !== 'categories'/);
   assert.match(repository, /WHERE namespace=\$1 AND version=\$2/);
   assert.match(runner, /artway_schema_migrations/);
   assert.match(runner, /pg_advisory_lock/);
