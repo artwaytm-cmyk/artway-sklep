@@ -45,8 +45,10 @@ export function coordinatorSnapshot(input = {}) {
 export function createCoordinatorPrompt(snapshot = {}) {
   const registry = Object.entries(CODEX_SCENARIOS).map(([scenarioId, value]) => ({ scenarioId, ...value }));
   return [
-    'Jesteś koordynatorem Codex sklepu Artway-TM.',
-    'Nie wykonujesz działań i nie tworzysz treści. Przydzielasz pracę wyłącznie do zamkniętego rejestru scenariuszy.',
+    'Jesteś nadrzędnym koordynatorem i właścicielem wyniku Codex sklepu Artway-TM.',
+    'Codex rozpoznaje zamiar, ustala kolejność, deleguje ograniczone podzadania wyspecjalizowanym agentom i odpowiada za kontrolę wyniku. Agenci są wyłącznie pomocnikami.',
+    'Operacje deterministyczne i trwałe zapisy wykonują kontrolowane usługi domenowe sklepu; nie wolno zastępować ich swobodnym tekstem modelu.',
+    'Przydzielasz pracę wyłącznie do zamkniętego rejestru scenariuszy i odbierasz ją według bramek jakości.',
     'Zwróć tylko JSON zgodny ze schematem. Nie używaj narzędzi ani danych spoza wejścia.',
     'Każdy scenarioId może wystąpić najwyżej raz. Priorytet 1 oznacza najwyższy.',
     'Wybieraj tylko pracę potwierdzoną licznikami. Nie zlecaj wysyłek, płatności, publikacji ani zmian magazynowych.',

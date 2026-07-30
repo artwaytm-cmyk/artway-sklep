@@ -8,6 +8,7 @@ export function createAgentEventSystem({
   readVersioned,
   writeIfVersion,
   runtime,
+  coordinate = null,
   text = (value = '', limit = 500) => String(value ?? '').trim().slice(0, limit),
 } = {}) {
   const queue = createAgentEventQueue({
@@ -190,14 +191,65 @@ export function createAgentEventSystem({
           decisionRequired: true,
         });
       }
+      const coordinationId = `codex-event:${event.id || productId}`;
+      await runtime.report({
+        event: 'work_progress',
+        source: 'codex-coordinator',
+        work: {
+          id: coordinationId,
+          productId,
+          productName: text(event.payload?.productName, 220),
+          channel: 'system',
+          action: 'koordynacja pełnego przeglądu produktu',
+          phase: 'planning',
+          status: 'running',
+          target: 'kontrolowane usługi domenowe sklepu',
+          message: 'Codex analizuje sygnał i przydziela ograniczone podzadania agentom pomocniczym.',
+        },
+      }).catch(() => {});
+      const coordinated = typeof coordinate === 'function'
+        ? await coordinate({
+          event,
+          kind: 'product.review',
+          productId,
+          productName: text(event.payload?.productName, 220),
+        }).catch((error) => ({ ok: false, reason: text(error?.message || error, 240), plan: null }))
+        : { ok: false, reason: 'coordinator_not_configured', plan: null };
+      const assignment = coordinated?.plan?.assignments?.find((item) => item.scenarioId === 'catalog-editorial') || null;
       const state = await preparationRoute.prepareProducts([productId], {
         operation: 'product-full-review',
-        requestedBy: event.source || 'agent-zdarzeniowy',
+        requestedBy: assignment ? 'codex-koordinator' : event.source || 'agent-zdarzeniowy',
       });
+      await runtime.report({
+        event: 'work_progress',
+        source: 'codex-coordinator',
+        work: {
+          id: coordinationId,
+          productId,
+          productName: text(event.payload?.productName, 220),
+          channel: 'system',
+          action: 'koordynacja pełnego przeglądu produktu',
+          phase: assignment ? 'delegated' : 'safe_fallback',
+          status: 'confirmed',
+          target: 'trwała kolejka przygotowania produktów',
+          targetRef: state.batchId,
+          message: assignment
+            ? `Codex przydzielił scenariusz ${assignment.scenarioId} v${assignment.scenarioVersion}; wykonanie trwa w serwerowej kolejce.`
+            : `Codex nie zwrócił planu (${coordinated?.reason || 'brak odpowiedzi'}); bezpieczny deterministyczny przepływ nie został zatrzymany.`,
+        },
+      }).catch(() => {});
       return {
-        message: `Produkt ${productId} przekazano do trwałej kolejki pełnego przeglądu: źródło, sklep, Von Halsky i Allegro.`,
+        message: `Produkt ${productId} przekazano przez koordynatora Codex do trwałej kolejki pełnego przeglądu: źródło, sklep, Von Halsky i Allegro.`,
         queued: true,
         batchId: state.batchId,
+        coordinator: assignment
+          ? {
+            id: 'codex',
+            scenarioId: assignment.scenarioId,
+            scenarioVersion: assignment.scenarioVersion,
+            specialist: assignment.specialist,
+          }
+          : { id: 'codex', fallback: true, reason: coordinated?.reason || 'unavailable' },
       };
     });
     queue.register('product.backlog.bootstrap', async () => {

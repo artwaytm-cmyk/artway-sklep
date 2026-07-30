@@ -4,13 +4,16 @@ const vonHalskyStan={
   sync:{status:"not_connected",lastConnectionAt:null,lastCatalogAt:null,lastCatalogCount:0,lastOrdersAt:null,lastError:"",lastRequestId:""},
   diagnostics:[],offers:[],orders:[],returns:[],claims:[],events:[],commands:[],categories:[],preview:null,operation:"",
   truth:{total:0,published:0,pending:0,rejected:0,closed:0,statuses:{}},
+  preparationQueue:{running:false,active:null,pending:0,recent:[],current:[],currentSummary:{},batches:[],updatedAt:""},
+  agentRuntime:{state:"ready",currentWork:null,publication:{counts:{},pending:[],recent:[]},updatedAt:""},
+  preparationBatchId:"",
   preparation:{active:false,paused:false,pauseRequested:false,cancelRequested:false,total:0,completed:0,currentIndex:0,currentProductId:"",currentName:"",startedAt:"",finishedAt:"",results:[],error:""}
 };
 let vonHalskySzukaj="",vonHalskyEtap="wszystkie",vonHalskyFiltr="wszystkie",vonHalskyAgentFiltr="wszystkie",vonHalskyStatusKanalu="wszystkie",vonHalskyDostepnosc="wszystkie",vonHalskyProducent="wszyscy",vonHalskyKategoria="wszystkie",vonHalskyProblem="wszystkie",vonHalskyCena="wszystkie",vonHalskySort="jakosc",vonHalskyStrona=1,vonHalskyNaStronie=25;
 const vonHalskyZaznaczone=new Set();
 const vonHalskyAgentWToku=new Set();
 let vonHalskyProduktyRenderCache=null,vonHalskyOcenaRenderCache=new WeakMap();
-let vonHalskyWznowProces=null,vonHalskyLiveTimer=null,vonHalskyReconcilePromise=null;
+let vonHalskyWznowProces=null,vonHalskyLiveTimer=null,vonHalskyReconcilePromise=null,vonHalskyProcesSygnatura="",vonHalskyOstatniOdczytKanalu=0,vonHalskyOdswiezenieWToku=false;
 let vonHalskyUstawieniaSekcja="identity";
 
 function vonHalskyMigawkaFiltrow(){
@@ -42,30 +45,18 @@ function vonHalskyZastosujAktualizacjeProduktow(updates=[]){
   }
   vonHalskyUniewaznijWidokProduktow();
 }
-function vonHalskyUruchomOdswiezanieNaZywo(){
-  if(vonHalskyLiveTimer)return;
-  vonHalskyLiveTimer=setInterval(async()=>{
-    if(!String(trasa()).startsWith("/admin/von-halsky")||vonHalskyStan.loading||vonHalskyStan.operation)return;
-    try{
-      const [,catalog]=await Promise.all([
-        vonHalskyLaduj(true,{render:false}),
-        chmura("product-catalog-query",{params:{audience:"admin",sort:"najnowsze",page:1,limit:100},timeout:30000}),
-      ]);
-      vonHalskyZastosujAktualizacjeProduktow((catalog?.items||[]).map(product=>({productId:product.id,product})));
-      if(Number(vonHalskyStan.sync?.pendingOfferCount||0)>0)await vonHalskyUzgodnijKatalog({silent:true});
-      renderuj();
-    }catch(error){console.warn("von_halsky_live_refresh",error);}
-  },15000);
-}
-
-async function vonHalskyLaduj(force=false,{render=true}={}){
+async function vonHalskyLaduj(force=false,{render=true,processes=true}={}){
   if(vonHalskyStan.loading||(!force&&vonHalskyStan.loaded))return;
   vonHalskyStan.loading=true;vonHalskyStan.error="";vonHalskyStan.lastLoadAttemptAt=new Date().toISOString();
   try{
-    const data=await chmura("von-halsky-overview",{timeout:20000});
+    const [data]=await Promise.all([
+      chmura("von-halsky-overview",{timeout:20000}),
+      processes?vonHalskyPobierzStanProcesow().catch(error=>{console.warn("von_halsky_process_status",error);return null;}):Promise.resolve(null),
+    ]);
     Object.assign(vonHalskyStan,{loaded:true,config:data.config||{},settings:{...vonHalskyStan.settings,...(data.settings||{})},sync:data.sync||vonHalskyStan.sync,diagnostics:Array.isArray(data.diagnostics)?data.diagnostics:[],offers:Array.isArray(data.offers)?data.offers:[],orders:Array.isArray(data.orders)?data.orders:[],returns:Array.isArray(data.returns)?data.returns:[],claims:Array.isArray(data.claims)?data.claims:[],events:Array.isArray(data.events)?data.events:[],commands:Array.isArray(data.commands)?data.commands:[],updatedAt:data.updatedAt||null});
+    vonHalskyProcesSygnatura=vonHalskySygnaturaProcesu();
     const verifiedAt=Date.parse(String(data.sync?.lastCatalogVerifiedAt||data.sync?.lastCatalogAt||"")),interval=Math.max(15,Number(data.settings?.syncIntervalMinutes)||15)*60000;
-    if(data.config?.configured===true&&data.sync?.status==="connected"&&(!Number.isFinite(verifiedAt)||Date.now()-verifiedAt>=interval))setTimeout(()=>vonHalskyUzgodnijKatalog({silent:true}),0);
+    if(data.config?.configured===true&&data.sync?.status==="connected"&&(!Number.isFinite(verifiedAt)||Date.now()-verifiedAt>=interval))setTimeout(()=>vonHalskyUzgodnijKatalog({silent:true,render:false}),0);
   }catch(error){
     // Nie uruchamiamy automatycznie kolejnego żądania przy każdym renderze.
     // Gdy API jest chwilowo niedostępne, zachowujemy ostatni stan widoku,
@@ -76,7 +67,7 @@ async function vonHalskyLaduj(force=false,{render=true}={}){
   vonHalskyStan.loading=false;
   if(render&&String(trasa()).startsWith("/admin/von-halsky"))renderuj();
 }
-async function vonHalskyUzgodnijKatalog({silent=false,repeat=false}={}){
+async function vonHalskyUzgodnijKatalog({silent=false,repeat=false,render=true}={}){
   if(vonHalskyReconcilePromise)return vonHalskyReconcilePromise;
   vonHalskyReconcilePromise=(async()=>{
     try{
@@ -87,7 +78,7 @@ async function vonHalskyUzgodnijKatalog({silent=false,repeat=false}={}){
       vonHalskyZastosujAktualizacjeProduktow(data.productUpdates||[]);
       if(!silent)toast(`API potwierdza: ${data.truth?.published||0} w sprzedaży • ${data.truth?.pending||0} w publikacji • ${(data.reconciliation?.staleCleared||0)+(data.reconciliation?.duplicateMappings||0)} błędnych powiązań usunięto ✅`);
       if(repeat&&(Number(data.truth?.pending||0)>0||Number(data.reconciliation?.awaiting||0)>0)){
-        for(const delay of [5000,15000,30000])setTimeout(()=>vonHalskyUzgodnijKatalog({silent:true}),delay);
+        for(const delay of [5000,15000,30000])setTimeout(()=>vonHalskyUzgodnijKatalog({silent:true,render:false}),delay);
       }
       return data;
     }catch(error){
@@ -95,7 +86,7 @@ async function vonHalskyUzgodnijKatalog({silent=false,repeat=false}={}){
       throw error;
     }finally{
       vonHalskyReconcilePromise=null;
-      if(String(trasa()).startsWith("/admin/von-halsky"))renderuj();
+      if(render&&String(trasa()).startsWith("/admin/von-halsky"))renderuj();
     }
   })();
   return vonHalskyReconcilePromise;

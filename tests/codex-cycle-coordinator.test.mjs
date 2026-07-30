@@ -32,5 +32,7 @@ test('koordynator dostaje tylko ograniczone liczniki, bez danych klientów i sek
   assert.equal(snapshot.newOrders, 4);
   assert.equal(snapshot.editorial.pending, 75);
   assert.doesNotMatch(prompt, /klient@example|sekret/);
+  assert.match(prompt, /nadrzędnym koordynatorem i właścicielem wyniku Codex/);
+  assert.match(prompt, /Agenci są wyłącznie pomocnikami/);
   assert.match(prompt, /Nie zlecaj wysyłek, płatności, publikacji ani zmian magazynowych/);
 });

@@ -7,6 +7,7 @@ export function createAllegroPreparationRoute(deps = {}) {
     pool = null, namespace = 'artway-sklep',
     worker: workerDependencies,
     afterPrepare = null,
+    coordinate = null,
   } = deps;
   const prepare = createAllegroPreparationWorker({
     ...workerDependencies,
@@ -135,11 +136,57 @@ export function createAllegroPreparationRoute(deps = {}) {
       const automatic = await startBacklog(body);
       return respond({ ok: true, automatic }, automatic.skipped ? 200 : 202);
     }
-    const state = await prepareProducts(Array.isArray(body.productIds) ? body.productIds : [], {
+    const productIds = [...new Set((Array.isArray(body.productIds) ? body.productIds : []).map(String).filter(Boolean))];
+    const coordinationId = `codex-batch:${Date.now().toString(36)}`;
+    await runtime.report({
+      event: 'work_progress',
+      source: 'codex-coordinator',
+      work: {
+        id: coordinationId,
+        channel: 'system',
+        action: `koordynacja partii ${productIds.length} produktów`,
+        phase: 'planning',
+        status: 'running',
+        target: 'trwała kolejka przygotowania produktów',
+        message: 'Codex ustala kolejność i przekazuje ograniczone zadania agentom pomocniczym.',
+      },
+    }).catch(() => {});
+    const coordinated = typeof coordinate === 'function'
+      ? await coordinate({ kind: 'product.review', productIds }).catch((error) => ({
+        ok: false,
+        reason: text(error?.message || error, 240),
+        plan: null,
+      }))
+      : { ok: false, reason: 'coordinator_not_configured', plan: null };
+    const assignment = coordinated?.plan?.assignments?.find((item) => item.scenarioId === 'catalog-editorial') || null;
+    const state = await prepareProducts(productIds, {
       operation: text(body.operation || 'allegro', 40),
-      requestedBy: text(sessionOf(req)?.email || 'administrator', 200),
+      requestedBy: assignment ? 'codex-koordinator' : text(sessionOf(req)?.email || 'administrator', 200),
     });
-    return respond({ ok: true, queued: true, queue: state }, 202);
+    await runtime.report({
+      event: 'work_progress',
+      source: 'codex-coordinator',
+      work: {
+        id: coordinationId,
+        channel: 'system',
+        action: `koordynacja partii ${productIds.length} produktów`,
+        phase: assignment ? 'delegated' : 'safe_fallback',
+        status: 'confirmed',
+        target: 'trwała kolejka przygotowania produktów',
+        targetRef: state.batchId,
+        message: assignment
+          ? `Codex przydzielił ${assignment.scenarioId} v${assignment.scenarioVersion}; wykonanie trwa na serwerze.`
+          : `Plan Codex był niedostępny (${coordinated?.reason || 'brak odpowiedzi'}); bezpieczna kolejka deterministyczna została uruchomiona.`,
+      },
+    }).catch(() => {});
+    return respond({
+      ok: true,
+      queued: true,
+      queue: state,
+      coordinator: assignment
+        ? { id: 'codex', scenarioId: assignment.scenarioId, scenarioVersion: assignment.scenarioVersion }
+        : { id: 'codex', fallback: true, reason: coordinated?.reason || 'unavailable' },
+    }, 202);
   };
   allegroPreparationRoute.prepareProducts = prepareProducts;
   allegroPreparationRoute.startBacklog = startBacklog;

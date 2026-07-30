@@ -60,6 +60,7 @@ import { createInventoryDecisionService } from './domain/inventory-decisions.mjs
 import { createCodexAgentQueue } from './domain/codex-agent-queue.mjs';
 import { createAgentRuntime } from './domain/agent-runtime.mjs';
 import { createAgentEventSystem } from './domain/agent-event-system.mjs';
+import { createProductEventCodexCoordinator } from './domain/product-event-codex-coordinator.mjs';
 import { createAgentProductReport } from './domain/agent-product-report.mjs';
 import { createAgentRuntimeRoute } from './agent-runtime-route.mjs';
 import { createAgentSpecialists } from './domain/agent-specialists.mjs';
@@ -309,12 +310,12 @@ const inpostServiceShipmentRoute = createInpostServiceShipmentRoute({
 });
 const agentRuntime = createAgentRuntime({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
 const agentProductReport = createAgentProductReport({ pool: postgresPool, namespace: STORE_NAME });
+const coordinateProductEvent = createProductEventCodexCoordinator({ env: process.env });
 const agentEvents = createAgentEventSystem({
-  pool: postgresPool,
-  namespace: STORE_NAME,
-  readVersioned: czytajWersjonowane,
-  writeIfVersion: zapiszJesliWersja,
+  pool: postgresPool, namespace: STORE_NAME,
+  readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja,
   runtime: agentRuntime,
+  coordinate: coordinateProductEvent,
   text: tekst,
 });
 const { queue: agentEventQueue, emit: emitAgentEvent } = agentEvents;
@@ -394,6 +395,7 @@ const allegroPreparationRoute = createAllegroPreparationRoute({
   respond: odpowiedz, isAdmin: czyAdmin, sessionOf: requestSession, text: tekst,
   readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, runtime: agentRuntime,
   pool: postgresPool, namespace: STORE_NAME,
+  coordinate: coordinateProductEvent,
   afterPrepare: przygotujProduktVonHalskyPoPelnejKontroli,
   worker: {
     text: tekst, readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), loadProducts: allegroAgentProduktyKompletne,
@@ -3739,7 +3741,6 @@ export default async (req) => {
 
     const productLinkImportResponse = await productLinkImport.route(req, url, action);
     if (productLinkImportResponse) return productLinkImportResponse;
-
     const productAvailabilityResponse = await productAvailabilityRoute(req, url, action);
     if (productAvailabilityResponse) return productAvailabilityResponse;
 

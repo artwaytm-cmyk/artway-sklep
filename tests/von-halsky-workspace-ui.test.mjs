@@ -43,22 +43,26 @@ test("tabela Von Halsky przestrzega standardu desktop i mobile",async()=>{
   assert.match(style,/\.von-halsky-stage-filters\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)!important\}/);
 });
 
-test("przygotowanie Von Halsky pokazuje rzeczywisty postęp i zapisuje produkty pojedynczo",async()=>{
-  const [workspace,preparation,editor,style]=await Promise.all([
+test("przygotowanie Von Halsky pokazuje trwały proces serwerowy niezależny od przeglądarki",async()=>{
+  const [workspace,live,preparation,editor,style]=await Promise.all([
     read("src/frontend/11b-von-halsky-workspace.js"),
+    read("src/frontend/11b-von-halsky-live-process.js"),
     read("src/frontend/11c-von-halsky-preparation.js"),
     read("src/frontend/12-product-editor-workspace.js"),
     read("src/styles/37-von-halsky-workspace.css"),
   ]);
-  const source=workspace+preparation;
-  assert.match(source,/Rzeczywisty postęp przygotowania/);
-  assert.match(source,/for\(let index=0;index<ids\.length;index\+=1\)/);
-  assert.match(source,/body:\{productIds:\[productId\]\}/);
+  const source=workspace+live+preparation;
+  assert.match(source,/Trwały proces serwerowy/);
+  assert.match(source,/allegro-preparation-queue-enqueue/);
+  assert.match(source,/operation:"product-full-review"/);
+  assert.match(source,/allegro-preparation-queue-status/);
+  assert.match(source,/agent-runtime-status/);
   assert.match(source,/vonHalskyAktualizujPostepDOM/);
-  assert.match(source,/function vonHalskyWstrzymajPrzygotowanie/);
-  assert.match(source,/function vonHalskyWznowPrzygotowanie/);
-  assert.match(source,/function vonHalskyZatrzymajPrzygotowanie/);
-  assert.match(source,/Wstrzymaj po bieżącym/);
+  assert.doesNotMatch(source,/for\(let index=0;index<ids\.length;index\+=1\)/);
+  assert.doesNotMatch(source,/body:\{productIds:\[productId\]\}/);
+  assert.match(source,/możesz zamknąć tę kartę/);
+  assert.match(source,/Codex/);
+  assert.match(source,/Agenci pomocniczy/);
   assert.match(source,/leftQuality\.wynik-rightQuality\.wynik/);
   assert.match(source,/Zapis centralny potwierdzony/);
   assert.match(source,/href="#\/admin\/produkty\/edytuj\//);
@@ -68,22 +72,26 @@ test("przygotowanie Von Halsky pokazuje rzeczywisty postęp i zapisuje produkty 
   assert.match(editor,/vonHalskyAgentReadbackConfirmed/);
 });
 
-test("wynik przygotowania i publikacji od razu aktualizuje filtr bez przeładowania strony",async()=>{
-  const [workspace,preparation]=await Promise.all([
+test("wynik przygotowania i publikacji aktualizuje widok bez pełnego renderu strony",async()=>{
+  const [workspace,live,preparation]=await Promise.all([
     read("src/frontend/11b-von-halsky-workspace.js"),
+    read("src/frontend/11b-von-halsky-live-process.js"),
     read("src/frontend/11c-von-halsky-preparation.js"),
   ]);
-  const source=workspace+preparation;
+  const source=workspace+live+preparation;
   assert.match(source,/function vonHalskyMigawkaFiltrow/);
   assert.match(source,/function vonHalskyPrzywrocFiltry/);
   assert.match(source,/function vonHalskyZastosujAktualizacjeProduktow/);
-  assert.match(source,/if\(result\?\.product\)vonHalskyZastosujAktualizacjeProduktow/);
+  assert.match(source,/function vonHalskyOdmalujWystawianieBezSkoku/);
+  assert.match(source,/current\.outerHTML=vonHalskyWystawianieHTML\(\)/);
+  assert.match(source,/requestAnimationFrame\(\(\)=>window\.scrollTo\(x,y\)\)/);
   assert.match(source,/vonHalskyZastosujAktualizacjeProduktow\(data\.productUpdates\|\|\[\]\)/);
   assert.match(source,/if\(Array\.isArray\(data\.offers\)\)vonHalskyStan\.offers=data\.offers/);
   assert.match(source,/setInterval\(async\(\)=>\{/);
   assert.match(source,/product-catalog-query/);
-  assert.match(source,/sort:"najnowsze",page:1,limit:100/);
-  assert.match(source,/},15000\)/);
+  assert.match(source,/ids:\[\.\.\.new Set\(ids\)\]\.join\(","\)/);
+  assert.match(source,/},4000\)/);
+  assert.doesNotMatch(source,/sort:"najnowsze",page:1,limit:100/);
 });
 
 test("sprzedaż Von Halsky opiera się wyłącznie na potwierdzonym PUBLISHED z API",async()=>{
