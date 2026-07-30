@@ -3,11 +3,11 @@ import {
   dedicatedDomainStorageStatus,
   dedicatedTableForDomain,
   deleteDedicatedDomainRecords,
-  ensureDedicatedDomainSchema,
   migrateDedicatedDomainRecords,
   readDedicatedDomainRecords,
   replaceDedicatedDomainRecords,
 } from './dedicated-domain-storage.mjs';
+import { assertPostgresRelations } from './postgres-schema-contract.mjs';
 
 const SETTINGS_DOMAIN_CONFIGS = Object.freeze({
   artway_ustawienia: valueConfig(),
@@ -343,24 +343,20 @@ async function ensureNormalizedSchema(pool, namespace) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(`CREATE TABLE IF NOT EXISTS artway_kv_store(
-      namespace text NOT NULL,key text NOT NULL,value jsonb NOT NULL,version bigint NOT NULL DEFAULT 1,updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(namespace,key))`);
-    await client.query(`CREATE TABLE IF NOT EXISTS artway_domain_snapshots(
-      namespace text NOT NULL,domain text NOT NULL,metadata jsonb NOT NULL DEFAULT '{}'::jsonb,content_hash text NOT NULL DEFAULT '',version bigint NOT NULL DEFAULT 1,updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(namespace,domain))`);
-    await client.query("ALTER TABLE artway_domain_snapshots ADD COLUMN IF NOT EXISTS content_hash text NOT NULL DEFAULT ''");
-    await client.query(`CREATE TABLE IF NOT EXISTS artway_domain_records(
-      namespace text NOT NULL,domain text NOT NULL,collection text NOT NULL,record_id text NOT NULL,ordinal bigint NOT NULL DEFAULT 0,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(namespace,domain,collection,record_id))`);
-    await client.query(`DO $$ BEGIN
-      ALTER TABLE artway_domain_records ADD CONSTRAINT artway_domain_records_snapshot_fk
-        FOREIGN KEY(namespace,domain) REFERENCES artway_domain_snapshots(namespace,domain) ON DELETE CASCADE;
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
-    await client.query('CREATE INDEX IF NOT EXISTS artway_domain_records_order_idx ON artway_domain_records(namespace,domain,collection,ordinal)');
-    await client.query('CREATE INDEX IF NOT EXISTS artway_domain_records_data_idx ON artway_domain_records USING gin(data jsonb_path_ops)');
-    await client.query(`CREATE TABLE IF NOT EXISTS artway_domain_migrations(
-      namespace text NOT NULL,migration_id text NOT NULL,details jsonb NOT NULL DEFAULT '{}'::jsonb,completed_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(namespace,migration_id))`);
-    await client.query(`CREATE TABLE IF NOT EXISTS artway_domain_legacy_backup(
-      namespace text NOT NULL,key text NOT NULL,migration_id text NOT NULL,value jsonb NOT NULL,version bigint NOT NULL,updated_at timestamptz NOT NULL,backed_up_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(namespace,key,migration_id))`);
-    await ensureDedicatedDomainSchema(client);
+    await assertPostgresRelations(client, [
+      'artway_kv_store',
+      'artway_domain_snapshots',
+      'artway_domain_records',
+      'artway_domain_migrations',
+      'artway_domain_legacy_backup',
+      'artway_store_orders',
+      'artway_allegro_orders',
+      'artway_allegro_offers',
+      'artway_allegro_mappings',
+      'artway_allegro_communications',
+      'artway_agent_records',
+      'artway_domain_records_archive_v2',
+    ], 'domen operacyjnych');
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`artway-normalize:${namespace}`]);
     const migrationId = 'domain-records-v1';
     const done = await client.query('SELECT 1 FROM artway_domain_migrations WHERE namespace=$1 AND migration_id=$2', [namespace, migrationId]);

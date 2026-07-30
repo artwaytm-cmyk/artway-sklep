@@ -1,0 +1,17 @@
+[Unit]
+Description=Artway-TM migawka obserwowalności PostgreSQL
+After=postgresql.service artway-backend.service
+
+[Service]
+Type=oneshot
+User=artway
+Group=artway
+WorkingDirectory=/srv/artway/shop
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /srv/artway/shop/scripts/postgres-observability-snapshot.mjs
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/artway/ops/status
+TimeoutStartSec=90s

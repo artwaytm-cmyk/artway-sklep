@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { createNormalizedDomainRepository } from './normalized-domain-repository.mjs';
+import { assertPostgresRelations } from './postgres-schema-contract.mjs';
 
 const { Pool } = pg;
 const pools = new Map();
@@ -29,16 +30,11 @@ export function createPostgresStoreRepository({ name, connectionString = process
   let initialization = null;
   const ensureSchema = () => {
     if (!initialization) {
-      initialization = pool.query(`
-        CREATE TABLE IF NOT EXISTS artway_kv_store (
-          namespace TEXT NOT NULL,
-          key TEXT NOT NULL,
-          value JSONB NOT NULL,
-          version BIGINT NOT NULL DEFAULT 1,
-          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          PRIMARY KEY (namespace, key)
-        )
-      `).then(() => undefined);
+      initialization = assertPostgresRelations(
+        pool,
+        ['artway_kv_store'],
+        'magazynu ustawień',
+      ).then(() => undefined);
     }
     return initialization;
   };

@@ -88,7 +88,7 @@ try {
   // lub zależności. Dzięki temu zwykła publikacja UI nie tworzy krótkiego 502.
   const restartBackend = backendRequiresRestart();
   if (restartBackend) {
-    execFileSync('node', ['scripts/migrate-postgres.mjs'], { cwd: sourceRoot, stdio: 'inherit' });
+    execFileSync('sudo', ['-n', 'systemctl', 'start', 'artway-postgres-migrate.service'], { stdio: 'inherit' });
     restartProductionBackend();
   }
   const result = await deployStaticRelease({ sourceRoot, releasesRoot, currentLink, releaseId, commit, healthCheck: productionHealthCheck, keep });

@@ -1,6 +1,12 @@
 import { createCentralProductSynchronizer } from './central-product-synchronizer.mjs';
 import { createCentralProductMutations } from './central-product-mutations.mjs';
+import {
+  centralCatalogQueryOptions,
+  decodeCatalogCursor,
+  encodeCatalogCursor,
+} from './central-product-catalog-query.mjs';
 import crypto from 'node:crypto';
+import { assertPostgresRelations } from '../core/postgres-schema-contract.mjs';
 import { produktBezDanychPrywatnych } from '../infakt-purchase.mjs';
 import { mergeCatalogProducts } from './catalog-quality.mjs';
 import { canonicalManufacturerName } from './product-field-validation.mjs';
@@ -16,7 +22,6 @@ const numberOrNull = (value) => {
 const normalize = (value) => text(value, 5000).toLocaleLowerCase('pl-PL').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/[^a-z0-9]+/g, ' ').trim();
 const own = (object, key) => Object.prototype.hasOwnProperty.call(asObject(object), String(key)) || Object.prototype.hasOwnProperty.call(asObject(object), key);
 const searchTsQuery = (value) => normalize(value).split(/\s+/).filter(Boolean).slice(0, 12).map((token) => `${token}:*`).join(' & ');
-
 export const CENTRAL_PRODUCT_SCHEMA_VERSION = 7;
 const CENTRAL_PRODUCT_DERIVED_FIELDS = new Set(['_catalog', 'stan', 'dostepny']);
 
@@ -247,84 +252,22 @@ export function centralCatalogBuildRecords(data = {}, {
   }).filter(Boolean);
 }
 
-export function centralCatalogQueryOptions(raw = {}) {
-  const allowedSort = new Set(['external', 'id', 'nazwa', 'producent', 'kategoria', 'cena-rosnaco', 'cena-malejaco', 'stan', 'braki-danych', 'najnowsze', 'ocena']);
-  const list = (value, max = 1000) => [...new Set((Array.isArray(value) ? value : String(value || '').split(',')).map((item) => text(item, 300)).filter(Boolean))].slice(0, max);
-  return {
-    query: normalize(raw.query || raw.q), category: text(raw.category, 300), producer: text(raw.producer, 300), status: text(raw.status || 'active', 40), source: text(raw.source || 'wszystkie', 40), stock: text(raw.stock || 'wszystkie', 40), allegro: text(raw.allegro || 'wszystkie', 40), data: text(raw.data || 'wszystkie', 40), sale: text(raw.sale || 'wszystkie', 40), promotion: text(raw.promotion || 'wszystkie', 40), link: text(raw.link || 'wszystkie', 40),
-    categories: list(raw.categories, 200), ids: list(raw.ids, 1000), special: text(raw.special, 40), minRating: numberOrNull(raw.minRating),
-    priceMin: numberOrNull(raw.priceMin), priceMax: numberOrNull(raw.priceMax), allegroPriceMin: numberOrNull(raw.allegroPriceMin), allegroPriceMax: numberOrNull(raw.allegroPriceMax),
-    sort: allowedSort.has(String(raw.sort)) ? String(raw.sort) : 'external', page: Math.max(1, Number(raw.page) || 1), limit: Math.max(1, Math.min(1000, Number(raw.limit) || 50)), admin: raw.admin === true,
-  };
-}
+export { centralCatalogQueryOptions } from './central-product-catalog-query.mjs';
 
 export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' } = {}) {
   const available = !!pool, ns = text(namespace, 120) || 'artway-sklep'; let schemaPromise = null;
   const aggregateCache = new Map();
   const ensureSchema = async () => {
     if (!available) return false;
-    if (!schemaPromise) schemaPromise = pool.query(`
-      CREATE TABLE IF NOT EXISTS artway_products (
-        namespace TEXT NOT NULL, product_id TEXT NOT NULL, data JSONB NOT NULL, public_data JSONB NOT NULL, admin_list_data JSONB NOT NULL DEFAULT '{}'::jsonb, public_list_data JSONB NOT NULL DEFAULT '{}'::jsonb,
-        name TEXT NOT NULL DEFAULT '', search_text TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '', producer TEXT NOT NULL DEFAULT '',
-        external_id TEXT NOT NULL DEFAULT '', sku TEXT NOT NULL DEFAULT '', ean TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'bazowy',
-        record_status TEXT NOT NULL DEFAULT 'active', stock NUMERIC NULL, sale_available BOOLEAN NOT NULL DEFAULT TRUE, has_source BOOLEAN NOT NULL DEFAULT FALSE,
-        has_allegro BOOLEAN NOT NULL DEFAULT FALSE, allegro_status TEXT NOT NULL DEFAULT '', missing_fields JSONB NOT NULL DEFAULT '[]'::jsonb, missing_count INTEGER NOT NULL DEFAULT 0,
-        price NUMERIC NULL, allegro_price NUMERIC NULL, promotion BOOLEAN NOT NULL DEFAULT FALSE, new_product BOOLEAN NOT NULL DEFAULT FALSE, rating NUMERIC NULL, rating_count INTEGER NOT NULL DEFAULT 0, duplicate_store BOOLEAN NOT NULL DEFAULT FALSE, duplicate_allegro BOOLEAN NOT NULL DEFAULT FALSE,
-        fingerprint TEXT NOT NULL DEFAULT '', authoritative_fields JSONB NOT NULL DEFAULT '[]'::jsonb, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(namespace, product_id)
-      );
-      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS admin_list_data JSONB NOT NULL DEFAULT '{}'::jsonb;
-      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS public_list_data JSONB NOT NULL DEFAULT '{}'::jsonb;
-      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS new_product BOOLEAN NOT NULL DEFAULT FALSE;
-      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS rating NUMERIC NULL;
-      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS rating_count INTEGER NOT NULL DEFAULT 0;
-      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS authoritative_fields JSONB NOT NULL DEFAULT '[]'::jsonb;
-      ALTER TABLE artway_products ADD COLUMN IF NOT EXISTS search_vector tsvector GENERATED ALWAYS AS (to_tsvector('simple', search_text)) STORED;
-      CREATE INDEX IF NOT EXISTS artway_products_search_idx ON artway_products(namespace, search_text text_pattern_ops);
-      CREATE INDEX IF NOT EXISTS artway_products_category_idx ON artway_products(namespace, category);
-      CREATE INDEX IF NOT EXISTS artway_products_producer_idx ON artway_products(namespace, producer);
-      CREATE INDEX IF NOT EXISTS artway_products_status_idx ON artway_products(namespace, record_status, sale_available);
-      CREATE INDEX IF NOT EXISTS artway_products_external_idx ON artway_products(namespace, external_id, sku, ean);
-      CREATE INDEX IF NOT EXISTS artway_products_price_idx ON artway_products(namespace, price) WHERE record_status='active';
-      CREATE INDEX IF NOT EXISTS artway_products_allegro_price_idx ON artway_products(namespace, allegro_price) WHERE record_status='active';
-      CREATE INDEX IF NOT EXISTS artway_products_stock_idx ON artway_products(namespace, stock) WHERE record_status='active';
-      CREATE INDEX IF NOT EXISTS artway_products_missing_idx ON artway_products(namespace, missing_count) WHERE record_status='active';
-      CREATE INDEX IF NOT EXISTS artway_products_updated_idx ON artway_products(namespace, updated_at DESC) WHERE record_status='active';
-      CREATE INDEX IF NOT EXISTS artway_products_channel_idx ON artway_products(namespace, has_allegro, allegro_status) WHERE record_status='active';
-      CREATE INDEX IF NOT EXISTS artway_products_public_sort_idx ON artway_products(namespace, new_product, rating DESC) WHERE record_status='active' AND sale_available=true;
-      CREATE INDEX IF NOT EXISTS artway_products_search_vector_idx ON artway_products USING GIN(search_vector);
-      CREATE TABLE IF NOT EXISTS artway_product_catalog_meta (
-        namespace TEXT PRIMARY KEY, schema_version INTEGER NOT NULL DEFAULT 1, source_revision TEXT NOT NULL DEFAULT '', product_count INTEGER NOT NULL DEFAULT 0, synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE TABLE IF NOT EXISTS artway_product_mutations (
-        namespace TEXT NOT NULL,
-        mutation_id TEXT NOT NULL,
-        product_id TEXT NOT NULL,
-        area TEXT NOT NULL DEFAULT 'product',
-        actor TEXT NOT NULL DEFAULT 'system',
-        fields JSONB NOT NULL DEFAULT '{}'::jsonb,
-        remove_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
-        before_fingerprint TEXT NOT NULL DEFAULT '',
-        after_fingerprint TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'applied',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY(namespace, mutation_id)
-      );
-      CREATE INDEX IF NOT EXISTS artway_product_mutations_product_idx ON artway_product_mutations(namespace, product_id, created_at DESC);
-      CREATE TABLE IF NOT EXISTS artway_product_sequences (
-        namespace TEXT NOT NULL,
-        sequence_name TEXT NOT NULL,
-        next_value BIGINT NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY(namespace, sequence_name)
-      );
-      CREATE INDEX IF NOT EXISTS artway_products_import_item_idx
-        ON artway_products(namespace,(data->>'importItemKey'))
-        WHERE source='import';
-      CREATE INDEX IF NOT EXISTS artway_products_source_url_idx
-        ON artway_products(namespace,(data->>'sourceUrl'))
-        WHERE source='import';
-    `).then(() => true);
+    if (!schemaPromise) {
+      schemaPromise = assertPostgresRelations(pool, [
+        'artway_products',
+        'artway_storefront_products',
+        'artway_product_catalog_meta',
+        'artway_product_mutations',
+        'artway_product_sequences',
+      ], 'centralnego katalogu produktów').then(() => true);
+    }
     return schemaPromise;
   };
 
@@ -346,10 +289,14 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     const cached = aggregateCache.get(key);
     if (cached && Date.now() - cached.at < 5 * 60 * 1000) return cached.promise;
     const audienceWhere = admin ? "namespace=$1 AND record_status<>'removed'" : "namespace=$1 AND record_status='active' AND sale_available=true";
+    const table = admin ? 'artway_products' : 'artway_storefront_products';
+    const summarySql = admin
+      ? `SELECT COUNT(*)::bigint total,COUNT(*) FILTER(WHERE record_status='active')::bigint active,COUNT(*) FILTER(WHERE record_status='trash')::bigint trash,COUNT(*) FILTER(WHERE sale_available=false AND record_status='active')::bigint hidden,COUNT(*) FILTER(WHERE missing_count>0 AND record_status='active')::bigint missing,COUNT(*) FILTER(WHERE missing_count=0 AND sale_available=true AND record_status='active')::bigint ready,COUNT(*) FILTER(WHERE has_allegro=true AND record_status='active')::bigint connected,COUNT(*) FILTER(WHERE promotion=true AND record_status='active')::bigint promotions,COUNT(*) FILTER(WHERE new_product=true AND record_status='active')::bigint new_products,COUNT(*) FILTER(WHERE duplicate_store=true AND record_status='active')::bigint duplicate_store,COUNT(*) FILTER(WHERE duplicate_allegro=true AND record_status='active')::bigint duplicate_allegro FROM artway_products WHERE ${audienceWhere}`
+      : `SELECT COUNT(*)::bigint total,COUNT(*)::bigint active,0::bigint trash,0::bigint hidden,0::bigint missing,COUNT(*)::bigint ready,0::bigint connected,COUNT(*) FILTER(WHERE promotion=true)::bigint promotions,COUNT(*) FILTER(WHERE new_product=true)::bigint new_products,0::bigint duplicate_store,0::bigint duplicate_allegro FROM artway_storefront_products WHERE ${audienceWhere}`;
     const promise = Promise.all([
-      pool.query(`SELECT COUNT(*)::bigint total,COUNT(*) FILTER(WHERE record_status='active')::bigint active,COUNT(*) FILTER(WHERE record_status='trash')::bigint trash,COUNT(*) FILTER(WHERE sale_available=false AND record_status='active')::bigint hidden,COUNT(*) FILTER(WHERE missing_count>0 AND record_status='active')::bigint missing,COUNT(*) FILTER(WHERE missing_count=0 AND sale_available=true AND record_status='active')::bigint ready,COUNT(*) FILTER(WHERE has_allegro=true AND record_status='active')::bigint connected,COUNT(*) FILTER(WHERE promotion=true AND record_status='active')::bigint promotions,COUNT(*) FILTER(WHERE new_product=true AND record_status='active')::bigint new_products,COUNT(*) FILTER(WHERE duplicate_store=true AND record_status='active')::bigint duplicate_store,COUNT(*) FILTER(WHERE duplicate_allegro=true AND record_status='active')::bigint duplicate_allegro FROM artway_products WHERE ${audienceWhere}`, [ns]),
-      pool.query(`SELECT category value,COUNT(*)::bigint count FROM artway_products WHERE ${audienceWhere} AND category<>'' GROUP BY category ORDER BY category`, [ns]),
-      pool.query(`SELECT producer value,COUNT(*)::bigint count FROM artway_products WHERE ${audienceWhere} AND producer<>'' GROUP BY producer ORDER BY producer`, [ns]),
+      pool.query(summarySql, [ns]),
+      pool.query(`SELECT category value,COUNT(*)::bigint count FROM ${table} WHERE ${audienceWhere} AND category<>'' GROUP BY category ORDER BY category`, [ns]),
+      pool.query(`SELECT producer value,COUNT(*)::bigint count FROM ${table} WHERE ${audienceWhere} AND producer<>'' GROUP BY producer ORDER BY producer`, [ns]),
     ]).then(([summaryResult, categories, producers]) => ({
       summary: Object.fromEntries(Object.entries(summaryResult.rows[0] || {}).map(([name, value]) => [name, Number(value) || 0])),
       facets: {
@@ -365,6 +312,8 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
   const query = async (raw = {}) => {
     if (!available) return { available: false, items: [], total: 0, page: 1, limit: 50, summary: {}, facets: { categories: [], producers: [] } };
     await ensureSchema(); const options = centralCatalogQueryOptions(raw), values = [ns], clauses = ['namespace=$1', "record_status<>'removed'"];
+    const table = options.admin ? 'artway_products' : 'artway_storefront_products';
+    const listColumn = options.admin ? 'admin_list_data' : 'list_data';
     const add = (sql, value) => { values.push(value); clauses.push(sql.replace('?', `$${values.length}`)); };
     if (!options.admin) clauses.push("record_status='active'", 'sale_available=true');
     if (options.query) add("search_vector @@ to_tsquery('simple', ?)", searchTsQuery(options.query));
@@ -372,33 +321,92 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     if (options.categories.length) { values.push(options.categories); clauses.push(`category=ANY($${values.length}::text[])`); }
     if (options.ids.length) { values.push(options.ids); clauses.push(`product_id=ANY($${values.length}::text[])`); }
     if (options.producer && options.producer !== 'wszyscy') add('producer=?', options.producer);
-    if (options.status === 'active') clauses.push("record_status='active'"); else if (options.status === 'trash') clauses.push("record_status='trash'"); else if (options.status === 'duplikaty') clauses.push('duplicate_store=true');
-    if (options.source === 'bazowe') clauses.push("source='bazowy'"); else if (options.source === 'wlasne') clauses.push("source IN ('dodany','import')");
-    if (options.stock === 'dostepne') clauses.push('(stock IS NULL OR stock>0)'); else if (options.stock === 'niskie') clauses.push('stock BETWEEN 1 AND 5'); else if (options.stock === 'brak') clauses.push('stock=0');
-    if (options.allegro === 'polaczone') clauses.push('has_allegro=true'); else if (options.allegro === 'brak') clauses.push('has_allegro=false'); else if (options.allegro === 'aktywne') clauses.push("allegro_status='ACTIVE'"); else if (options.allegro === 'szkice') clauses.push("has_allegro=true AND allegro_status<>'ACTIVE'"); else if (options.allegro === 'duplikaty') clauses.push('duplicate_allegro=true');
-    const missingMap = { ean: 'ean', zdjecie: 'zdjecie', opis: 'opis', producent: 'producent', kategoria: 'kategoria', zrodlo: 'zrodlo', koszt: 'koszt' };
-    if (options.data === 'gotowe') clauses.push('missing_count=0'); else if (options.data === 'braki') clauses.push('missing_count>0'); else if (missingMap[options.data]) { values.push(missingMap[options.data]); clauses.push(`missing_fields ? $${values.length}`); }
-    if (options.sale === 'dostepne') clauses.push('sale_available=true'); else if (options.sale === 'niedostepne') clauses.push('sale_available=false');
+    if (options.admin) {
+      if (options.status === 'active') clauses.push("record_status='active'"); else if (options.status === 'trash') clauses.push("record_status='trash'"); else if (options.status === 'duplikaty') clauses.push('duplicate_store=true');
+      if (options.source === 'bazowe') clauses.push("source='bazowy'"); else if (options.source === 'wlasne') clauses.push("source IN ('dodany','import')");
+      if (options.stock === 'dostepne') clauses.push('(stock IS NULL OR stock>0)'); else if (options.stock === 'niskie') clauses.push('stock BETWEEN 1 AND 5'); else if (options.stock === 'brak') clauses.push('stock=0');
+      if (options.allegro === 'polaczone') clauses.push('has_allegro=true'); else if (options.allegro === 'brak') clauses.push('has_allegro=false'); else if (options.allegro === 'aktywne') clauses.push("allegro_status='ACTIVE'"); else if (options.allegro === 'szkice') clauses.push("has_allegro=true AND allegro_status<>'ACTIVE'"); else if (options.allegro === 'duplikaty') clauses.push('duplicate_allegro=true');
+      const missingMap = { ean: 'ean', zdjecie: 'zdjecie', opis: 'opis', producent: 'producent', kategoria: 'kategoria', zrodlo: 'zrodlo', koszt: 'koszt' };
+      if (options.data === 'gotowe') clauses.push('missing_count=0'); else if (options.data === 'braki') clauses.push('missing_count>0'); else if (missingMap[options.data]) { values.push(missingMap[options.data]); clauses.push(`missing_fields ? $${values.length}`); }
+      if (options.sale === 'dostepne') clauses.push('sale_available=true'); else if (options.sale === 'niedostepne') clauses.push('sale_available=false');
+      if (options.link === 'z_linkiem') clauses.push('has_source=true'); else if (options.link === 'bez_linku') clauses.push('has_source=false');
+      if (options.allegroPriceMin !== null) add('allegro_price>=?', options.allegroPriceMin);
+      if (options.allegroPriceMax !== null) add('allegro_price<=?', options.allegroPriceMax);
+    }
     if (options.promotion === 'promocje') clauses.push('promotion=true'); else if (options.promotion === 'regularne') clauses.push('promotion=false');
     if (options.special === 'nowosci') clauses.push('new_product=true');
     if (options.minRating !== null) add('rating>=?', options.minRating);
-    if (options.link === 'z_linkiem') clauses.push('has_source=true'); else if (options.link === 'bez_linku') clauses.push('has_source=false');
-    if (options.priceMin !== null) add('price>=?', options.priceMin); if (options.priceMax !== null) add('price<=?', options.priceMax); if (options.allegroPriceMin !== null) add('allegro_price>=?', options.allegroPriceMin); if (options.allegroPriceMax !== null) add('allegro_price<=?', options.allegroPriceMax);
-    const where = clauses.join(' AND '), order = { external:"NULLIF(external_id,'') ASC NULLS LAST,NULLIF(sku,'') ASC NULLS LAST,product_id ASC", id:'product_id ASC', nazwa:'name ASC,product_id ASC', producent:'producer ASC,name ASC', kategoria:'category ASC,name ASC', 'cena-rosnaco':'price ASC NULLS LAST,name ASC', 'cena-malejaco':'price DESC NULLS LAST,name ASC', stan:'stock ASC NULLS LAST,name ASC', 'braki-danych':'missing_count DESC,name ASC', najnowsze:'updated_at DESC,product_id DESC', ocena:'rating DESC NULLS LAST,rating_count DESC,name ASC' }[options.sort];
-    const offset = (options.page - 1) * options.limit, pageValues = [...values, options.limit, offset], limitRef = `$${values.length + 1}`, offsetRef = `$${values.length + 2}`;
+    if (options.priceMin !== null) add('price>=?', options.priceMin);
+    if (options.priceMax !== null) add('price<=?', options.priceMax);
+    let effectiveSort = options.sort;
+    if (!options.admin && ['stan', 'braki-danych'].includes(effectiveSort)) effectiveSort = 'external';
+    const countWhere = clauses.join(' AND ');
+    const countValues = [...values];
+    const cursor = decodeCatalogCursor(options.cursor);
+    const cursorSupported = ['external', 'id'].includes(effectiveSort);
+    if (options.cursor && cursorSupported && cursor.sort === effectiveSort) {
+      if (effectiveSort === 'external' && cursor.productId) {
+        values.push(text(cursor.externalId, 200), text(cursor.sku, 200), text(cursor.productId, 120));
+        clauses.push(`(
+          COALESCE(NULLIF(external_id,''),U&'\\FFFF'),
+          COALESCE(NULLIF(sku,''),U&'\\FFFF'),
+          product_id
+        ) > (
+          COALESCE(NULLIF($${values.length - 2},''),U&'\\FFFF'),
+          COALESCE(NULLIF($${values.length - 1},''),U&'\\FFFF'),
+          $${values.length}
+        )`);
+      } else if (effectiveSort === 'id' && cursor.productId) {
+        add('product_id>?', text(cursor.productId, 120));
+      }
+    }
+    const where = clauses.join(' AND ');
+    const order = {
+      external: "COALESCE(NULLIF(external_id,''),U&'\\FFFF') ASC,COALESCE(NULLIF(sku,''),U&'\\FFFF') ASC,product_id ASC",
+      id: 'product_id ASC',
+      nazwa: 'name ASC,product_id ASC',
+      producent: 'producer ASC,name ASC',
+      kategoria: 'category ASC,name ASC',
+      'cena-rosnaco': 'price ASC NULLS LAST,name ASC',
+      'cena-malejaco': 'price DESC NULLS LAST,name ASC',
+      stan: 'stock ASC NULLS LAST,name ASC',
+      'braki-danych': 'missing_count DESC,name ASC',
+      najnowsze: 'updated_at DESC,product_id DESC',
+      ocena: 'rating DESC NULLS LAST,rating_count DESC,name ASC',
+    }[effectiveSort];
+    const useCursor = cursorSupported && (options.cursor || options.page === 1);
+    const offset = useCursor ? 0 : (options.page - 1) * options.limit;
+    const pageValues = [...values, options.limit + 1, offset];
+    const limitRef = `$${values.length + 1}`, offsetRef = `$${values.length + 2}`;
     const meta = await metadata();
     const [rows, count, aggregate] = await Promise.all([
-      pool.query(`SELECT ${options.admin ? 'admin_list_data' : 'public_list_data'} product FROM artway_products WHERE ${where} ORDER BY ${order} LIMIT ${limitRef} OFFSET ${offsetRef}`, pageValues),
-      pool.query(`SELECT COUNT(*)::bigint total FROM artway_products WHERE ${where}`, values),
+      pool.query(`SELECT ${listColumn} product,product_id,external_id,sku FROM ${table} WHERE ${where} ORDER BY ${order} LIMIT ${limitRef} OFFSET ${offsetRef}`, pageValues),
+      pool.query(`SELECT COUNT(*)::bigint total FROM ${table} WHERE ${countWhere}`, countValues),
       aggregates(options.admin, meta.sourceRevision),
     ]);
+    const hasMore = rows.rows.length > options.limit;
+    const selectedRows = rows.rows.slice(0, options.limit);
+    const last = selectedRows.at(-1);
+    const nextCursor = hasMore && cursorSupported && last
+      ? encodeCatalogCursor({
+        version: 1,
+        sort: effectiveSort,
+        productId: last.product_id,
+        ...(effectiveSort === 'external' ? { externalId: last.external_id, sku: last.sku } : {}),
+      })
+      : null;
     const total = Number(count.rows[0]?.total) || 0;
-    const ids = options.admin && total <= 5000 ? (await pool.query(`SELECT product_id FROM artway_products WHERE ${where} ORDER BY ${order}`, values)).rows.map((row) => row.product_id) : null;
-    return { available: true, items: rows.rows.map((row) => row.product), ids, total, page: options.page, limit: options.limit, summary: aggregate.summary, facets: aggregate.facets, revision: meta.sourceRevision, syncedAt: meta.syncedAt };
+    const ids = options.admin && total <= 5000 ? (await pool.query(`SELECT product_id FROM artway_products WHERE ${countWhere} ORDER BY ${order}`, countValues)).rows.map((row) => row.product_id) : null;
+    return { available: true, items: selectedRows.map((row) => row.product), ids, total, page: options.page, limit: options.limit, nextCursor, pagination: cursorSupported ? 'cursor' : 'offset', summary: aggregate.summary, facets: aggregate.facets, revision: meta.sourceRevision, syncedAt: meta.syncedAt };
   };
 
   const get = async (id, { admin = false } = {}) => {
-    if (!available) return null; await ensureSchema(); const result = await pool.query(`SELECT ${admin ? 'data' : 'public_data'} product FROM artway_products WHERE namespace=$1 AND product_id=$2 AND record_status<>'removed'${admin ? '' : " AND record_status='active' AND sale_available=true"}`, [ns, text(id, 120)]); return result.rows[0]?.product || null;
+    if (!available) return null;
+    await ensureSchema();
+    const result = admin
+      ? await pool.query("SELECT data product FROM artway_products WHERE namespace=$1 AND product_id=$2 AND record_status<>'removed'", [ns, text(id, 120)])
+      : await pool.query("SELECT public_data product FROM artway_storefront_products WHERE namespace=$1 AND product_id=$2 AND record_status='active' AND sale_available=true", [ns, text(id, 120)]);
+    return result.rows[0]?.product || null;
   };
 
   /**

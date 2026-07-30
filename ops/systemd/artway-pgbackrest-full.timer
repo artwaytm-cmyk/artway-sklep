@@ -1,0 +1,10 @@
+[Unit]
+Description=Artway-TM cotygodniowa pełna kopia PITR
+
+[Timer]
+OnCalendar=Sun *-*-* 02:15:00 Europe/Warsaw
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

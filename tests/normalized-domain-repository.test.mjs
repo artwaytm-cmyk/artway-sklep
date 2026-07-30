@@ -110,9 +110,11 @@ test('największe domeny operacyjne mają własne tabele zamiast wspólnej tabel
 
 test('dedykowana migracja zachowuje kopię wycofania i usuwa aktywne duplikaty z tabeli ogólnej', async () => {
   const source = await readFile(new URL('../src/backend/lib/core/dedicated-domain-storage.mjs', import.meta.url), 'utf8');
+  const baseline = await readFile(new URL('../db/migrations/0000_runtime_schema_baseline.sql', import.meta.url), 'utf8');
   assert.match(source, /artway_domain_records_archive_v2/);
   assert.match(source, /INSERT INTO artway_domain_records_archive_v2/);
   assert.match(source, /DELETE FROM artway_domain_records WHERE namespace=\$1 AND domain=\$2/);
   assert.match(source, /dedicated-domain-tables-v2/);
-  assert.match(source, /ON DELETE CASCADE/);
+  assert.match(baseline, /ON DELETE CASCADE/);
+  assert.doesNotMatch(source, /CREATE TABLE|ALTER TABLE|CREATE INDEX/);
 });

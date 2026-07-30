@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { assertPostgresRelations } from '../core/postgres-schema-contract.mjs';
 
 const STATE_KEY = 'allegro_preparation_queue';
 
@@ -22,62 +23,19 @@ export function createPostgresAllegroPreparationQueue({
   let retryTimer = null;
 
   const ensureSchema = async () => {
-    if (!schemaPromise) schemaPromise = pool.query(`
-      CREATE TABLE IF NOT EXISTS artway_allegro_preparation_tasks (
-        namespace TEXT NOT NULL,
-        task_id TEXT NOT NULL,
-        batch_id TEXT NOT NULL,
-        product_id TEXT NOT NULL,
-        operation TEXT NOT NULL DEFAULT 'allegro',
-        requested_by TEXT NOT NULL DEFAULT 'administrator',
-        requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        priority INTEGER NOT NULL DEFAULT 0,
-        priority_reason TEXT NOT NULL DEFAULT '',
-        attempt INTEGER NOT NULL DEFAULT 0,
-        skip_editorial BOOLEAN NOT NULL DEFAULT FALSE,
-        status TEXT NOT NULL DEFAULT 'pending',
-        result JSONB NOT NULL DEFAULT '{}'::jsonb,
-        started_at TIMESTAMPTZ NULL,
-        completed_at TIMESTAMPTZ NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY(namespace, task_id)
-      );
-      ALTER TABLE artway_allegro_preparation_tasks
-        ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 0;
-      ALTER TABLE artway_allegro_preparation_tasks
-        ADD COLUMN IF NOT EXISTS priority_reason TEXT NOT NULL DEFAULT '';
-      CREATE UNIQUE INDEX IF NOT EXISTS artway_allegro_preparation_active_product_idx
-        ON artway_allegro_preparation_tasks(namespace, product_id)
-        WHERE status IN ('pending','running');
-      CREATE INDEX IF NOT EXISTS artway_allegro_preparation_status_idx
-        ON artway_allegro_preparation_tasks(namespace, status, priority DESC, requested_at, task_id);
-      CREATE INDEX IF NOT EXISTS artway_allegro_preparation_priority_idx
-        ON artway_allegro_preparation_tasks(namespace, status, priority DESC, requested_at, task_id);
-      CREATE TABLE IF NOT EXISTS artway_allegro_preparation_batches (
-        namespace TEXT NOT NULL,
-        batch_id TEXT NOT NULL,
-        operation TEXT NOT NULL DEFAULT 'allegro',
-        requested_by TEXT NOT NULL DEFAULT 'administrator',
-        requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        requested_product_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-        tracked_task_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-        enqueued INTEGER NOT NULL DEFAULT 0,
-        duplicates_skipped INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY(namespace, batch_id)
-      );
-      CREATE INDEX IF NOT EXISTS artway_allegro_preparation_batches_requested_idx
-        ON artway_allegro_preparation_batches(namespace, requested_at DESC);
-      CREATE TABLE IF NOT EXISTS artway_allegro_preparation_state (
-        namespace TEXT PRIMARY KEY,
-        blocked_until TIMESTAMPTZ NULL,
-        blocked_reason TEXT NOT NULL DEFAULT '',
-        legacy_migrated BOOLEAN NOT NULL DEFAULT FALSE,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      INSERT INTO artway_allegro_preparation_state(namespace)
-      VALUES('${ns.replace(/'/g, "''")}')
-      ON CONFLICT(namespace) DO NOTHING;
-    `);
+    if (!schemaPromise) {
+      schemaPromise = assertPostgresRelations(pool, [
+        'artway_allegro_preparation_tasks',
+        'artway_allegro_preparation_batches',
+        'artway_allegro_preparation_state',
+      ], 'kolejki przygotowania Allegro').then(async () => {
+        await pool.query(`
+          INSERT INTO artway_allegro_preparation_state(namespace)
+          VALUES($1)
+          ON CONFLICT(namespace) DO NOTHING
+        `, [ns]);
+      });
+    }
     return schemaPromise;
   };
 

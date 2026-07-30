@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { assertPostgresRelations } from '../core/postgres-schema-contract.mjs';
 
 const FALLBACK_KEY = 'agent_event_queue';
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
@@ -93,35 +94,13 @@ export function createAgentEventQueue({
 
   async function ensureSchema() {
     if (!pool) return;
-    if (!schemaPromise) schemaPromise = pool.query(`
-      CREATE TABLE IF NOT EXISTS artway_agent_events (
-        namespace TEXT NOT NULL,
-        event_id TEXT NOT NULL,
-        event_type TEXT NOT NULL,
-        area TEXT NOT NULL DEFAULT 'system',
-        entity_id TEXT NOT NULL DEFAULT '',
-        dedupe_key TEXT NOT NULL,
-        source TEXT NOT NULL DEFAULT 'server',
-        priority INTEGER NOT NULL DEFAULT 100,
-        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-        status TEXT NOT NULL DEFAULT 'queued',
-        attempts INTEGER NOT NULL DEFAULT 0,
-        result JSONB NOT NULL DEFAULT '{}'::jsonb,
-        last_error TEXT NOT NULL DEFAULT '',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        started_at TIMESTAMPTZ NULL,
-        completed_at TIMESTAMPTZ NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        PRIMARY KEY(namespace, event_id)
+    if (!schemaPromise) {
+      schemaPromise = assertPostgresRelations(
+        pool,
+        ['artway_agent_events'],
+        'kolejki zdarzeń Agenta',
       );
-      CREATE UNIQUE INDEX IF NOT EXISTS artway_agent_events_active_dedupe_idx
-        ON artway_agent_events(namespace, dedupe_key)
-        WHERE status IN ('queued','running');
-      CREATE INDEX IF NOT EXISTS artway_agent_events_claim_idx
-        ON artway_agent_events(namespace, status, priority DESC, created_at, event_id);
-      CREATE INDEX IF NOT EXISTS artway_agent_events_recent_idx
-        ON artway_agent_events(namespace, updated_at DESC);
-    `);
+    }
     await schemaPromise;
   }
 

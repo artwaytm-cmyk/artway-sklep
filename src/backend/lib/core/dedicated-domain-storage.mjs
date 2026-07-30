@@ -1,3 +1,5 @@
+import { assertPostgresRelations } from './postgres-schema-contract.mjs';
+
 const DOMAIN_TABLES = Object.freeze({
   'kv:orders': 'artway_store_orders',
   'kv:deleted_orders': 'artway_store_orders',
@@ -29,74 +31,15 @@ export function dedicatedDomains() {
 }
 
 export async function ensureDedicatedDomainSchema(client) {
-  await client.query(`CREATE TABLE IF NOT EXISTS artway_store_orders(
-    namespace text NOT NULL,domain text NOT NULL,collection text NOT NULL,record_id text NOT NULL,
-    ordinal bigint NOT NULL DEFAULT 0,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),
-    status text GENERATED ALWAYS AS (COALESCE(data->>'status','')) STORED,
-    customer_email text GENERATED ALWAYS AS (lower(COALESCE(data->>'email',data->>'customerEmail',''))) STORED,
-    PRIMARY KEY(namespace,domain,collection,record_id),
-    FOREIGN KEY(namespace,domain) REFERENCES artway_domain_snapshots(namespace,domain) ON DELETE CASCADE)`);
-  await client.query('CREATE INDEX IF NOT EXISTS artway_store_orders_status_idx ON artway_store_orders(namespace,domain,status,ordinal)');
-  await client.query('CREATE INDEX IF NOT EXISTS artway_store_orders_email_idx ON artway_store_orders(namespace,customer_email) WHERE customer_email<>\'\'');
-
-  await client.query(`CREATE TABLE IF NOT EXISTS artway_allegro_orders(
-    namespace text NOT NULL,domain text NOT NULL,collection text NOT NULL,record_id text NOT NULL,
-    ordinal bigint NOT NULL DEFAULT 0,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),
-    status text GENERATED ALWAYS AS (COALESCE(data->>'status',data->>'fulfillmentStatus','')) STORED,
-    checkout_form_id text GENERATED ALWAYS AS (COALESCE(data->>'checkoutFormId',data->>'checkout_form_id','')) STORED,
-    PRIMARY KEY(namespace,domain,collection,record_id),
-    FOREIGN KEY(namespace,domain) REFERENCES artway_domain_snapshots(namespace,domain) ON DELETE CASCADE)`);
-  await client.query('CREATE INDEX IF NOT EXISTS artway_allegro_orders_status_idx ON artway_allegro_orders(namespace,status,ordinal)');
-  await client.query('CREATE INDEX IF NOT EXISTS artway_allegro_orders_checkout_idx ON artway_allegro_orders(namespace,checkout_form_id) WHERE checkout_form_id<>\'\'');
-
-  await client.query(`CREATE TABLE IF NOT EXISTS artway_allegro_offers(
-    namespace text NOT NULL,domain text NOT NULL,collection text NOT NULL,record_id text NOT NULL,
-    ordinal bigint NOT NULL DEFAULT 0,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),
-    status text GENERATED ALWAYS AS (COALESCE(data->>'status',data#>>'{publication,status}','')) STORED,
-    product_id text GENERATED ALWAYS AS (COALESCE(data->>'productId',data#>>'{product,id}','')) STORED,
-    PRIMARY KEY(namespace,domain,collection,record_id),
-    FOREIGN KEY(namespace,domain) REFERENCES artway_domain_snapshots(namespace,domain) ON DELETE CASCADE)`);
-  await client.query('CREATE INDEX IF NOT EXISTS artway_allegro_offers_status_idx ON artway_allegro_offers(namespace,status,ordinal)');
-  await client.query('CREATE INDEX IF NOT EXISTS artway_allegro_offers_product_idx ON artway_allegro_offers(namespace,product_id) WHERE product_id<>\'\'');
-  await client.query('CREATE INDEX IF NOT EXISTS artway_allegro_offers_data_idx ON artway_allegro_offers USING gin(data jsonb_path_ops)');
-
-  await client.query(`CREATE TABLE IF NOT EXISTS artway_allegro_mappings(
-    namespace text NOT NULL,domain text NOT NULL,collection text NOT NULL,record_id text NOT NULL,
-    ordinal bigint NOT NULL DEFAULT 0,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),
-    product_id text GENERATED ALWAYS AS (COALESCE(data->>'productId','')) STORED,
-    mapping_state text GENERATED ALWAYS AS (COALESCE(data->>'mappingRole',data->>'lifecycle',data->>'status','')) STORED,
-    PRIMARY KEY(namespace,domain,collection,record_id),
-    FOREIGN KEY(namespace,domain) REFERENCES artway_domain_snapshots(namespace,domain) ON DELETE CASCADE)`);
-  await client.query('CREATE INDEX IF NOT EXISTS artway_allegro_mappings_product_idx ON artway_allegro_mappings(namespace,product_id) WHERE product_id<>\'\'');
-  await client.query('CREATE INDEX IF NOT EXISTS artway_allegro_mappings_state_idx ON artway_allegro_mappings(namespace,mapping_state)');
-
-  await client.query(`CREATE TABLE IF NOT EXISTS artway_allegro_communications(
-    namespace text NOT NULL,domain text NOT NULL,collection text NOT NULL,record_id text NOT NULL,
-    ordinal bigint NOT NULL DEFAULT 0,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),
-    status text GENERATED ALWAYS AS (COALESCE(data->>'status',data->>'state','')) STORED,
-    buyer_login text GENERATED ALWAYS AS (lower(COALESCE(data->>'buyerLogin',data#>>'{interlocutor,login}',''))) STORED,
-    PRIMARY KEY(namespace,domain,collection,record_id),
-    FOREIGN KEY(namespace,domain) REFERENCES artway_domain_snapshots(namespace,domain) ON DELETE CASCADE)`);
-  await client.query('CREATE INDEX IF NOT EXISTS artway_allegro_communications_status_idx ON artway_allegro_communications(namespace,domain,collection,status,ordinal)');
-  await client.query('CREATE INDEX IF NOT EXISTS artway_allegro_communications_buyer_idx ON artway_allegro_communications(namespace,buyer_login) WHERE buyer_login<>\'\'');
-  await client.query('CREATE INDEX IF NOT EXISTS artway_allegro_communications_data_idx ON artway_allegro_communications USING gin(data jsonb_path_ops)');
-
-  await client.query(`CREATE TABLE IF NOT EXISTS artway_agent_records(
-    namespace text NOT NULL,domain text NOT NULL,collection text NOT NULL,record_id text NOT NULL,
-    ordinal bigint NOT NULL DEFAULT 0,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),
-    state text GENERATED ALWAYS AS (COALESCE(data->>'state',data->>'status','')) STORED,
-    event_at text GENERATED ALWAYS AS (COALESCE(data->>'at',data->>'createdAt',data->>'updatedAt','')) STORED,
-    PRIMARY KEY(namespace,domain,collection,record_id),
-    FOREIGN KEY(namespace,domain) REFERENCES artway_domain_snapshots(namespace,domain) ON DELETE CASCADE)`);
-  await client.query('CREATE INDEX IF NOT EXISTS artway_agent_records_state_idx ON artway_agent_records(namespace,domain,collection,state,ordinal)');
-  await client.query('CREATE INDEX IF NOT EXISTS artway_agent_records_time_idx ON artway_agent_records(namespace,event_at DESC) WHERE event_at<>\'\'');
-  await client.query('CREATE INDEX IF NOT EXISTS artway_agent_records_data_idx ON artway_agent_records USING gin(data jsonb_path_ops)');
-
-  await client.query(`CREATE TABLE IF NOT EXISTS artway_domain_records_archive_v2(
-    migration_id text NOT NULL,namespace text NOT NULL,domain text NOT NULL,collection text NOT NULL,
-    record_id text NOT NULL,ordinal bigint NOT NULL,data jsonb NOT NULL,updated_at timestamptz NOT NULL,
-    archived_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY(migration_id,namespace,domain,collection,record_id))`);
+  return assertPostgresRelations(client, [
+    'artway_store_orders',
+    'artway_allegro_orders',
+    'artway_allegro_offers',
+    'artway_allegro_mappings',
+    'artway_allegro_communications',
+    'artway_agent_records',
+    'artway_domain_records_archive_v2',
+  ], 'dedykowanych domen');
 }
 
 export async function readDedicatedDomainRecords(client, namespace, domain) {

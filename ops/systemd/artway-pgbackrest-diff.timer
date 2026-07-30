@@ -1,0 +1,10 @@
+[Unit]
+Description=Artway-TM codzienna różnicowa kopia PITR
+
+[Timer]
+OnCalendar=Mon..Sat *-*-* 02:15:00 Europe/Warsaw
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

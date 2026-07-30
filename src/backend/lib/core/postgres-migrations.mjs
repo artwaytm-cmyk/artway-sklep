@@ -11,6 +11,7 @@ function checksum(content = '') {
 export async function runPostgresMigrations({
   pool,
   directory = path.resolve(process.cwd(), 'db/migrations'),
+  ownerRole = '',
 } = {}) {
   if (!pool || typeof pool.connect !== 'function') {
     throw new TypeError('Migracje PostgreSQL wymagają puli połączeń.');
@@ -22,6 +23,10 @@ export async function runPostgresMigrations({
   const applied = [];
   try {
     await client.query("SELECT pg_advisory_lock(hashtext('artway-schema-migrations-v1'))");
+    if (ownerRole) {
+      if (!/^[a-z_][a-z0-9_]*$/i.test(ownerRole)) throw new Error('Nieprawidłowa rola właściciela migracji.');
+      await client.query(`SET ROLE ${ownerRole}`);
+    }
     await client.query(`
       CREATE TABLE IF NOT EXISTS artway_schema_migrations (
         version TEXT PRIMARY KEY,
@@ -60,6 +65,7 @@ export async function runPostgresMigrations({
     }
     return { ok: true, applied, total: files.length };
   } finally {
+    await client.query('RESET ROLE').catch(() => {});
     await client.query("SELECT pg_advisory_unlock(hashtext('artway-schema-migrations-v1'))").catch(() => {});
     client.release();
   }
