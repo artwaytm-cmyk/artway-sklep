@@ -2,6 +2,7 @@ import { createCentralProductSynchronizer } from './central-product-synchronizer
 import { createCentralProductMutations } from './central-product-mutations.mjs';
 import {
   centralCatalogQueryOptions,
+  CENTRAL_IMPORTED_PRODUCT_MATCH_SQL,
   decodeCatalogCursor,
   encodeCatalogCursor,
 } from './central-product-catalog-query.mjs';
@@ -507,30 +508,12 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     const producer = normalize(source.producent || source.marka).replace(/\s+/g, '');
     const producerCode = normalize(source.kodProducenta || source.mpn).replace(/\s+/g, '');
     if (![itemKey, url, ean, externalId, producer && producerCode].some(Boolean)) return null;
-    const result = await pool.query(`
-      SELECT data,
-        CASE
-          WHEN $2<>'' AND data->>'importItemKey'=$2 THEN 'import_item_key'
-          WHEN $3<>'' AND (data->>'sourceUrl'=$3 OR data->>'producentUrl'=$3) THEN 'source_url'
-          WHEN $4<>'' AND ean=$4 THEN 'gtin'
-          WHEN $5<>'' AND (external_id=$5 OR sku=$5) THEN 'external_id'
-          ELSE 'manufacturer_code'
-        END reason
-      FROM artway_product_records
-      WHERE namespace=$1 AND record_status<>'removed' AND (
-        ($2<>'' AND data->>'importItemKey'=$2)
-        OR ($3<>'' AND (data->>'sourceUrl'=$3 OR data->>'producentUrl'=$3))
-        OR ($4<>'' AND ean=$4)
-        OR ($5<>'' AND (external_id=$5 OR sku=$5))
-        OR (
-          $6<>'' AND $7<>''
-          AND regexp_replace(lower(producer),'[^a-z0-9]+','','g')=$6
-          AND regexp_replace(lower(COALESCE(data->>'kodProducenta',data->>'mpn','')),'[^a-z0-9]+','','g')=$7
-        )
-      )
-      ORDER BY updated_at DESC
-      LIMIT 1
-    `, [ns, itemKey, url, ean, externalId, producer, producerCode]);
+    // Oddzielne gałęzie pozwalają PostgreSQL użyć właściwego indeksu dla
+    // każdego identyfikatora. Jedno duże OR wymuszało skan payloadów, co
+    // przestawało być akceptowalne przy 50–100 tys. produktów.
+    const result = await pool.query(CENTRAL_IMPORTED_PRODUCT_MATCH_SQL, [
+      ns, itemKey, url, ean, externalId, producer, producerCode,
+    ]);
     return result.rowCount
       ? { product: asObject(result.rows[0].data), reason: result.rows[0].reason }
       : null;

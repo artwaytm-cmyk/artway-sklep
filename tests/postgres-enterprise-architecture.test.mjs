@@ -17,6 +17,7 @@ test('schemat PostgreSQL powstaje wyłącznie przez numerowane migracje', async 
     '0003_read_models_history_observability.sql',
     '0004_pitr_restore_verification.sql',
     '0005_product_payload_contraction.sql',
+    '0006_product_payload_lookup_indexes.sql',
   ]);
   const runtimeFiles = [
     'src/backend/lib/core/postgres-store-repository.mjs',
@@ -75,6 +76,8 @@ test('lekki sklep, partycje, retencja i pomiar indeksów są wdrażane bez autom
 
 test('ciężkie dane produktów i magazynu mają oddzielne źródła oraz kontrolowany cutover', async () => {
   const migration = await read('db/migrations/0005_product_payload_contraction.sql');
+  const lookupMigration = await read('db/migrations/0006_product_payload_lookup_indexes.sql');
+  const queryHelpers = await read('src/backend/lib/domain/central-product-catalog-query.mjs');
   const verifier = await read('scripts/verify-postgres-projections.mjs');
   const observation = await read('scripts/postgres-observability-snapshot.mjs');
   assert.match(migration, /CREATE TABLE IF NOT EXISTS artway_product_payloads/);
@@ -86,6 +89,12 @@ test('ciężkie dane produktów i magazynu mają oddzielne źródła oraz kontro
   assert.match(verifier, /consecutive_matches\+1>=4/);
   assert.match(observation, /INTERVAL '7 days'/);
   assert.match(observation, /automaticDrop: false/);
+  assert.match(lookupMigration, /artway_product_payloads_import_item_idx/);
+  assert.match(lookupMigration, /artway_product_payloads_source_url_idx/);
+  assert.match(lookupMigration, /artway_products_ean_lookup_idx/);
+  assert.match(lookupMigration, /DROP INDEX IF EXISTS artway_products_source_url_idx/);
+  assert.match(queryHelpers, /WITH candidates AS/);
+  assert.match(queryHelpers, /artway_product_payloads x/);
 });
 
 test('katalog przyjmuje nieprzezroczysty kursor, a trasa przekazuje go do repozytorium', async () => {
