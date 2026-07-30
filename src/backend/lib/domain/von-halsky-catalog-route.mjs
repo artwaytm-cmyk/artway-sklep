@@ -83,7 +83,7 @@ export function createVonHalskyCatalogRoute(context = {}) {
         await recordDiagnostic({
           operation: 'catalog-reconciliation',
           status: 'ok',
-          message: `API: ${reconciliation.truth.total}; w sprzedaży: ${reconciliation.truth.published}; usunięte fałszywe powiązania: ${reconciliation.counts.staleCleared}.`,
+          message: `API: ${reconciliation.truth.total}; w sprzedaży: ${reconciliation.truth.published}; usunięte fałszywe powiązania: ${reconciliation.counts.staleCleared}; rozdzielone duplikaty: ${reconciliation.counts.duplicateMappings}.`,
           requestId: remoteResult.requestId || '',
         });
         return respond({

@@ -85,7 +85,7 @@ async function vonHalskyUzgodnijKatalog({silent=false,repeat=false}={}){
       if(data.truth)vonHalskyStan.truth=data.truth;
       if(data.sync)vonHalskyStan.sync={...vonHalskyStan.sync,...data.sync};
       vonHalskyZastosujAktualizacjeProduktow(data.productUpdates||[]);
-      if(!silent)toast(`API potwierdza: ${data.truth?.published||0} w sprzedaży • ${data.truth?.pending||0} w publikacji • ${data.reconciliation?.staleCleared||0} błędnych powiązań usunięto ✅`);
+      if(!silent)toast(`API potwierdza: ${data.truth?.published||0} w sprzedaży • ${data.truth?.pending||0} w publikacji • ${(data.reconciliation?.staleCleared||0)+(data.reconciliation?.duplicateMappings||0)} błędnych powiązań usunięto ✅`);
       if(repeat&&(Number(data.truth?.pending||0)>0||Number(data.reconciliation?.awaiting||0)>0)){
         for(const delay of [5000,15000,30000])setTimeout(()=>vonHalskyUzgodnijKatalog({silent:true}),delay);
       }

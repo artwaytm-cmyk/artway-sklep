@@ -1055,6 +1055,10 @@ test('uzgodnienie katalogu liczy wyłącznie zdalne PUBLISHED i usuwa fałszywe 
       id: 'STALE', externalId: 'STALE-EXT', vonHalskyOfferId: 'LOCAL-ONLY',
       vonHalskyEditorialSyncState: 'synced', vonHalskyEditorialSyncPending: false,
     }],
+    ['DUPLICATE', {
+      id: 'DUPLICATE', externalId: 'REAL-EXT',
+      vonHalskyEditorialSyncState: 'queued', vonHalskyEditorialSyncPending: true,
+    }],
   ]);
   const remoteOffers = [
     { offerId: 'REMOTE-1', externalId: 'REAL-EXT', status: 'PUBLISHED' },
@@ -1081,9 +1085,12 @@ test('uzgodnienie katalogu liczy wyłącznie zdalne PUBLISHED i usuwa fałszywe 
   });
   assert.equal(result.truth.published, 1);
   assert.equal(result.counts.staleCleared, 1);
+  assert.equal(result.counts.duplicateMappings, 1);
   assert.equal(products.get('REAL').vonHalskyRemoteStatus, 'PUBLISHED');
   assert.equal(products.get('REAL').vonHalskyEditorialSyncState, 'synced');
   assert.equal(products.get('STALE').vonHalskyOfferId, undefined);
   assert.equal(products.get('STALE').vonHalskyRemoteStatus, 'NOT_FOUND');
   assert.equal(products.get('STALE').vonHalskyEditorialSyncState, 'decision_required');
+  assert.equal(products.get('DUPLICATE').vonHalskyRemoteStatus, 'DUPLICATE_MAPPING');
+  assert.equal(products.get('DUPLICATE').vonHalskyRemotePresent, false);
 });

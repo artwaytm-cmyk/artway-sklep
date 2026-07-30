@@ -96,6 +96,44 @@ function lastPublicationAttemptAt(product = {}) {
   ));
 }
 
+function productRemoteCandidate(product = {}, index = {}) {
+  const externalId = text(product.externalId || product.sku || product.id, 200);
+  const localOfferId = text(product.vonHalskyOfferId || product.inpostVonHalskyOfferId, 200);
+  const byExternal = externalId ? index.byExternalId.get(externalId) : null;
+  const byLocalId = localOfferId ? index.byOfferId.get(localOfferId) : null;
+  const remote = byExternal || byLocalId || null;
+  if (!remote) return null;
+  const localIdExact = Boolean(localOfferId && localOfferId === remote.offerId);
+  const externalExact = Boolean(externalId && externalId === remote.externalId);
+  const score = (externalExact ? 1_000 : 0)
+    + (localIdExact ? 500 : 0)
+    + (product.vonHalskyRemotePresent === true ? 30 : 0)
+    + (product.sprzedazAktywna !== false ? 20 : 0)
+    + (text(product.ean || product.gtin, 30) ? 10 : 0)
+    + (text(product.nazwa || product.name, 200) ? 5 : 0);
+  return { remote, externalId, localOfferId, score };
+}
+
+function chooseRemoteProductAssignments(products = [], index = {}) {
+  const candidates = new Map(), groups = new Map();
+  for (const product of asArray(products)) {
+    const productId = text(product?.id, 160);
+    if (!productId) continue;
+    const candidate = productRemoteCandidate(product, index);
+    if (!candidate?.remote?.offerId) continue;
+    candidates.set(productId, candidate);
+    const list = groups.get(candidate.remote.offerId) || [];
+    list.push({ productId, ...candidate });
+    groups.set(candidate.remote.offerId, list);
+  }
+  const winners = new Map();
+  for (const [offerId, rows] of groups) {
+    rows.sort((left, right) => right.score - left.score || left.productId.localeCompare(right.productId, 'pl'));
+    winners.set(offerId, rows[0].productId);
+  }
+  return { candidates, winners };
+}
+
 export async function reconcileVonHalskyCatalog({
   remoteOffers = [],
   products = [],
@@ -113,15 +151,55 @@ export async function reconcileVonHalskyCatalog({
     closed: 0,
     staleCleared: 0,
     awaiting: 0,
+    duplicateMappings: 0,
     unchanged: 0,
   };
   const currentMs = Date.parse(timestamp) || Date.now();
+  const assignments = chooseRemoteProductAssignments(products, index);
   for (const product of asArray(products)) {
     const productId = text(product?.id, 160);
     if (!productId) continue;
     const externalId = text(product.externalId || product.sku || product.id, 200);
     const localOfferId = text(product.vonHalskyOfferId || product.inpostVonHalskyOfferId, 200);
-    const remote = (localOfferId && index.byOfferId.get(localOfferId)) || (externalId && index.byExternalId.get(externalId));
+    const candidate = assignments.candidates.get(productId);
+    const remote = candidate?.remote || null;
+    if (remote && assignments.winners.get(remote.offerId) !== productId) {
+      const fields = {
+        ...buildEditorialPublicationPatch({
+          product,
+          channel: 'vonHalsky',
+          status: 'decision_required',
+          timestamp,
+          targetRef: externalId,
+          error: 'Ta sama oferta API była przypięta do więcej niż jednej kartoteki. Zachowano jedno najpewniejsze powiązanie.',
+          stateOverride: 'duplicate_mapping',
+        }),
+        vonHalskyRemoteStatus: 'DUPLICATE_MAPPING',
+        vonHalskyRemotePresent: false,
+        vonHalskyRemoteVerifiedAt: timestamp,
+      };
+      const remove = localOfferId === remote.offerId
+        ? ['vonHalskyOfferId', 'inpostVonHalskyOfferId', 'vonHalskyCommandId']
+        : [];
+      const saved = await saveProductFields({
+        productId,
+        fields,
+        remove,
+        mutationId: `von-halsky-reconcile-duplicate:${productId}:${remote.offerId}`,
+        actor: 'von-halsky-api',
+        area: 'von-halsky-reconciliation',
+      });
+      counts.duplicateMappings += 1;
+      updates.push({
+        productId,
+        fields,
+        remove,
+        product: saved?.product,
+        readbackConfirmed: saved?.publication?.readbackConfirmed === true,
+        confirmedAt: timestamp,
+      });
+      continue;
+    }
     if (remote) {
       const fields = publicationForRemote(product, remote, timestamp);
       const saved = await saveProductFields({

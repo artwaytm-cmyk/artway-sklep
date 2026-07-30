@@ -26,6 +26,7 @@ function vonHalskyGpsr(product={}){
   return {required:product.vonHalskyGpsrRequired===true,ready:missing.length===0,name,address,email,phone,missing,source:String(value.source||"")};
 }
 function vonHalskyZdalnaOfertaProduktu(product={}){
+  if(product.vonHalskyRemotePresent===false&&String(product.vonHalskyRemoteStatus||"").toUpperCase()==="DUPLICATE_MAPPING")return null;
   const externalId=String(product.externalId||product.sku||product.id||""),localOfferId=String(product.vonHalskyOfferId||product.inpostVonHalskyOfferId||"");
   const priority={PUBLISHED:60,PENDING:50,PROCESSING:40,CLOSED:30,SOLDOUT:25,INACTIVE:20,REJECTED:10,ERROR:5};
   return (Array.isArray(vonHalskyStan.offers)?vonHalskyStan.offers:[])
@@ -152,7 +153,7 @@ async function vonHalskyUzgodnijKatalog({silent=false,repeat=false}={}){
       if(data.truth)vonHalskyStan.truth=data.truth;
       if(data.sync)vonHalskyStan.sync={...vonHalskyStan.sync,...data.sync};
       vonHalskyZastosujAktualizacjeProduktow(data.productUpdates||[]);
-      if(!silent)toast(`API potwierdza: ${data.truth?.published||0} w sprzedaży • ${data.truth?.pending||0} w publikacji • ${data.reconciliation?.staleCleared||0} błędnych powiązań usunięto ✅`);
+      if(!silent)toast(`API potwierdza: ${data.truth?.published||0} w sprzedaży • ${data.truth?.pending||0} w publikacji • ${(data.reconciliation?.staleCleared||0)+(data.reconciliation?.duplicateMappings||0)} błędnych powiązań usunięto ✅`);
       if(repeat&&(Number(data.truth?.pending||0)>0||Number(data.reconciliation?.awaiting||0)>0)){
         for(const delay of [5000,15000,30000])setTimeout(()=>vonHalskyUzgodnijKatalog({silent:true}),delay);
       }
