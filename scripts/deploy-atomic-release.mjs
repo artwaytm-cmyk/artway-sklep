@@ -78,10 +78,9 @@ function backendRequiresRestart() {
 
 let releaseLock;
 try {
-  // products.json pozostaje wyłącznie awaryjną, publiczną projekcją. Tuż przed
-  // wydaniem jest odtwarzany z kanonicznych rekordów PostgreSQL, więc nigdy
-  // nie staje się równoległym źródłem edycji ani starą wersją oferty.
-  execFileSync('node', ['scripts/generate-canonical-products-snapshot.mjs'], { cwd: sourceRoot, stdio: 'inherit' });
+  // Najpierw sprawdzamy niezmienne artefakty aplikacji. Migawka produktów
+  // powstaje dopiero po ewentualnej migracji schematu, ponieważ nowy kod
+  // może czytać widok utworzony właśnie przez tę migrację.
   execFileSync('npm', ['run', 'build:check'], { cwd: sourceRoot, stdio: 'inherit' });
   releaseLock = await acquireDeploymentLock(releasesRoot);
   // Statyczne wydanie nie przerywa aktywnych zapisów panelu. Backend jest
@@ -103,6 +102,10 @@ try {
       throw error;
     }
   }
+  // products.json pozostaje wyłącznie awaryjną, publiczną projekcją. Tuż przed
+  // wydaniem jest odtwarzany z kanonicznych rekordów PostgreSQL, więc nigdy
+  // nie staje się równoległym źródłem edycji ani starą wersją oferty.
+  execFileSync('node', ['scripts/generate-canonical-products-snapshot.mjs'], { cwd: sourceRoot, stdio: 'inherit' });
   const result = await deployStaticRelease({ sourceRoot, releasesRoot, currentLink, releaseId, commit, healthCheck: productionHealthCheck, keep });
   console.log(JSON.stringify({ ok: true, backendRestarted: restartBackend, ...result }, null, 2));
 } catch (error) {

@@ -85,6 +85,11 @@ test('produkcja i CI korzystają z atomowej bramki publikacji', async () => {
   assert.match(deployScript, /'db\/migrations'/);
   assert.match(deployScript, /artway-postgres-migrate\.service/);
   assert.match(deployScript, /if \(restartBackend\) \{[\s\S]*controlProductionBackend\('stop'\);[\s\S]*artway-postgres-migrate\.service[\s\S]*controlProductionBackend\('start'\);[\s\S]*\}[\s\S]*deployStaticRelease/);
+  assert.ok(
+    deployScript.indexOf('artway-postgres-migrate.service')
+      < deployScript.indexOf("scripts/generate-canonical-products-snapshot.mjs"),
+    'migawka produktów musi powstać dopiero po migracji schematu',
+  );
 });
 
 test('retencja nigdy nie usuwa katalogów ze starszych systemów publikacji', async (t) => {
