@@ -77,12 +77,14 @@ test('produkcja i CI korzystają z atomowej bramki publikacji', async () => {
   assert.match(workflow, /npm run audit:architecture/);
   assert.match(workflow, /npm audit --audit-level=high/);
   assert.equal(packageJson.scripts['deploy:atomic'], 'node scripts/deploy-atomic-release.mjs');
-  assert.match(deployScript, /systemctl', 'restart', backendService/);
+  assert.match(deployScript, /systemctl', action, backendService/);
+  assert.match(deployScript, /controlProductionBackend\('stop'\)/);
+  assert.match(deployScript, /controlProductionBackend\('start'\)/);
   assert.match(deployScript, /function backendRequiresRestart\(\)/);
   assert.match(deployScript, /'src\/backend'/);
   assert.match(deployScript, /'db\/migrations'/);
   assert.match(deployScript, /artway-postgres-migrate\.service/);
-  assert.match(deployScript, /if \(restartBackend\) \{[\s\S]*artway-postgres-migrate\.service[\s\S]*restartProductionBackend\(\);[\s\S]*\}[\s\S]*deployStaticRelease/);
+  assert.match(deployScript, /if \(restartBackend\) \{[\s\S]*controlProductionBackend\('stop'\);[\s\S]*artway-postgres-migrate\.service[\s\S]*controlProductionBackend\('start'\);[\s\S]*\}[\s\S]*deployStaticRelease/);
 });
 
 test('retencja nigdy nie usuwa katalogów ze starszych systemów publikacji', async (t) => {

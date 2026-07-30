@@ -61,3 +61,14 @@ Duże platformy nie uznają jednej liczby linii za miarę skalowalności. Stosuj
 - Raport `npm run audit:architecture` pokazuje zapas oraz ostrzeżenia, natomiast `npm run verify` blokuje przekroczenia twarde.
 
 Limity bezpieczeństwa, limity zewnętrznych API, stronicowanie i rozmiary importów pozostają osobnymi kontraktami. Nie wolno ich zwiększać tylko dlatego, że rośnie liczba produktów; skalowanie odbywa się przez stronicowanie, kolejki, cache i podział domen.
+
+## PostgreSQL — źródła prawdy i bezpieczne przełączenia
+
+- Schemat zmieniają wyłącznie nieedytowalne, numerowane migracje z `db/migrations/`. Migrator, właściciel obiektów i aplikacja korzystają z oddzielnych ról.
+- `artway_products` jest lekkim indeksem operacyjnym produktu. Pełne dokumenty kanałów znajdują się w `artway_product_payloads`, a spójny odczyt zapewnia `artway_product_records`. Trigger zapisuje payload atomowo w tej samej transakcji.
+- Publiczny sklep czyta z lekkiej projekcji `artway_storefront_products`; nie pobiera administracyjnego dokumentu produktu.
+- Zamówienia, oferty, komunikacja, Agent i magazyn mają dedykowane tabele rekordowe. Magazyn nie zapisuje aktywnych kopii w ogólnej tabeli domen.
+- Relacyjne modele odczytowe są kontrolowane przez `scripts/verify-postgres-projections.mjs`. Przełączenie cienia na stan zweryfikowany wymaga minimum 24 godzin zgodnych wyników i co najmniej czterech kolejnych kontroli.
+- Indeks może zostać uznany za kandydata do usunięcia dopiero po co najmniej siedmiu dniach pomiarów bez odczytu. Klucze główne, indeksy unikalne i indeksy pod ograniczeniami są zawsze chronione; automat nigdy sam nie wykonuje `DROP INDEX`.
+- Historia mutacji jest partycjonowana miesięcznie i ma jawną retencję. Kopie WAL oraz pgBackRest umożliwiają PITR, a odtworzenie jest okresowo sprawdzane na osobnej bazie.
+- Wydanie zmieniające backend zatrzymuje zapis na krótkie okno, stosuje transakcyjne migracje, uruchamia nowy kod i dopiero po kontroli zdrowia przełącza wydanie statyczne.

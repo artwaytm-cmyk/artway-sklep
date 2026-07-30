@@ -114,7 +114,7 @@ test('dedykowana migracja zachowuje kopię wycofania i usuwa aktywne duplikaty z
   assert.match(source, /artway_domain_records_archive_v2/);
   assert.match(source, /INSERT INTO artway_domain_records_archive_v2/);
   assert.match(source, /DELETE FROM artway_domain_records WHERE namespace=\$1 AND domain=\$2/);
-  assert.match(source, /dedicated-domain-tables-v2/);
+  assert.match(source, /dedicated-domain-tables-v3/);
   assert.match(baseline, /ON DELETE CASCADE/);
   assert.doesNotMatch(source, /CREATE TABLE|ALTER TABLE|CREATE INDEX/);
 });

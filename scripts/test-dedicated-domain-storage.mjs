@@ -11,6 +11,7 @@ await seed.connect();
 const tables = [
   'artway_domain_records_archive_v2', 'artway_agent_records', 'artway_allegro_communications',
   'artway_allegro_mappings', 'artway_allegro_offers', 'artway_allegro_orders', 'artway_store_orders',
+  'artway_warehouse_records',
   'artway_domain_legacy_backup', 'artway_domain_migrations', 'artway_domain_records',
   'artway_domain_snapshots', 'artway_kv_store',
 ];
@@ -28,6 +29,11 @@ try {
     content_hash text NOT NULL DEFAULT '',version bigint NOT NULL DEFAULT 1,
     updated_at timestamptz NOT NULL DEFAULT now(),PRIMARY KEY(namespace,domain))`);
   await seed.query(`CREATE TABLE artway_domain_records(
+    namespace text NOT NULL,domain text NOT NULL,collection text NOT NULL,record_id text NOT NULL,
+    ordinal bigint NOT NULL DEFAULT 0,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY(namespace,domain,collection,record_id),
+    FOREIGN KEY(namespace,domain) REFERENCES artway_domain_snapshots(namespace,domain) ON DELETE CASCADE)`);
+  await seed.query(`CREATE TABLE artway_warehouse_records(
     namespace text NOT NULL,domain text NOT NULL,collection text NOT NULL,record_id text NOT NULL,
     ordinal bigint NOT NULL DEFAULT 0,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY(namespace,domain,collection,record_id),
@@ -76,7 +82,7 @@ try {
   assert.equal(current.items[0]?.status, 'ENDED');
 
   const status = await repository.storageStatus();
-  assert.equal(status.engine, 'postgres-domain-tables-v2');
+  assert.equal(status.engine, 'postgres-domain-tables-v3');
   assert.equal(status.migrated, true);
   assert.equal(status.activeGenericDedicatedRecords, 0);
   assert.equal(status.activeLegacyDomains, 0);

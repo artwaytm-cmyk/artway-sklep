@@ -18,9 +18,20 @@ const DOMAIN_TABLES = Object.freeze({
   'kv:agent_action_runs': 'artway_agent_records',
   'kv:agent_runtime': 'artway_agent_records',
   'kv:codex_agent_jobs': 'artway_agent_records',
+  'settings:artway_stany': 'artway_warehouse_records',
+  'settings:artway_magazyn_niedobory_wydan': 'artway_warehouse_records',
+  'settings:artway_dostepnosc': 'artway_warehouse_records',
+  'settings:artway_ruchy_magazynowe': 'artway_warehouse_records',
+  'settings:artway_magazyn_produkty': 'artway_warehouse_records',
+  'settings:artway_magazyn_ustawienia': 'artway_warehouse_records',
+  'settings:artway_magazyn_lokalizacje': 'artway_warehouse_records',
+  'settings:artway_magazyn_lokalizacje_usuniete': 'artway_warehouse_records',
+  'settings:artway_dokumenty_magazynowe': 'artway_warehouse_records',
+  'settings:artway_dokumenty_magazynowe_usuniete': 'artway_warehouse_records',
+  'settings:artway_dokumenty_magazynowe_seq': 'artway_warehouse_records',
 });
 
-export const DEDICATED_DOMAIN_MIGRATION = 'dedicated-domain-tables-v2';
+export const DEDICATED_DOMAIN_MIGRATION = 'dedicated-domain-tables-v3';
 
 export function dedicatedTableForDomain(domain) {
   return DOMAIN_TABLES[String(domain || '')] || '';
@@ -38,6 +49,7 @@ export async function ensureDedicatedDomainSchema(client) {
     'artway_allegro_mappings',
     'artway_allegro_communications',
     'artway_agent_records',
+    'artway_warehouse_records',
     'artway_domain_records_archive_v2',
   ], 'dedykowanych domen');
 }

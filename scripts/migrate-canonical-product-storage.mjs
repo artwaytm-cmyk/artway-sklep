@@ -74,7 +74,7 @@ async function buildAudit(client) {
     `, [NAMESPACE]);
   const centralRows = await client.query(`
       SELECT product_id,data,source,record_status,fingerprint,authoritative_fields
-      FROM artway_products
+      FROM artway_product_records
       WHERE namespace=$1 AND record_status<>'removed'
       ORDER BY product_id
     `, [NAMESPACE]);

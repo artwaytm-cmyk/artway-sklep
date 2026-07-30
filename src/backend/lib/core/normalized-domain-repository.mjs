@@ -355,6 +355,7 @@ async function ensureNormalizedSchema(pool, namespace) {
       'artway_allegro_mappings',
       'artway_allegro_communications',
       'artway_agent_records',
+      'artway_warehouse_records',
       'artway_domain_records_archive_v2',
     ], 'domen operacyjnych');
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`artway-normalize:${namespace}`]);
@@ -572,7 +573,7 @@ export function createNormalizedDomainRepository({ pool, namespace, legacy }) {
         COALESCE((SELECT pg_column_size(value)::int FROM artway_kv_store WHERE namespace=$1 AND key='settings'),0) AS settings_bytes`, [namespace, Object.keys(DIRECT_DOMAIN_CONFIGS)]);
         const row = result.rows[0] || {}, dedicated = await dedicatedDomainStorageStatus(client, namespace);
         return {
-          engine: 'postgres-domain-tables-v2', migrated: row.migrated === true && dedicated.migrated,
+          engine: 'postgres-domain-tables-v3', migrated: row.migrated === true && dedicated.migrated,
           domains: Number(row.domains) || 0,
           records: (Number(row.records) || 0) + dedicated.records,
           genericRecords: Number(row.records) || 0,

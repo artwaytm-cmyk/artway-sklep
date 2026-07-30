@@ -45,10 +45,11 @@ async function productionHealthCheck(manifest) {
   throw lastError || new Error('Kontrola zdrowia nie powiodła się.');
 }
 
-function restartProductionBackend() {
+function controlProductionBackend(action = 'restart') {
   if (!backendService || backendService === 'none') return;
   if (!/^[A-Za-z0-9_.@-]+$/.test(backendService)) throw new Error('Nieprawidłowa nazwa usługi backendu.');
-  execFileSync('sudo', ['-n', 'systemctl', 'restart', backendService], { stdio: 'inherit' });
+  if (!['start', 'stop', 'restart'].includes(action)) throw new Error('Nieprawidłowa operacja usługi backendu.');
+  execFileSync('sudo', ['-n', 'systemctl', action, backendService], { stdio: 'inherit' });
 }
 
 function backendRequiresRestart() {
@@ -88,8 +89,19 @@ try {
   // lub zależności. Dzięki temu zwykła publikacja UI nie tworzy krótkiego 502.
   const restartBackend = backendRequiresRestart();
   if (restartBackend) {
-    execFileSync('sudo', ['-n', 'systemctl', 'start', 'artway-postgres-migrate.service'], { stdio: 'inherit' });
-    restartProductionBackend();
+    // Migracje kontrakcyjne nie mogą ścigać się z zapisem działającego
+    // procesu. Krótkie, kontrolowane okno zatrzymuje backend, stosuje
+    // transakcyjne migracje i uruchamia już nową wersję kodu.
+    controlProductionBackend('stop');
+    try {
+      execFileSync('sudo', ['-n', 'systemctl', 'start', 'artway-postgres-migrate.service'], { stdio: 'inherit' });
+      controlProductionBackend('start');
+    } catch (error) {
+      // Migracje są transakcyjne. Po ich niepowodzeniu przywracamy usługę,
+      // aby nie pozostawić sklepu wyłączonego.
+      try { controlProductionBackend('start'); } catch {}
+      throw error;
+    }
   }
   const result = await deployStaticRelease({ sourceRoot, releasesRoot, currentLink, releaseId, commit, healthCheck: productionHealthCheck, keep });
   console.log(JSON.stringify({ ok: true, backendRestarted: restartBackend, ...result }, null, 2));

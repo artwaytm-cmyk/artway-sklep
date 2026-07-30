@@ -38,7 +38,7 @@ const [{ rows: runRows }, { rows: productRows }] = await Promise.all([
       AND (data->>'createdAt')::timestamptz >= $2::timestamptz
     ORDER BY (data->>'createdAt')::timestamptz DESC
   `, ['kv:agent_specialists_state', since]),
-  pool.query('SELECT product_id, data FROM artway_products'),
+  pool.query('SELECT product_id, data FROM artway_product_records'),
 ]);
 
 const productsByUrl = new Map(productRows.map((row) => [normalizeUrl(row.data?.sourceUrl || row.data?.producentUrl), row]));

@@ -14,7 +14,7 @@ const pool = new pg.Pool(process.env.DATABASE_URL
 const catalog = createCentralProductCatalog({ pool, namespace });
 const { rows } = await pool.query(`
   SELECT product_id,data
-  FROM artway_products
+  FROM artway_product_records
   WHERE namespace=$1 AND record_status<>'removed'
   ORDER BY product_id
 `, [namespace]);

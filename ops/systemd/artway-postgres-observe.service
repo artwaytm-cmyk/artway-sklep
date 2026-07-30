@@ -9,6 +9,7 @@ Group=artway
 WorkingDirectory=/srv/artway/shop
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/node /srv/artway/shop/scripts/postgres-observability-snapshot.mjs
+ExecStart=/usr/bin/node /srv/artway/shop/scripts/verify-postgres-projections.mjs --strict
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

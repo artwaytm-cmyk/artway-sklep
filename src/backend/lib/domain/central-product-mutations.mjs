@@ -132,10 +132,14 @@ export function createCentralProductMutations(context = {}) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const current = await client.query(
-        'SELECT data,public_data,fingerprint,sale_available FROM artway_products WHERE namespace=$1 AND product_id=$2 AND record_status<>$3 FOR UPDATE',
-        [ns, productId, 'removed'],
-      );
+      const current = await client.query(`
+        SELECT x.data,x.public_data,p.fingerprint,p.sale_available
+        FROM artway_products p
+        JOIN artway_product_payloads x
+          ON x.namespace=p.namespace AND x.product_id=p.product_id
+        WHERE p.namespace=$1 AND p.product_id=$2 AND p.record_status<>$3
+        FOR UPDATE OF p,x
+      `, [ns, productId, 'removed']);
       if (!current.rowCount) {
         await client.query('ROLLBACK');
         return { available: true, updated: false, reason: 'not_found' };
@@ -213,10 +217,14 @@ export function createCentralProductMutations(context = {}) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const current = await client.query(
-        "SELECT data,fingerprint FROM artway_products WHERE namespace=$1 AND product_id=$2 AND record_status='trash' FOR UPDATE",
-        [ns, productId],
-      );
+      const current = await client.query(`
+        SELECT x.data,p.fingerprint
+        FROM artway_products p
+        JOIN artway_product_payloads x
+          ON x.namespace=p.namespace AND x.product_id=p.product_id
+        WHERE p.namespace=$1 AND p.product_id=$2 AND p.record_status='trash'
+        FOR UPDATE OF p,x
+      `, [ns, productId]);
       if (!current.rowCount) {
         await client.query('ROLLBACK');
         return { available: true, deleted: false, reason: 'not_in_trash' };
@@ -263,22 +271,24 @@ export function createCentralProductMutations(context = {}) {
       await client.query('BEGIN');
       const durableMutationId = text(mutationId || safeFields.lastAdminMutationId || `catalog:${productId}:${Date.now().toString(36)}`, 200);
       const current = await client.query(`
-        SELECT data,public_data,authoritative_fields,
+        SELECT x.data,x.public_data,x.authoritative_fields,
           EXISTS(
             SELECT 1 FROM artway_product_mutations
-            WHERE namespace=$1 AND mutation_id=$4
+            WHERE namespace=p.namespace AND mutation_id=$4
           ) mutation_exists,
           (
             SELECT fields FROM artway_product_mutations
-            WHERE namespace=$1 AND mutation_id=$4
+            WHERE namespace=p.namespace AND mutation_id=$4
           ) mutation_fields,
           (
             SELECT remove_fields FROM artway_product_mutations
-            WHERE namespace=$1 AND mutation_id=$4
+            WHERE namespace=p.namespace AND mutation_id=$4
           ) mutation_remove_fields
-        FROM artway_products
-        WHERE namespace=$1 AND product_id=$2 AND record_status<>$3
-        FOR UPDATE
+        FROM artway_products p
+        JOIN artway_product_payloads x
+          ON x.namespace=p.namespace AND x.product_id=p.product_id
+        WHERE p.namespace=$1 AND p.product_id=$2 AND p.record_status<>$3
+        FOR UPDATE OF p,x
       `, [ns, productId, 'removed', durableMutationId]);
       if (!current.rowCount) { await client.query('ROLLBACK'); return { available: true, updated: false, reason: 'not_found' }; }
       const currentData = asObject(current.rows[0].data);

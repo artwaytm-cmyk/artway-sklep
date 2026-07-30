@@ -146,7 +146,7 @@ test('pojedyncza cena aktualizuje centralną kartotekę bez pełnej synchronizac
   const client = {
     query: async (sql, params = []) => {
       calls.push({ sql, params });
-      if (sql.includes('SELECT data,public_data,authoritative_fields')) return { rowCount: 1, rows: [current] };
+      if (sql.includes('SELECT x.data,x.public_data,x.authoritative_fields')) return { rowCount: 1, rows: [current] };
       return { rowCount: 1, rows: [] };
     },
     release() {},
@@ -177,7 +177,7 @@ test('ponowienie mutationId z innym payloadem jest odrzucane zamiast tworzyć ni
   const client = {
     query: async (sql) => {
       calls.push(sql);
-      if (sql.includes('SELECT data,public_data,authoritative_fields')) {
+      if (sql.includes('SELECT x.data,x.public_data,x.authoritative_fields')) {
         return { rowCount: 1, rows: [current] };
       }
       return { rowCount: 1, rows: [] };
@@ -212,7 +212,7 @@ test('wynik publikacji Allegro aktualizuje dane i indeks kanału w centralnej ka
   const client = {
     query: async (sql, params = []) => {
       calls.push({ sql, params });
-      if (sql.includes('SELECT data,public_data,authoritative_fields')) return { rowCount: 1, rows: [current] };
+      if (sql.includes('SELECT x.data,x.public_data,x.authoritative_fields')) return { rowCount: 1, rows: [current] };
       return { rowCount: 1, rows: [] };
     },
     release() {},

@@ -262,6 +262,8 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     if (!schemaPromise) {
       schemaPromise = assertPostgresRelations(pool, [
         'artway_products',
+        'artway_product_payloads',
+        'artway_product_records',
         'artway_storefront_products',
         'artway_product_catalog_meta',
         'artway_product_mutations',
@@ -289,7 +291,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     const cached = aggregateCache.get(key);
     if (cached && Date.now() - cached.at < 5 * 60 * 1000) return cached.promise;
     const audienceWhere = admin ? "namespace=$1 AND record_status<>'removed'" : "namespace=$1 AND record_status='active' AND sale_available=true";
-    const table = admin ? 'artway_products' : 'artway_storefront_products';
+    const table = admin ? 'artway_product_records' : 'artway_storefront_products';
     const summarySql = admin
       ? `SELECT COUNT(*)::bigint total,COUNT(*) FILTER(WHERE record_status='active')::bigint active,COUNT(*) FILTER(WHERE record_status='trash')::bigint trash,COUNT(*) FILTER(WHERE sale_available=false AND record_status='active')::bigint hidden,COUNT(*) FILTER(WHERE missing_count>0 AND record_status='active')::bigint missing,COUNT(*) FILTER(WHERE missing_count=0 AND sale_available=true AND record_status='active')::bigint ready,COUNT(*) FILTER(WHERE has_allegro=true AND record_status='active')::bigint connected,COUNT(*) FILTER(WHERE promotion=true AND record_status='active')::bigint promotions,COUNT(*) FILTER(WHERE new_product=true AND record_status='active')::bigint new_products,COUNT(*) FILTER(WHERE duplicate_store=true AND record_status='active')::bigint duplicate_store,COUNT(*) FILTER(WHERE duplicate_allegro=true AND record_status='active')::bigint duplicate_allegro FROM artway_products WHERE ${audienceWhere}`
       : `SELECT COUNT(*)::bigint total,COUNT(*)::bigint active,0::bigint trash,0::bigint hidden,0::bigint missing,COUNT(*)::bigint ready,0::bigint connected,COUNT(*) FILTER(WHERE promotion=true)::bigint promotions,COUNT(*) FILTER(WHERE new_product=true)::bigint new_products,0::bigint duplicate_store,0::bigint duplicate_allegro FROM artway_storefront_products WHERE ${audienceWhere}`;
@@ -312,7 +314,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
   const query = async (raw = {}) => {
     if (!available) return { available: false, items: [], total: 0, page: 1, limit: 50, summary: {}, facets: { categories: [], producers: [] } };
     await ensureSchema(); const options = centralCatalogQueryOptions(raw), values = [ns], clauses = ['namespace=$1', "record_status<>'removed'"];
-    const table = options.admin ? 'artway_products' : 'artway_storefront_products';
+    const table = options.admin ? 'artway_product_records' : 'artway_storefront_products';
     const listColumn = options.admin ? 'admin_list_data' : 'list_data';
     const add = (sql, value) => { values.push(value); clauses.push(sql.replace('?', `$${values.length}`)); };
     if (!options.admin) clauses.push("record_status='active'", 'sale_available=true');
@@ -404,7 +406,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     if (!available) return null;
     await ensureSchema();
     const result = admin
-      ? await pool.query("SELECT data product FROM artway_products WHERE namespace=$1 AND product_id=$2 AND record_status<>'removed'", [ns, text(id, 120)])
+      ? await pool.query("SELECT data product FROM artway_product_records WHERE namespace=$1 AND product_id=$2 AND record_status<>'removed'", [ns, text(id, 120)])
       : await pool.query("SELECT public_data product FROM artway_storefront_products WHERE namespace=$1 AND product_id=$2 AND record_status='active' AND sale_available=true", [ns, text(id, 120)]);
     return result.rows[0]?.product || null;
   };
@@ -422,7 +424,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     const values = [ns, text(afterId, 120), safeLimit];
     const result = await pool.query(`
       SELECT product_id,data
-      FROM artway_products
+      FROM artway_product_records
       WHERE namespace=$1
         AND record_status<>'removed'
         AND product_id>$2
@@ -456,7 +458,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     const [rows, count, meta] = await Promise.all([
       pool.query(`
         SELECT data
-        FROM artway_products
+        FROM artway_product_records
         WHERE namespace=$1 AND record_status<>'removed'
           AND (source='import' OR data->>'storageOrigin'='product-link-file-import')
         ORDER BY product_id
@@ -464,7 +466,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
       `, [ns, safeLimit, safeOffset]),
       pool.query(`
         SELECT COUNT(*)::bigint total
-        FROM artway_products
+        FROM artway_product_records
         WHERE namespace=$1 AND record_status<>'removed'
           AND (source='import' OR data->>'storageOrigin'='product-link-file-import')
       `, [ns]),
@@ -514,7 +516,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
           WHEN $5<>'' AND (external_id=$5 OR sku=$5) THEN 'external_id'
           ELSE 'manufacturer_code'
         END reason
-      FROM artway_products
+      FROM artway_product_records
       WHERE namespace=$1 AND record_status<>'removed' AND (
         ($2<>'' AND data->>'importItemKey'=$2)
         OR ($3<>'' AND (data->>'sourceUrl'=$3 OR data->>'producentUrl'=$3))

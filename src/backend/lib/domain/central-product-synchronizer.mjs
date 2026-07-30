@@ -12,10 +12,14 @@ export function createCentralProductSynchronizer(context = {}) {
       // Blokada rekordów gwarantuje, że przebudowa indeksu nie minie się z
       // atomowym zapisem Agenta. Tylko pola wcześniej zapisane przez mutację
       // centralną mają pierwszeństwo nad starszym snapshotem domeny.
-      const authorityRows = await client.query(
-        'SELECT product_id,data,authoritative_fields FROM artway_products WHERE namespace=$1 FOR UPDATE',
-        [ns],
-      );
+      const authorityRows = await client.query(`
+        SELECT p.product_id,x.data,x.authoritative_fields
+        FROM artway_products p
+        JOIN artway_product_payloads x
+          ON x.namespace=p.namespace AND x.product_id=p.product_id
+        WHERE p.namespace=$1
+        FOR UPDATE OF p,x
+      `, [ns]);
       const authoritativeProducts = new Map(authorityRows.rows.map((row) => [
         String(row.product_id),
         { data: asObject(row.data), fields: asArray(row.authoritative_fields) },

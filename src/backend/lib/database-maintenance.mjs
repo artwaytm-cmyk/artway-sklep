@@ -52,7 +52,7 @@ export async function executeDatabaseMaintenance({
         product_id,'product-retention','server-maintenance',
         jsonb_build_object('recordStatus','purged','snapshot',data),
         '[]'::jsonb,fingerprint,'','applied',$2::timestamptz
-      FROM artway_products
+      FROM artway_product_records
       WHERE namespace=$1 AND record_status='trash'
         AND updated_at < $2::timestamptz - ($3::text || ' days')::interval
       ON CONFLICT(namespace,mutation_id) DO NOTHING

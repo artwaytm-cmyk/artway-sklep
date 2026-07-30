@@ -58,7 +58,7 @@ const REPORT_CTE = `
       ) von_prepared,
       COALESCE(p.data->>'vonHalskyAgentStatus','')='ready' von_ready,
       lower(COALESCE(p.data->>'allegroEditorialSyncPending','false'))='true' needs_update
-    FROM artway_products p
+    FROM artway_product_records p
     LEFT JOIN latest_task t ON t.product_id=p.product_id
     WHERE p.namespace=$1 AND p.record_status='active'
   ),

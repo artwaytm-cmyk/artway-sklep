@@ -16,6 +16,7 @@ test('schemat PostgreSQL powstaje wyłącznie przez numerowane migracje', async 
     '0002_relational_shadow_models.sql',
     '0003_read_models_history_observability.sql',
     '0004_pitr_restore_verification.sql',
+    '0005_product_payload_contraction.sql',
   ]);
   const runtimeFiles = [
     'src/backend/lib/core/postgres-store-repository.mjs',
@@ -70,6 +71,21 @@ test('lekki sklep, partycje, retencja i pomiar indeksów są wdrażane bez autom
   assert.match(maintenance, /SET SCHEMA artway_archive/);
   assert.match(observation, /artway_index_usage_samples/);
   assert.doesNotMatch(observation, /DROP INDEX/);
+});
+
+test('ciężkie dane produktów i magazynu mają oddzielne źródła oraz kontrolowany cutover', async () => {
+  const migration = await read('db/migrations/0005_product_payload_contraction.sql');
+  const verifier = await read('scripts/verify-postgres-projections.mjs');
+  const observation = await read('scripts/postgres-observability-snapshot.mjs');
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS artway_product_payloads/);
+  assert.match(migration, /CREATE OR REPLACE VIEW artway_product_records/);
+  assert.match(migration, /CREATE TRIGGER artway_product_payload_offload_trg/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS artway_warehouse_records/);
+  assert.match(migration, /DELETE FROM artway_domain_records[\s\S]*settings:artway_stany/);
+  assert.match(verifier, /INTERVAL '24 hours'/);
+  assert.match(verifier, /consecutive_matches\+1>=4/);
+  assert.match(observation, /INTERVAL '7 days'/);
+  assert.match(observation, /automaticDrop: false/);
 });
 
 test('katalog przyjmuje nieprzezroczysty kursor, a trasa przekazuje go do repozytorium', async () => {

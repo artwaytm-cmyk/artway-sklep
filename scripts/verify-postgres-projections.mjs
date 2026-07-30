@@ -113,15 +113,15 @@ const definitions = [
     name: 'warehouse',
     source: `
       SELECT (
-        (SELECT count(*) FROM artway_domain_records
+        (SELECT count(*) FROM artway_warehouse_records
           WHERE namespace=$1 AND domain='settings:artway_magazyn_lokalizacje')
-        +(SELECT count(DISTINCT record_id) FROM artway_domain_records
+        +(SELECT count(DISTINCT record_id) FROM artway_warehouse_records
           WHERE namespace=$1 AND domain IN (
             'settings:artway_stany','settings:artway_magazyn_produkty'
           ))
-        +(SELECT count(*) FROM artway_domain_records
+        +(SELECT count(*) FROM artway_warehouse_records
           WHERE namespace=$1 AND domain='settings:artway_ruchy_magazynowe')
-        +(SELECT count(*) FROM artway_domain_records
+        +(SELECT count(*) FROM artway_warehouse_records
           WHERE namespace=$1 AND domain='settings:artway_dokumenty_magazynowe')
       )::bigint count`,
     projected: `
@@ -134,24 +134,24 @@ const definitions = [
     mismatches: `
       SELECT (
         abs(
-          (SELECT count(*) FROM artway_domain_records WHERE namespace=$1
+          (SELECT count(*) FROM artway_warehouse_records WHERE namespace=$1
             AND domain='settings:artway_magazyn_lokalizacje')
           -(SELECT count(*) FROM artway_inventory_locations WHERE namespace=$1)
         )
         +abs(
-          (SELECT count(DISTINCT record_id) FROM artway_domain_records
+          (SELECT count(DISTINCT record_id) FROM artway_warehouse_records
             WHERE namespace=$1 AND domain IN (
               'settings:artway_stany','settings:artway_magazyn_produkty'
             ))
           -(SELECT count(*) FROM artway_inventory_balances WHERE namespace=$1)
         )
         +abs(
-          (SELECT count(*) FROM artway_domain_records WHERE namespace=$1
+          (SELECT count(*) FROM artway_warehouse_records WHERE namespace=$1
             AND domain='settings:artway_ruchy_magazynowe')
           -(SELECT count(*) FROM artway_inventory_movements WHERE namespace=$1)
         )
         +abs(
-          (SELECT count(*) FROM artway_domain_records WHERE namespace=$1
+          (SELECT count(*) FROM artway_warehouse_records WHERE namespace=$1
             AND domain='settings:artway_dokumenty_magazynowe')
           -(SELECT count(*) FROM artway_warehouse_documents WHERE namespace=$1)
         )
@@ -163,11 +163,33 @@ const definitions = [
     projected: `SELECT count(*)::bigint count FROM artway_storefront_products WHERE namespace=$1`,
     mismatches: `
       SELECT count(*)::bigint count
-      FROM artway_products s
+      FROM artway_product_records s
       FULL JOIN artway_storefront_products p USING(namespace,product_id)
       WHERE COALESCE(s.namespace,p.namespace)=$1 AND (
         s.product_id IS NULL OR p.product_id IS NULL
         OR md5(s.public_data::text||'|'||s.public_list_data::text)<>p.source_hash
+      )`,
+  },
+  {
+    name: 'product_payloads',
+    source: `SELECT count(*)::bigint count FROM artway_products WHERE namespace=$1`,
+    projected: `SELECT count(*)::bigint count FROM artway_product_payloads WHERE namespace=$1`,
+    mismatches: `
+      SELECT count(*)::bigint count
+      FROM artway_products p
+      FULL JOIN artway_product_payloads x USING(namespace,product_id)
+      WHERE COALESCE(p.namespace,x.namespace)=$1 AND (
+        p.product_id IS NULL OR x.product_id IS NULL
+        OR x.payload_hash<>md5(
+          x.data::text||'|'||x.public_data::text||'|'||
+          x.admin_list_data::text||'|'||x.public_list_data::text||'|'||
+          x.authoritative_fields::text
+        )
+        OR p.data<>'{}'::jsonb
+        OR p.public_data<>'{}'::jsonb
+        OR p.admin_list_data<>'{}'::jsonb
+        OR p.public_list_data<>'{}'::jsonb
+        OR p.authoritative_fields<>'[]'::jsonb
       )`,
   },
   {
@@ -215,9 +237,32 @@ try {
         source_count=$3,projection_count=$4,mismatch_count=$5,
         compared_at=NOW(),
         consecutive_matches=CASE WHEN $6 THEN consecutive_matches+1 ELSE 0 END,
-        details=jsonb_build_object('matches',$6,'verifiedBy','projection-verifier-v1')
+        first_matched_at=CASE
+          WHEN $6 THEN COALESCE(first_matched_at,NOW())
+          ELSE NULL
+        END,
+        eligible_at=CASE
+          WHEN $6
+           AND COALESCE(first_matched_at,NOW())<=NOW()-INTERVAL '24 hours'
+           AND consecutive_matches+1>=4
+          THEN COALESCE(eligible_at,NOW())
+          ELSE eligible_at
+        END,
+        mode=CASE
+          WHEN mode='shadow' AND $6
+           AND COALESCE(first_matched_at,NOW())<=NOW()-INTERVAL '24 hours'
+           AND consecutive_matches+1>=4
+          THEN 'verified'
+          ELSE mode
+        END,
+        details=jsonb_build_object(
+          'matches',$6,
+          'verifiedBy','projection-verifier-v2',
+          'minimumObservationHours',24,
+          'minimumConsecutiveMatches',4
+        )
       WHERE namespace=$1 AND projection=$2
-      RETURNING consecutive_matches
+      RETURNING consecutive_matches,mode,first_matched_at,eligible_at
     `, [
       namespace, definition.name, sourceCount, projectionCount,
       mismatchCount, matches,
@@ -229,6 +274,9 @@ try {
       mismatchCount,
       matches,
       consecutiveMatches: Number(updated.rows[0]?.consecutive_matches) || 0,
+      mode: updated.rows[0]?.mode || 'shadow',
+      firstMatchedAt: updated.rows[0]?.first_matched_at || null,
+      eligibleAt: updated.rows[0]?.eligible_at || null,
     });
   }
   const ok = results.every((result) => result.matches);
