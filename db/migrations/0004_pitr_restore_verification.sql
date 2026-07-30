@@ -3,3 +3,4 @@ CREATE TABLE IF NOT EXISTS artway_pitr_restore_verification (
   phase TEXT NOT NULL CHECK(phase IN ('before_target','after_target')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
