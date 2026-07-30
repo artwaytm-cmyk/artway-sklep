@@ -2,6 +2,7 @@ import { createPostgresAllegroPreparationQueue } from './allegro-preparation-pos
 import crypto from 'node:crypto';
 import { providerQuotaUnavailable } from './agent-specialists-support.mjs';
 import { productPreparationQualityGap, productSalePriority } from './product-preparation-priority.mjs';
+import { runAllegroPreparationDownstream } from './allegro-preparation-downstream.mjs';
 
 export { productPreparationQualityGap } from './product-preparation-priority.mjs';
 
@@ -360,7 +361,7 @@ export function createAllegroPreparationQueue({
   }
 
   let workerPromise = null;
-  let retryTimer = null;
+  let editorialProviderUnavailable = false;
 
   async function mutate(callback) {
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
@@ -431,19 +432,18 @@ export function createAllegroPreparationQueue({
   async function claim() {
     let claimed = null;
     await mutate((state) => {
-      const blockedUntil = Date.parse(state.blockedUntil || '');
       if (state.active || !state.pending.length) return state;
-      const editorialProviderBlocked = Number.isFinite(blockedUntil) && blockedUntil > now().getTime();
       claimed = normalizeTask({
         ...state.pending[0],
         attempt: Number(state.pending[0].attempt || 0) + 1,
-        skipEditorial: editorialProviderBlocked,
+        skipEditorial: editorialProviderUnavailable,
       });
       return {
         ...state,
         active: claimed,
         pending: state.pending.slice(1),
-        ...(editorialProviderBlocked ? {} : { blockedUntil: '', blockedReason: '' }),
+        blockedUntil: '',
+        blockedReason: '',
       };
     });
     return claimed;
@@ -467,6 +467,7 @@ export function createAllegroPreparationQueue({
         error: clean(result?.error, 1000),
         nextRetryAt: clean(result?.nextRetryAt, 50),
         decision: asObject(result?.decision),
+        downstream: asObject(result?.downstream),
       };
       return { ...state, active: state.active?.id === task.id ? null : state.active, results: [item, ...state.results].slice(0, MAX_RESULTS) };
     });
@@ -481,13 +482,6 @@ export function createAllegroPreparationQueue({
   }
 
   async function run() {
-    const pauseForQuota = async () => {
-      const blockedUntil = new Date(now().getTime() + 6 * 60 * 60_000).toISOString();
-      await mutate((state) => ({ ...state, blockedUntil, blockedReason: 'OpenAI API quota' }));
-      clearTimeout(retryTimer);
-      retryTimer = setTimeout(() => kick(), 6 * 60 * 60_000);
-      retryTimer.unref?.();
-    };
     while (true) {
       const task = await claim();
       if (!task) {
@@ -525,7 +519,7 @@ export function createAllegroPreparationQueue({
           };
         }
         if (typeof afterPrepare === 'function' && result?.ready === true) {
-          const downstream = await afterPrepare(task, result);
+          const downstream = await runAllegroPreparationDownstream({ afterPrepare, task, result, clean });
           result = {
             ...result,
             downstream: asObject(downstream),
@@ -535,11 +529,9 @@ export function createAllegroPreparationQueue({
         if (typeof report === 'function') await report({ task, status: result?.status || (result?.ready === false ? 'decision_required' : 'completed'), result }).catch(() => {});
         // Redaktorzy zapisują bezpieczne pola nawet wtedy, gdy dostawca AI zwróci
         // limit rozliczeniowy. Taki wynik nie jest wyjątkiem, dlatego kolejka musi
-        // rozpoznać go jawnie i pozostawić następne produkty do późniejszego wznowienia.
+        // rozpoznać go jawnie i kontynuować bez redakcji dla kolejnych produktów.
         if (result?.providerUnavailable === true || providerQuotaUnavailable(result?.error)) {
-          await pauseForQuota();
-          // Limit dostawcy blokuje wyłącznie redakcję AI. Kolejne zadania nadal
-          // pobierają źródło, kategorię, parametry i zapisują wynik do kartoteki.
+          editorialProviderUnavailable = true;
           continue;
         }
       } catch (error) {
@@ -570,7 +562,7 @@ export function createAllegroPreparationQueue({
         await finish(task, result);
         if (typeof report === 'function') await report({ task, status: result.status, result }).catch(() => {});
         if (quotaUnavailable) {
-          await pauseForQuota();
+          editorialProviderUnavailable = true;
           continue;
         }
       }
@@ -584,9 +576,16 @@ export function createAllegroPreparationQueue({
   }
 
   async function resume() {
+    editorialProviderUnavailable = false;
     await mutate((state) => state.active
-      ? { ...state, pending: [{ ...state.active, attempt: Number(state.active.attempt || 0) }, ...state.pending], active: null }
-      : state);
+      ? {
+          ...state,
+          pending: [{ ...state.active, attempt: Number(state.active.attempt || 0) }, ...state.pending],
+          active: null,
+          blockedUntil: '',
+          blockedReason: '',
+        }
+      : { ...state, blockedUntil: '', blockedReason: '' });
     kick();
     return status();
   }

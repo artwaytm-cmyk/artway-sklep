@@ -21,6 +21,7 @@ import {
 } from './domain/von-halsky-agent-preparation.mjs';
 import { resolveVonHalskyResponsibleProducer } from './domain/von-halsky-responsible-producer.mjs';
 import { vonHalskyCatalogTruthSummary } from './domain/von-halsky-catalog-reconciliation.mjs';
+import { recordVonHalskyPublicationState } from './domain/channel-publication-state-repository.mjs';
 
 const STORE_KEY = 'inpost_von_halsky_channel';
 let cachedCategoryIndex = null;
@@ -84,18 +85,23 @@ function cleanState(value = {}) {
 }
 
 function channelOperationalSummary(state = {}) {
-  const truth = vonHalskyCatalogTruthSummary(state.offers);
+  const storedTruth = state?.truth && typeof state.truth === 'object' ? state.truth : null;
+  const truth = storedTruth || vonHalskyCatalogTruthSummary(state.offers);
   const commands = Array.isArray(state.commands) ? state.commands : [];
-  const pendingCommands = commands.filter((item) => (
-    !['SUCCESS', 'FAILURE', 'FAILED', 'CANCELLED', 'NOT_FOUND'].includes(String(item?.status || 'PENDING').toUpperCase())
-  ));
+  const pendingCommands = Number.isFinite(Number(state?.commandSummary?.pending))
+    ? Number(state.commandSummary.pending)
+    : commands.filter((item) => (
+      !['SUCCESS', 'FAILURE', 'FAILED', 'CANCELLED', 'NOT_FOUND'].includes(String(item?.status || 'PENDING').toUpperCase())
+    )).length;
   return {
     source: 'inpost-von-halsky-api',
     verifiedAt: state.sync?.lastCatalogVerifiedAt || state.sync?.lastCatalogAt || null,
     truth,
     operations: {
-      pendingCommands: pendingCommands.length,
-      recentCommands: commands.length,
+      pendingCommands,
+      recentCommands: Number.isFinite(Number(state?.commandSummary?.total))
+        ? Number(state.commandSummary.total)
+        : commands.length,
     },
     consistent: Number(state.sync?.remoteOfferCount ?? truth.total) === truth.total
       && Number(state.sync?.publishedOfferCount ?? truth.published) === truth.published,
@@ -104,9 +110,16 @@ function channelOperationalSummary(state = {}) {
 
 function remoteOfferSummary(details = {}) {
   const offer = details?.offer || details || {};
+  const product = offer?.product && typeof offer.product === 'object' ? offer.product : {};
   return {
     offerId: String(offer.id || offer.offerId || ''),
     externalId: String(offer.externalId || ''),
+    sku: String(offer.sku || product.sku || ''),
+    gtin: String(offer.gtin || offer.ean || product.ean || product.gtin || ''),
+    manufacturerCode: String(offer.manufacturerCode || offer.manufacturerProductNumber
+      || product.manufacturerProductNumber || product.manufacturerCode || ''),
+    brand: String(offer.brand || product.brand || ''),
+    categoryId: String(offer.categoryId || product.categoryId || ''),
     status: String(offer.status || ''),
     updatedAt: offer.updatedAt || null,
     validationErrors: Array.isArray(details?.metadata?.validationErrors) ? details.metadata.validationErrors.slice(0, 30) : [],
@@ -200,6 +213,7 @@ export function createVonHalskyRoute({
   sourceImages = null,
   sourceUrlOf = () => '',
   sessionOf = () => null,
+  channelState = null,
 } = {}) {
   const api = createVonHalskyApiClient({ env: new Proxy({}, { get: (_target, key) => env()?.[key] }), fetchImpl });
 
@@ -308,6 +322,7 @@ export function createVonHalskyRoute({
           readbackConfirmed: saved?.publication?.readbackConfirmed === true,
           confirmedAt: timestamp,
         });
+        await recordVonHalskyPublicationState({ repository: channelState, productId: id, product, status, details, timestamp });
       }
       return confirmations;
     }
@@ -329,6 +344,7 @@ export function createVonHalskyRoute({
     deduplicateVonHalskyOffers, vonHalskyOfferProposal,
     vonHalskyOfferProjection, vonHalskyProductReadiness,
     vonHalskyPublicConfig, normalizeVonHalskySettings, env,
+    channelState,
   };
   const agentPreparationRoute = createVonHalskyAgentRoute(routeContext);
   const operationsRoute = createVonHalskyOperationsRoute(routeContext);

@@ -1,6 +1,7 @@
 import {
   preferredVonHalskyOffers,
   reconcileVonHalskyCatalog,
+  resolveVonHalskyRemoteOffer,
 } from './von-halsky-catalog-reconciliation.mjs';
 
 export function vonHalskyCreateReceipts(payload = {}) {
@@ -89,6 +90,7 @@ export function createVonHalskyCatalogRoute(context = {}) {
     deduplicateVonHalskyOffers, vonHalskyOfferProposal,
     vonHalskyOfferProjection, vonHalskyProductReadiness,
     vonHalskyPublicConfig, normalizeVonHalskySettings, env,
+    channelState,
   } = context;
   return async function route(req, url, action) {
     if (action === 'von-halsky-catalog-preview') {
@@ -139,6 +141,32 @@ export function createVonHalskyCatalogRoute(context = {}) {
           saveProductFields,
           timestamp,
         });
+        if (channelState?.upsertState && reconciliation.productUpdates.length) {
+          await Promise.all(reconciliation.productUpdates.map((update) => {
+            const fields = update.fields || {};
+            const remoteStatus = String(fields.vonHalskyRemoteStatus || '').toUpperCase();
+            const publicationStatus = remoteStatus === 'PUBLISHED'
+              ? 'confirmed'
+              : ['REJECTED', 'ERROR', 'DUPLICATE_MAPPING', 'NOT_FOUND'].includes(remoteStatus)
+                ? 'failed'
+                : ['PENDING', 'PROCESSING', 'VERIFYING'].includes(remoteStatus)
+                  ? 'publishing'
+                  : 'blocked';
+            return channelState.upsertState({
+              productId: update.productId,
+              channel: 'von_halsky',
+              preparationStatus: publicationStatus === 'failed' ? 'needs_data' : 'ready',
+              publicationStatus,
+              categoryId: fields.vonHalskyCategoryId || update.product?.vonHalskyCategoryId || '',
+              targetId: fields.vonHalskyOfferId || update.product?.vonHalskyOfferId || '',
+              errorCode: publicationStatus === 'failed' ? `von_halsky_${remoteStatus.toLowerCase()}` : '',
+              errorText: fields.vonHalskyEditorialSyncError || '',
+              providerConfirmedAt: publicationStatus === 'confirmed' ? timestamp : null,
+              readbackConfirmedAt: publicationStatus === 'confirmed' ? timestamp : null,
+              metadata: { remoteStatus, source },
+            });
+          }));
+        }
         const changedProductIds = [...new Set(
           (Array.isArray(reconciliation.productUpdates) ? reconciliation.productUpdates : [])
             .map((item) => String(item?.productId || ''))
@@ -280,14 +308,21 @@ export function createVonHalskyCatalogRoute(context = {}) {
         // operacji zbiorczych nie dokładamy do listy ofert, dopóki GET /offers
         // faktycznie ich nie zwróci.
         const remoteOffers = (Array.isArray(remoteResult.data) ? remoteResult.data : []).map(remoteOfferSummary);
-        const remoteByExternalId = preferredVonHalskyOffers(remoteOffers).byExternalId;
+        const remoteIndex = preferredVonHalskyOffers(remoteOffers);
+        const remoteForItem = (item = {}) => resolveVonHalskyRemoteOffer({
+          externalId: item.externalId,
+          sku: item.externalId,
+          gtin: item.gtin,
+          manufacturerCode: item.manufacturerCode,
+          brand: item.brand,
+        }, remoteIndex).offer;
         lastRequestId = remoteResult.requestId || '';
-        const existing = deduplicated.items.filter((item) => remoteByExternalId.has(item.externalId));
-        const createCandidates = eligible.filter((item) => !remoteByExternalId.has(item.externalId) && allowNewOffer(item));
-        skippedNew = eligible.filter((item) => !remoteByExternalId.has(item.externalId) && !allowNewOffer(item)).length;
+        const existing = deduplicated.items.filter((item) => remoteForItem(item));
+        const createCandidates = eligible.filter((item) => !remoteForItem(item) && allowNewOffer(item));
+        skippedNew = eligible.filter((item) => !remoteForItem(item) && !allowNewOffer(item)).length;
 
         for (const item of existing) {
-          const product = productByExternalId.get(item.externalId), remote = remoteByExternalId.get(item.externalId);
+          const product = productByExternalId.get(item.externalId), remote = remoteForItem(item);
           activeBatchProducts = product ? [product] : [];
           if (
             product
@@ -343,7 +378,7 @@ export function createVonHalskyCatalogRoute(context = {}) {
 
         if (state.settings.automaticPriceSync !== false) {
           const prices = existing.filter((item) => item.available && item.readiness.publishable).map((item) => ({
-            offerId: remoteByExternalId.get(item.externalId).offerId,
+            offerId: remoteForItem(item).offerId,
             price: { amount: Number(Number(item.price).toFixed(2)), currency: item.currency || 'PLN' },
           }));
           for (let offset = 0; offset < prices.length; offset += batchSize) {
@@ -354,7 +389,7 @@ export function createVonHalskyCatalogRoute(context = {}) {
         }
         if (state.settings.automaticStockSync !== false) {
           const stocks = existing.map((item) => ({
-            offerId: remoteByExternalId.get(item.externalId).offerId,
+            offerId: remoteForItem(item).offerId,
             stock: { quantity: item.available ? item.stock : 0, unit: 'UNIT' },
           }));
           for (let offset = 0; offset < stocks.length; offset += batchSize) {

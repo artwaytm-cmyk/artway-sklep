@@ -20,7 +20,7 @@ export function createPostgresAllegroPreparationQueue({
   const ns = clean(namespace, 120) || 'artway-sklep';
   let schemaPromise = null;
   let workerPromise = null;
-  let retryTimer = null;
+  let editorialProviderUnavailable = false;
 
   const ensureSchema = async () => {
     if (!schemaPromise) {
@@ -241,12 +241,10 @@ export function createPostgresAllegroPreparationQueue({
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const state = await client.query(
-        'SELECT blocked_until FROM artway_allegro_preparation_state WHERE namespace=$1 FOR UPDATE',
+      await client.query(
+        'SELECT namespace FROM artway_allegro_preparation_state WHERE namespace=$1 FOR UPDATE',
         [ns],
       );
-      const editorialBlocked = Number.isFinite(Date.parse(state.rows[0]?.blocked_until || ''))
-        && Date.parse(state.rows[0].blocked_until) > now().getTime();
       const selected = await client.query(`
         SELECT * FROM artway_allegro_preparation_tasks
         WHERE namespace=$1 AND status='pending'
@@ -264,7 +262,7 @@ export function createPostgresAllegroPreparationQueue({
         SET status='running',attempt=attempt+1,skip_editorial=$3,started_at=NOW(),updated_at=NOW()
         WHERE namespace=$1 AND task_id=$2
         RETURNING *
-      `, [ns, row.task_id, editorialBlocked]);
+      `, [ns, row.task_id, editorialProviderUnavailable]);
       await client.query('COMMIT');
       return taskFromRow(updated.rows[0]);
     } catch (error) {
@@ -292,6 +290,7 @@ export function createPostgresAllegroPreparationQueue({
       error: clean(result?.error, 1000),
       nextRetryAt: clean(result?.nextRetryAt, 50),
       decision: asObject(result?.decision),
+      downstream: asObject(result?.downstream),
     };
     await pool.query(`
       UPDATE artway_allegro_preparation_tasks
@@ -321,18 +320,6 @@ export function createPostgresAllegroPreparationQueue({
       SET status='pending',result=$3::jsonb,started_at=NULL,completed_at=NULL,updated_at=NOW()
       WHERE namespace=$1 AND task_id=$2
     `, [ns, task.id, JSON.stringify(item)]);
-  };
-
-  const pauseForQuota = async () => {
-    const blockedUntil = new Date(now().getTime() + 6 * 60 * 60_000).toISOString();
-    await pool.query(`
-      UPDATE artway_allegro_preparation_state
-      SET blocked_until=$2,blocked_reason='OpenAI API quota',updated_at=NOW()
-      WHERE namespace=$1
-    `, [ns, blockedUntil]);
-    clearTimeout(retryTimer);
-    retryTimer = setTimeout(() => kick(), 6 * 60 * 60_000);
-    retryTimer.unref?.();
   };
 
   const run = async () => {
@@ -375,7 +362,17 @@ export function createPostgresAllegroPreparationQueue({
           };
         }
         if (typeof afterPrepare === 'function' && result?.ready === true) {
-          const downstream = await afterPrepare(task, result);
+          let downstream;
+          try {
+            downstream = await afterPrepare(task, result);
+          } catch (error) {
+            downstream = {
+              channel: 'vonHalsky',
+              status: 'retry',
+              ready: false,
+              error: clean(error?.message || error, 1000),
+            };
+          }
           result = {
             ...result,
             downstream: asObject(downstream),
@@ -389,7 +386,9 @@ export function createPostgresAllegroPreparationQueue({
             result,
           }).catch(() => {});
         }
-        if (result?.providerUnavailable === true || providerQuotaUnavailable(result?.error)) await pauseForQuota();
+        if (result?.providerUnavailable === true || providerQuotaUnavailable(result?.error)) {
+          editorialProviderUnavailable = true;
+        }
       } catch (error) {
         const quotaUnavailable = providerQuotaUnavailable(error);
         let result = {
@@ -417,7 +416,7 @@ export function createPostgresAllegroPreparationQueue({
         }
         await finish(task, result);
         if (typeof report === 'function') await report({ task, status: result.status, result }).catch(() => {});
-        if (quotaUnavailable) await pauseForQuota();
+        if (quotaUnavailable) editorialProviderUnavailable = true;
       }
     }
   };
@@ -430,6 +429,12 @@ export function createPostgresAllegroPreparationQueue({
 
   const resume = async () => {
     await migrateLegacy();
+    editorialProviderUnavailable = false;
+    await pool.query(`
+      UPDATE artway_allegro_preparation_state
+      SET blocked_until=NULL,blocked_reason='',updated_at=NOW()
+      WHERE namespace=$1
+    `, [ns]);
     await pool.query(`
       UPDATE artway_allegro_preparation_tasks
       SET status='pending',started_at=NULL,updated_at=NOW()

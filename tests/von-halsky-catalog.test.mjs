@@ -29,9 +29,69 @@ import {
   responsibleProducerFromSourceText,
 } from '../src/backend/lib/domain/von-halsky-responsible-producer.mjs';
 import {
+  preferredVonHalskyOffers,
   reconcileVonHalskyCatalog,
+  resolveVonHalskyRemoteOffer,
   vonHalskyCatalogTruthSummary,
 } from '../src/backend/lib/domain/von-halsky-catalog-reconciliation.mjs';
+
+test('oferta Von Halsky jest odnajdywana po EAN albo kodzie producenta z marką', () => {
+  const index = preferredVonHalskyOffers([{
+    offer: {
+      id: 'VH-REMOTE-1',
+      status: 'REJECTED',
+      externalId: 'stary-identyfikator',
+      product: {
+        sku: 'STARE-SKU',
+        ean: '5906018027532',
+        manufacturerProductNumber: '2753',
+        brand: 'Alexander',
+        categoryId: 'gry',
+      },
+    },
+  }]);
+  const byGtin = resolveVonHalskyRemoteOffer({
+    externalId: 'NOWE-SKU',
+    gtin: '5906018027532',
+  }, index);
+  assert.equal(byGtin.offer.offerId, 'VH-REMOTE-1');
+  assert.match(byGtin.matchedBy, /gtin/);
+  const byManufacturer = resolveVonHalskyRemoteOffer({
+    manufacturerCode: '2753',
+    brand: 'Alexander',
+  }, index);
+  assert.equal(byManufacturer.offer.offerId, 'VH-REMOTE-1');
+  assert.match(byManufacturer.matchedBy, /manufacturerCode\+brand/);
+});
+
+test('status kanału zachowuje relacyjne liczniki PostgreSQL bez pobierania całej listy ofert', async () => {
+  const route = createVonHalskyRoute({
+    respond: (body, status = 200) => ({ body, status }),
+    isAdmin: () => true,
+    readVersioned: async (_key, fallback) => ({ value: fallback, revision: 0 }),
+    writeIfVersion: async () => ({ modified: true }),
+    readStatus: async (fallback) => ({
+      ...fallback,
+      truth: {
+        total: 160,
+        published: 105,
+        pending: 39,
+        rejected: 16,
+        closed: 0,
+        statuses: { PUBLISHED: 105, PENDING: 39, REJECTED: 16 },
+      },
+      commandSummary: { pending: 12, total: 50 },
+      sync: { remoteOfferCount: 160, publishedOfferCount: 105 },
+    }),
+  });
+  const request = new Request('https://artwaytm.pl/api?action=von-halsky-status');
+  const response = await route(request, new URL(request.url), 'von-halsky-status');
+  assert.equal(response.status, 200);
+  assert.equal(response.body.truth.total, 160);
+  assert.equal(response.body.truth.published, 105);
+  assert.equal(response.body.channelStatus.operations.pendingCommands, 12);
+  assert.equal(response.body.channelStatus.consistent, true);
+});
 
 test('potwierdzenia publikacji Von Halsky są rozpoznawane także w opakowanej odpowiedzi API', () => {
   assert.deepEqual(vonHalskyCreateReceipts({

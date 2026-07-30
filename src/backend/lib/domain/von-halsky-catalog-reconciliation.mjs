@@ -3,6 +3,21 @@ import { buildEditorialPublicationPatch } from './agent-product-editorial-state.
 const text = (value, max = 500) => String(value ?? '').replace(/\u0000/g, '').trim().slice(0, max);
 const upper = (value) => text(value, 60).toUpperCase();
 const asArray = (value) => Array.isArray(value) ? value : [];
+const identityText = (value) => text(value, 500)
+  .normalize('NFKD')
+  .replace(/\p{Diacritic}/gu, '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim();
+const identityGtin = (value) => {
+  const digits = text(value, 100).replace(/\D/g, '');
+  return [8, 12, 13, 14].includes(digits.length) ? digits : '';
+};
+const identityManufacturerBrand = (manufacturerCode, brand) => {
+  const code = identityText(manufacturerCode);
+  const maker = identityText(brand);
+  return code && maker ? `${code}::${maker}` : '';
+};
 
 function stableOperationalValue(value) {
   if (Array.isArray(value)) return value.map(stableOperationalValue);
@@ -35,25 +50,76 @@ function offerStatusPriority(status = '') {
 }
 
 export function preferredVonHalskyOffers(offers = []) {
-  const byExternalId = new Map(), byOfferId = new Map();
+  const byExternalId = new Map(), byOfferId = new Map(), bySku = new Map();
+  const byGtin = new Map(), byManufacturerBrand = new Map();
+  const prefer = (index, key, offer) => {
+    if (!key) return;
+    const previous = index.get(key);
+    if (!previous || offerStatusPriority(offer.status) > offerStatusPriority(previous.status)) {
+      index.set(key, offer);
+    }
+  };
   for (const source of asArray(offers)) {
     const offer = source?.offer || source || {};
+    const product = offer?.product || source?.product || {};
     const normalized = {
       offerId: text(offer.id || offer.offerId, 200),
       externalId: text(offer.externalId, 200),
+      sku: text(offer.sku || product.sku, 200),
+      gtin: identityGtin(offer.gtin || offer.ean || product.ean || product.gtin),
+      manufacturerCode: text(
+        offer.manufacturerCode
+        || offer.manufacturerProductNumber
+        || product.manufacturerProductNumber
+        || product.manufacturerCode,
+        500,
+      ),
+      brand: text(offer.brand || product.brand, 200),
+      categoryId: text(offer.categoryId || product.categoryId, 120),
       status: upper(offer.status),
       updatedAt: offer.updatedAt || null,
       validationErrors: asArray(source?.metadata?.validationErrors || source?.validationErrors).slice(0, 30),
       rejectionReasons: asArray(source?.metadata?.rejectionReasons || source?.rejectionReasons).slice(0, 30),
     };
     if (normalized.offerId) byOfferId.set(normalized.offerId, normalized);
-    if (!normalized.externalId) continue;
-    const previous = byExternalId.get(normalized.externalId);
-    if (!previous || offerStatusPriority(normalized.status) > offerStatusPriority(previous.status)) {
-      byExternalId.set(normalized.externalId, normalized);
-    }
+    prefer(byExternalId, normalized.externalId, normalized);
+    prefer(bySku, normalized.sku, normalized);
+    prefer(byGtin, normalized.gtin, normalized);
+    prefer(
+      byManufacturerBrand,
+      identityManufacturerBrand(normalized.manufacturerCode, normalized.brand),
+      normalized,
+    );
   }
-  return { byExternalId, byOfferId };
+  return { byExternalId, byOfferId, bySku, byGtin, byManufacturerBrand };
+}
+
+export function resolveVonHalskyRemoteOffer(identity = {}, index = {}) {
+  const localOfferId = text(identity.offerId || identity.vonHalskyOfferId || identity.inpostVonHalskyOfferId, 200);
+  const externalId = text(identity.externalId, 200);
+  const sku = text(identity.sku, 200);
+  const gtin = identityGtin(identity.gtin || identity.ean);
+  const manufacturerBrand = identityManufacturerBrand(
+    identity.manufacturerCode || identity.kodProducenta || identity.mpn,
+    identity.brand || identity.marka || identity.producent,
+  );
+  const candidates = [
+    ['offerId', localOfferId && index.byOfferId?.get(localOfferId)],
+    ['externalId', externalId && index.byExternalId?.get(externalId)],
+    ['sku', sku && index.bySku?.get(sku)],
+    ['gtin', gtin && index.byGtin?.get(gtin)],
+    ['manufacturerCode+brand', manufacturerBrand && index.byManufacturerBrand?.get(manufacturerBrand)],
+  ].filter(([, offer]) => offer?.offerId);
+  if (!candidates.length) return { offer: null, matchedBy: '', conflicts: [] };
+  const distinctOfferIds = [...new Set(candidates.map(([, offer]) => offer.offerId))];
+  if (distinctOfferIds.length > 1) {
+    return {
+      offer: null,
+      matchedBy: '',
+      conflicts: candidates.map(([matchedBy, offer]) => ({ matchedBy, offerId: offer.offerId })),
+    };
+  }
+  return { offer: candidates[0][1], matchedBy: candidates.map(([matchedBy]) => matchedBy).join('+'), conflicts: [] };
 }
 
 export function vonHalskyCatalogTruthSummary(offers = []) {
@@ -115,19 +181,27 @@ function lastPublicationAttemptAt(product = {}) {
 function productRemoteCandidate(product = {}, index = {}) {
   const externalId = text(product.externalId || product.sku || product.id, 200);
   const localOfferId = text(product.vonHalskyOfferId || product.inpostVonHalskyOfferId, 200);
-  const byExternal = externalId ? index.byExternalId.get(externalId) : null;
-  const byLocalId = localOfferId ? index.byOfferId.get(localOfferId) : null;
-  const remote = byExternal || byLocalId || null;
+  const resolution = resolveVonHalskyRemoteOffer({
+    offerId: localOfferId,
+    externalId,
+    sku: product.sku || product.externalId,
+    gtin: product.gtin || product.ean,
+    manufacturerCode: product.kodProducenta || product.mpn || product.numerReferencyjny,
+    brand: product.marka || product.producent,
+  }, index);
+  const remote = resolution.offer;
   if (!remote) return null;
   const localIdExact = Boolean(localOfferId && localOfferId === remote.offerId);
   const externalExact = Boolean(externalId && externalId === remote.externalId);
   const score = (externalExact ? 1_000 : 0)
     + (localIdExact ? 500 : 0)
+    + (resolution.matchedBy.includes('gtin') ? 250 : 0)
+    + (resolution.matchedBy.includes('manufacturerCode+brand') ? 150 : 0)
     + (product.vonHalskyRemotePresent === true ? 30 : 0)
     + (product.sprzedazAktywna !== false ? 20 : 0)
     + (text(product.ean || product.gtin, 30) ? 10 : 0)
     + (text(product.nazwa || product.name, 200) ? 5 : 0);
-  return { remote, externalId, localOfferId, score };
+  return { remote, externalId, localOfferId, score, matchedBy: resolution.matchedBy };
 }
 
 function chooseRemoteProductAssignments(products = [], index = {}) {

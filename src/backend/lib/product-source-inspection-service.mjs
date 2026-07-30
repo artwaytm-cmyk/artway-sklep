@@ -1,6 +1,6 @@
 import { tekst } from './core/http.mjs';
 import { createProductSourceMatching } from './product-source-matching.mjs';
-import { synchronizeProductIdentifierAliases } from './domain/product-identifiers.mjs';
+import { isValidGtin, synchronizeProductIdentifierAliases } from './domain/product-identifiers.mjs';
 import { SOURCE_IMAGE_POLICY_VERSION } from './domain/source-product-images.mjs';
 import { responsibleProducerFromSourceText } from './domain/von-halsky-responsible-producer.mjs';
 import { createProductSourceResultCache, productSourceCacheKey } from './product-source-result-cache.mjs';
@@ -256,7 +256,8 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
     const symbol = parametr(dict, ['Symbol', 'Kod', 'SKU']) || tekst(ldProduct.sku, 120).trim();
     const kodProducentaRaw = parametr(dict, ['Kod producenta', 'Numer referencyjny', 'Numer katalogowy', 'Reference number', 'MPN', 'Kod katalogowy']) || tekst(ldProduct.mpn, 120).trim();
     const eanRaw = parametr(dict, ['EAN', 'GTIN', 'Kod EAN']) || tekst(ldProduct.gtin13 || ldProduct.gtin || ldProduct.gtin12 || ldProduct.gtin14, 80).trim() || kodProducentaRaw;
-    const ean = (String(eanRaw).match(/\b\d{8,14}\b/) || [])[0] || '';
+    const eanCandidate = (String(eanRaw).match(/\b\d{8,14}\b/) || [])[0] || '';
+    const ean = isValidGtin(eanCandidate) ? eanCandidate : '';
     const kodProducenta = (kodProducentaRaw && normalizujKluczParametru(kodProducentaRaw) !== normalizujKluczParametru(ean) ? kodProducentaRaw : '') || symbol;
     const statusHtml = stripHtml((html.match(/id=["']projector_status_description["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '');
     const statusDostepny = /produkt dostępny|\bdostępny\b|in stock|instock/i.test(statusHtml + ' ' + String(ldProduct?.offers?.availability || ''));
@@ -274,7 +275,7 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
     );
     const parametry = {
       symbol,
-      kodProducenta: kodProducentaRaw,
+      kodProducenta: kodProducenta || symbol,
       numerReferencyjny: parametr(dict, ['Numer referencyjny', 'Reference number']) || kodProducentaRaw,
       ean,
       seria: parametr(dict, ['Seria']),
@@ -432,7 +433,8 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
     const symbol = markdownWartoscPoEtykiecie(segment, ['Symbol', 'SKU', 'Kod']);
     const kodProducentaRaw = markdownWartoscPoEtykiecie(segment, ['Kod producenta', 'Numer referencyjny', 'Numer katalogowy', 'Reference number', 'MPN', 'Kod katalogowy']);
     const eanRaw = markdownWartoscPoEtykiecie(segment, ['EAN', 'GTIN', 'Kod EAN']) || kodProducentaRaw;
-    const ean = (String(eanRaw).match(/\b\d{8,14}\b/) || [])[0] || '';
+    const eanCandidate = (String(eanRaw).match(/\b\d{8,14}\b/) || [])[0] || '';
+    const ean = isValidGtin(eanCandidate) ? eanCandidate : '';
     const kodProducenta = (kodProducentaRaw && normalizujKluczParametru(kodProducentaRaw) !== normalizujKluczParametru(ean) ? kodProducentaRaw : '') || symbol;
     const zdjecia = obrazkiProduktuZMarkdown(url, body);
     const beforeTitle = body.slice(0, productStart), crumbs = [...beforeTitle.matchAll(/^\s*\d+\.\s+\[([^\]]+)\]/gm)].map((m) => markdownInlineTekst(m[1])).filter((x) => x && !/strona główna/i.test(x));
@@ -477,7 +479,7 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
         stanProducentaZrodlo: quantity !== null ? 'ilość pokazana przez producenta' : 'status strony producenta',
         producentStatus: niedostepny ? 'brak' : (dostepny ? (quantity === null ? 'dostepny_nieznany' : 'dostepny') : 'nieznany'),
         producentSprawdzonoAt: checkedAt,
-        parametryProducenta: { symbol, kodProducenta: kodProducentaRaw, ean, seria: dict.seria, wiek: dict.wiek, liczbaGraczy: dict['liczba graczy'], wymiaryOpakowania: dict['wymiary opakowania'], wagaOpakowania: dict['waga opakowania'], ostrzezenie: dict.ostrzezenie },
+        parametryProducenta: { symbol, kodProducenta: kodProducenta || symbol, ean, seria: dict.seria, wiek: dict.wiek, liczbaGraczy: dict['liczba graczy'], wymiaryOpakowania: dict['wymiary opakowania'], wagaOpakowania: dict['waga opakowania'], ostrzezenie: dict.ostrzezenie },
         parametryZrodla: Object.fromEntries(Object.entries(dict).filter(([, value]) => value)),
         ...(responsibleProducer ? { gpsrResponsibleProducer: responsibleProducer } : {}),
         sourceEvidence: { url, host, fetchedAt: checkedAt, title, retrieval: 'reader-fallback', fields: ['nazwa', 'cena', 'opisKrotki', 'opis', 'zdjecia', 'EAN', 'kodProducenta', 'dostepnosc', ...Object.keys(dict).filter((key) => dict[key])].slice(0, 80), imagePolicyVersion: SOURCE_IMAGE_POLICY_VERSION, imageSourceType: 'product_source_page', imageSourceUrl: url, imageUrls: zdjecia, imagesFetchedAt: checkedAt, ...(responsibleProducer ? { responsibleProducer } : {}) },

@@ -93,6 +93,23 @@ export function createAgentEventSystem({
     })));
   }
 
+  function signalVonHalskyPreparation(productId, { source = 'allegro-preparation' } = {}) {
+    const id = text(productId, 120).trim();
+    if (!id) return Promise.resolve({ skipped: true, reason: 'missing_product_id' });
+    return emit({
+      type: 'product.von_halsky.prepare',
+      area: 'products',
+      entityId: id,
+      dedupeKey: `product.von_halsky.prepare:${id}`,
+      source,
+      priority: 520,
+      payload: {
+        productId: id,
+        action: 'niezależne przygotowanie kartoteki Von Halsky',
+      },
+    });
+  }
+
   function vonHalskyFinisher({
     route,
     publicOrigin = 'https://artwaytm.pl',
@@ -180,6 +197,7 @@ export function createAgentEventSystem({
 
   function connect({
     preparationRoute,
+    prepareVonHalsky,
     storeOrderReconciliation,
     readAllegroOrders,
     reconcileAllegroPlan,
@@ -266,6 +284,19 @@ export function createAgentEventSystem({
         enqueued: Number(automatic.enqueued || automatic.candidates?.length || 0),
       };
     });
+    queue.register('product.von_halsky.prepare', async (event) => {
+      if (typeof prepareVonHalsky !== 'function') {
+        throw Object.assign(new Error('Wykonawca przygotowania Von Halsky nie jest skonfigurowany.'), {
+          decisionRequired: true,
+        });
+      }
+      return prepareVonHalsky({
+        id: event.id,
+        productId: event.entityId || event.payload?.productId,
+        operation: 'von-halsky',
+        requestedAt: event.createdAt,
+      });
+    });
     queue.register('order.store.received', async (event) => ({
       message: `Nowe zamówienie ${event.entityId} zostało zapisane, sprawdzone magazynowo i przekazane do właściwego planu zaopatrzenia.`,
       reconciliation: await storeOrderReconciliation.reconcileDraftsSafely({ summary: true }),
@@ -308,6 +339,7 @@ export function createAgentEventSystem({
     emit,
     signalProduct,
     signalAllegroOrders,
+    signalVonHalskyPreparation,
     wrapProductSaver,
     vonHalskyFinisher,
     connect,

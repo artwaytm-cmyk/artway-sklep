@@ -79,18 +79,18 @@ test('błąd quota zatrzymuje tylko redakcję AI, a kolejne produkty nadal zapis
     now: () => new Date('2026-07-26T12:00:00.000Z'),
   });
   await queue.enqueue(['1', '2', '3']);
-  const blocked = await waitUntil(async () => {
+  const finished = await waitUntil(async () => {
     const status = await queue.status();
-    return status.blockedUntil && !status.running ? status : null;
+    return !status.running && status.pending === 0 && status.recent.length === 3 ? status : null;
   });
   assert.deepEqual(calls, [
     { productId: '1', skipEditorial: false },
     { productId: '2', skipEditorial: true },
     { productId: '3', skipEditorial: true },
   ]);
-  assert.equal(blocked.pending, 0);
-  assert.equal(blocked.blockedReason, 'OpenAI API quota');
-  assert.equal(blocked.blockedUntil, '2026-07-26T18:00:00.000Z');
+  assert.equal(finished.pending, 0);
+  assert.equal(finished.blockedReason, '');
+  assert.equal(finished.blockedUntil, '');
 });
 
 test('zapisany wynik z ostrzeżeniem quota przełącza pozostałe zadania w tryb bez redaktora', async () => {
@@ -118,19 +118,19 @@ test('zapisany wynik z ostrzeżeniem quota przełącza pozostałe zadania w tryb
     now: () => new Date('2026-07-26T12:00:00.000Z'),
   });
   await queue.enqueue(['1', '2', '3']);
-  const blocked = await waitUntil(async () => {
+  const finished = await waitUntil(async () => {
     const status = await queue.status();
-    return status.blockedUntil && !status.running ? status : null;
+    return !status.running && status.pending === 0 && status.recent.length === 3 ? status : null;
   });
   assert.deepEqual(calls, [
     { productId: '1', skipEditorial: false },
     { productId: '2', skipEditorial: true },
     { productId: '3', skipEditorial: true },
   ]);
-  assert.equal(blocked.recent[0].status, 'waiting_provider');
-  assert.deepEqual(blocked.recent[0].savedFields, ['allegroCategoryId', 'allegroParameters']);
-  assert.equal(blocked.pending, 0);
-  assert.equal(blocked.blockedReason, 'OpenAI API quota');
+  assert.equal(finished.recent[0].status, 'waiting_provider');
+  assert.deepEqual(finished.recent[0].savedFields, ['allegroCategoryId', 'allegroParameters']);
+  assert.equal(finished.pending, 0);
+  assert.equal(finished.blockedReason, '');
 });
 
 test('kolejka po restarcie przywraca aktywny produkt przed oczekującymi', async () => {
@@ -151,7 +151,7 @@ test('kolejka po restarcie przywraca aktywny produkt przed oczekującymi', async
   assert.equal(repository.value().active, null);
 });
 
-test('zadanie jest zakończone dopiero po potwierdzonym etapie drugiego kanału', async () => {
+test('błąd etapu Von Halsky nie cofa potwierdzonego przygotowania Allegro', async () => {
   const repository = memoryRepository();
   let downstreamAttempts = 0;
   const queue = createAllegroPreparationQueue({
@@ -159,8 +159,7 @@ test('zadanie jest zakończone dopiero po potwierdzonym etapie drugiego kanału'
     prepare: async () => ({ ready: true, status: 'completed', savedFields: ['opis'] }),
     afterPrepare: async () => {
       downstreamAttempts += 1;
-      if (downstreamAttempts < 2) throw new Error('Von Halsky nie potwierdził jeszcze zapisu');
-      return { channel: 'vonHalsky', status: 'ready', readbackConfirmed: true };
+      throw new Error('Von Halsky nie potwierdził jeszcze zapisu');
     },
   });
   await queue.enqueue(['multi-channel']);
@@ -168,9 +167,12 @@ test('zadanie jest zakończone dopiero po potwierdzonym etapie drugiego kanału'
     const value = await queue.status();
     return !value.running && value.recent.length === 1 ? value : null;
   });
-  assert.equal(downstreamAttempts, 2);
+  assert.equal(downstreamAttempts, 1);
   assert.equal(status.recent[0].status, 'completed');
   assert.equal(status.recent[0].ready, true);
+  assert.equal(status.recent[0].downstream.channel, 'vonHalsky');
+  assert.equal(status.recent[0].downstream.status, 'retry');
+  assert.match(status.recent[0].downstream.error, /nie potwierdził/);
 });
 
 test('ponowne przygotowanie śledzi zajęte produkty zamiast tworzyć pustą partię', async () => {
