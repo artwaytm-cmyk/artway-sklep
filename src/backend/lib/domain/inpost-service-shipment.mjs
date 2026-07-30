@@ -2,6 +2,9 @@ const MONEY_MAX = 1_000_000;
 const BILLING_MODES = new Set(['none', 'single', 'monthly']);
 const DELIVERY_TYPES = new Set(['locker', 'courier']);
 const SENDING_METHODS = new Set(['parcel_locker', 'any_point', 'pok', 'pop', 'courier_pok', 'branch', 'dispatch_order']);
+const LOCKER_SENDING_METHODS = new Set(['parcel_locker', 'any_point', 'pok', 'pop', 'branch']);
+const COURIER_SENDING_METHODS = new Set(['', 'any_point', 'pok', 'pop', 'courier_pok', 'branch']);
+const DROPOFF_POINT_REQUIRED_METHODS = new Set(['parcel_locker', 'pok', 'pop', 'courier_pok']);
 const LOCKER_EXTRAS = new Set(['labelless']);
 const COURIER_EXTRAS = new Set(['sms', 'email', 'saturday', 'dor1720', 'rod', 'labelless']);
 
@@ -207,7 +210,10 @@ export function inpostServiceContactFingerprint(raw = {}) {
 
 export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = {}) {
   const deliveryType = DELIVERY_TYPES.has(clean(raw.deliveryType, 20)) ? clean(raw.deliveryType, 20) : 'locker';
-  const sendingMethod = SENDING_METHODS.has(clean(raw.sendingMethod, 40)) ? clean(raw.sendingMethod, 40) : 'parcel_locker';
+  const requestedSendingMethod = SENDING_METHODS.has(clean(raw.sendingMethod, 40)) ? clean(raw.sendingMethod, 40) : '';
+  const sendingMethod = deliveryType === 'locker'
+    ? (LOCKER_SENDING_METHODS.has(requestedSendingMethod) ? requestedSendingMethod : 'parcel_locker')
+    : (COURIER_SENDING_METHODS.has(requestedSendingMethod) ? requestedSendingMethod : '');
   const allowedExtras = deliveryType === 'locker' ? LOCKER_EXTRAS : COURIER_EXTRAS;
   const extras = [...new Set((Array.isArray(raw.additionalServices) ? raw.additionalServices : []).map((item) => clean(item, 30)).filter((item) => allowedExtras.has(item)))];
   const billingMode = BILLING_MODES.has(clean(raw.billingMode, 20)) ? clean(raw.billingMode, 20) : 'none';
@@ -240,7 +246,7 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
     insurance: { enabled: raw.insurance?.enabled === true, amount: money(raw.insurance?.amount) },
     weekend: deliveryType === 'locker' && raw.weekend === true,
     additionalServices: extras,
-    pickupRequested: raw.pickupRequested === true || sendingMethod === 'dispatch_order',
+    pickupRequested: raw.pickupRequested === true || requestedSendingMethod === 'dispatch_order',
     billing: {
       mode: billingMode,
       commissionGross,
@@ -269,6 +275,9 @@ export function validateInpostServiceDraft(draft = {}) {
     if (!value?.city) errors.push({ field: `${prefix}.address.city`, message: 'Brak miejscowości.' });
   }
   if (draft.deliveryType === 'locker' && !draft.targetPoint) errors.push({ field: 'targetPoint', message: 'Wybierz Paczkomat lub PaczkoPunkt odbiorcy.' });
+  if (DROPOFF_POINT_REQUIRED_METHODS.has(draft.sendingMethod) && !draft.dropoffPoint) {
+    errors.push({ field: 'dropoffPoint', message: 'Wybierz konkretny punkt nadania dla wybranego sposobu nadania.' });
+  }
   if (draft.cod?.enabled && draft.cod.amount <= 0) errors.push({ field: 'cod.amount', message: 'Podaj kwotę pobrania.' });
   if (draft.insurance?.enabled && draft.insurance.amount <= 0) errors.push({ field: 'insurance.amount', message: 'Podaj wartość ubezpieczenia.' });
   if (draft.deliveryType === 'courier' && (draft.parcel?.weight <= 0 || draft.parcel?.weight > 30)) errors.push({ field: 'parcel.weight', message: 'Kurier Standard z tego cennika obsługuje wagę od 0,01 do 30 kg.' });
@@ -279,9 +288,10 @@ export function validateInpostServiceDraft(draft = {}) {
 }
 
 export function inpostServiceShipxPayload(draft = {}) {
-  const customAttributes = { sending_method: draft.sendingMethod };
+  const customAttributes = {};
+  if (draft.sendingMethod) customAttributes.sending_method = draft.sendingMethod;
   if (draft.deliveryType === 'locker') customAttributes.target_point = draft.targetPoint;
-  if (draft.dropoffPoint && ['parcel_locker', 'pok', 'pop', 'courier_pok'].includes(draft.sendingMethod)) customAttributes.dropoff_point = draft.dropoffPoint;
+  if (draft.dropoffPoint && DROPOFF_POINT_REQUIRED_METHODS.has(draft.sendingMethod)) customAttributes.dropoff_point = draft.dropoffPoint;
   const payload = {
     sender: shipxParty(draft.sender, true),
     receiver: shipxParty(draft.receiver, draft.deliveryType === 'courier'),
@@ -291,7 +301,7 @@ export function inpostServiceShipxPayload(draft = {}) {
     comments: draft.comments || `Nadanie usługowe ${draft.reference}`.slice(0, 100),
     external_customer_id: draft.billing.clientKey || undefined,
     only_choice_of_offer: false,
-    custom_attributes: customAttributes,
+    ...(Object.keys(customAttributes).length ? { custom_attributes: customAttributes } : {}),
   };
   if (draft.additionalServices.length) payload.additional_services = draft.additionalServices;
   if (draft.weekend) payload.end_of_week_collection = true;

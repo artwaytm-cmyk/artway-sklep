@@ -13,14 +13,15 @@ test("oferty Allegro korzystają z pełnego wzorca centrum wystawiania",async()=
   assert.match(styles,/\.allegro-offers-workspace/);
 });
 
-test("ciężkie listy Allegro tworzą karty stopniowo zamiast blokować wejście",async()=>{
+test("publikacja doładowuje ciężkie karty stopniowo, a sprzedaż używa lekkiej tabeli kanału",async()=>{
   const source=await read("src/frontend/12c-commerce-catalog-actions.js"),mapping=await read("src/frontend/11-allegro-mapping-index.js"),sync=(await read("src/frontend/03-cloud-sync.js"))+(await read("src/frontend/03a-company-payments-and-product-ids.js")),styles=await read("src/styles/29-commerce-catalog-actions.css");
   assert.match(source,/function allegroProgresywneKartyHTML/);
   assert.match(source,/items\.slice\(0,batch\)/);
   assert.match(source,/state\.items\.slice\(state\.index,state\.index\+12\)/);
   assert.match(source,/new IntersectionObserver/);
   assert.match(source,/allegroProgresywneKartyHTML\(rows,allegroPublikacjaKartaHTML,"wystawianie"\)/);
-  assert.match(source,/allegroProgresywneKartyHTML\(rows,allegroOfertaMapowanieCardHTML,"oferty"\)/);
+  assert.match(source,/allegro-channel-offers-table/);
+  assert.doesNotMatch(source,/allegroProgresywneKartyHTML\(rows,allegroOfertaMapowanieCardHTML,"oferty"\)/);
   assert.match(mapping,/function allegroProduktyMapowaniaAktywne/);
   assert.match(mapping,/const produkty=allegroProduktyMapowaniaAktywne\(\)/);
   assert.doesNotMatch(mapping,/function allegroKandydaciMapowaniaOferty\([^)]*\)\{const produkty=produktyDoAdministracji\(\)\.filter/);

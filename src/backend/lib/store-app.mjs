@@ -3783,7 +3783,7 @@ export default async (req) => {
       code: e?.code || (status === 500 ? 'server_error' : 'request_error'),
     };
     if (Array.isArray(e?.missingEnv)) body.missingEnv = e.missingEnv;
-    if (e?.inpost?.details) body.details = e.inpost.details;
+    if (Array.isArray(e?.details) && e.details.length) body.details = e.details; else if (e?.inpost?.details) body.details = e.inpost.details;
     if (e?.allegro) body.allegroError = e.allegro;
     if (e?.draft) body.draft = e.draft;
     if (e?.categorySuggestion) body.categorySuggestion = e.categorySuggestion;

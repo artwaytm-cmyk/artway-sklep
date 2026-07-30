@@ -948,11 +948,48 @@ async function inpostServiceLaduj(force=false,cicho=true){
   }catch(e){inpostServiceStan={...inpostServiceStan,loaded:true,loading:false,error:e.message||String(e)};if(!cicho)toast("InPost: "+inpostServiceStan.error);}
   if(trasa()==="/admin/wysylki/inpost")renderuj();
 }
-function inpostServiceUstawTyp(form){
+const inpostServiceMetodyNadania={
+  locker:[
+    ["any_point","Dowolny punkt InPost"],
+    ["parcel_locker","Konkretny Paczkomat"],
+    ["pok","Punkt Obsługi Klienta"],
+    ["pop","Punkt Obsługi Przesyłek"],
+    ["branch","Oddział InPost"]
+  ],
+  courier:[
+    ["","Nadanie standardowe"],
+    ["any_point","Dowolny punkt InPost"],
+    ["pok","Punkt Obsługi Klienta"],
+    ["pop","Punkt Obsługi Przesyłek"],
+    ["courier_pok","Punkt kurierski InPost"],
+    ["branch","Oddział InPost"]
+  ]
+};
+const inpostServiceMetodyWymagajacePunktu=new Set(["parcel_locker","pok","pop","courier_pok"]);
+function inpostServiceMetodyNadaniaOpcjeHTML(type="locker",selected=""){
+  return (inpostServiceMetodyNadania[type]||inpostServiceMetodyNadania.locker).map(([value,label])=>`<option value="${esc(value)}" ${String(value)===String(selected)?"selected":""}>${esc(label)}</option>`).join("");
+}
+function inpostServiceZastosujZgodnoscTypu(form){
   const type=String(form?.deliveryType?.value||"locker");
   form?.querySelectorAll("[data-inpost-only]").forEach(el=>el.hidden=!String(el.dataset.inpostOnly||"").split(",").includes(type));
-  if(type==="locker"&&form?.sendingMethod?.value==="dispatch_order")form.sendingMethod.value="parcel_locker";
-  inpostServicePrzelicz(form);
+  const select=form?.sendingMethod,allowed=inpostServiceMetodyNadania[type]||[],current=String(select?.value||"");
+  if(select){
+    const next=allowed.some(([value])=>value===current)?current:(type==="locker"?"any_point":"");
+    select.innerHTML=inpostServiceMetodyNadaniaOpcjeHTML(type,next);
+    select.value=next;
+  }
+  const method=String(select?.value||""),requiresPoint=inpostServiceMetodyWymagajacePunktu.has(method),dropoff=form?.dropoffPoint;
+  if(dropoff){
+    dropoff.required=requiresPoint;
+    dropoff.setAttribute("aria-required",requiresPoint?"true":"false");
+    if(!requiresPoint)dropoff.value="";
+    dropoff.placeholder=requiresPoint?"Wybierz lub wpisz kod punktu":"Nie jest wymagany";
+  }
+  const label=form?.querySelector("[data-inpost-dropoff-label]"),hint=form?.querySelector("[data-inpost-dropoff-hint]");
+  if(label)label.textContent=requiresPoint?"Punkt nadania *":"Punkt nadania";
+  if(hint)hint.textContent=requiresPoint?"Ten sposób nadania wymaga wskazania konkretnego punktu.":"Dla wybranej metody punkt nadania nie jest wymagany.";
+  form?.querySelectorAll('[data-receiver-address]').forEach(input=>input.required=type==="courier");
+  return {type,method,requiresPoint};
 }
 function inpostServicePrzelicz(form){
   const fee=Math.max(0,Number(String(form?.commissionGross?.value||0).replace(",","."))||0),out=form?.querySelector("[data-inpost-commission-total]");
@@ -972,13 +1009,41 @@ function inpostServicePayload(form){
   const data=new FormData(form),additionalServices=[...form.querySelectorAll('[name="additionalServices"]:checked')].map(input=>input.value);
   return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:String(data.get("comments")||"").trim(),sender:inpostServiceStronaOsoby(form,"sender"),receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod:data.get("sendingMethod"),targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:data.get("codEnabled")==="on",amount:data.get("codAmount")},insurance:{enabled:data.get("insuranceEnabled")==="on",amount:data.get("insuranceAmount")},weekend:data.get("weekend")==="on",additionalServices,pickupRequested:data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
 }
-function inpostServiceBladPol(fields=[]){
-  const first=Array.isArray(fields)?fields[0]:null;
-  if(first?.message)toast(first.message);
+function inpostServiceSzczegolyBledu(fields,prefix=""){
+  const out=[];
+  const visit=(value,path)=>{
+    if(value==null)return;
+    if(typeof value==="string"||typeof value==="number"||typeof value==="boolean"){out.push({field:path,message:String(value)});return;}
+    if(Array.isArray(value)){value.forEach((item,index)=>visit(item,path));return;}
+    if(typeof value==="object"){
+      if(typeof value.message==="string"){out.push({field:String(value.field||path),message:value.message});return;}
+      Object.entries(value).forEach(([key,item])=>visit(item,path?`${path}.${key}`:key));
+    }
+  };
+  visit(fields,prefix);return out;
+}
+function inpostServiceNazwaPola(path=""){
+  const map={"sender.firstName":"senderFirstName","sender.email":"senderEmail","sender.phone":"senderPhone","sender.address.street":"senderStreet","sender.address.buildingNumber":"senderBuilding","sender.address.postCode":"senderPostCode","sender.address.city":"senderCity","receiver.firstName":"receiverFirstName","receiver.email":"receiverEmail","receiver.phone":"receiverPhone","receiver.address.street":"receiverStreet","receiver.address.buildingNumber":"receiverBuilding","receiver.address.postCode":"receiverPostCode","receiver.address.city":"receiverCity","targetPoint":"targetPoint","dropoffPoint":"dropoffPoint","custom_attributes.target_point":"targetPoint","custom_attributes.dropoff_point":"dropoffPoint","custom_attributes.sending_method":"sendingMethod","cod.amount":"codAmount","insurance.amount":"insuranceAmount","parcel.weight":"weight","commissionGross":"commissionGross"};
+  return map[path]||path.split(".").at(-1)||"";
+}
+function inpostServiceWyczyscBledyFormularza(form){
+  form?.querySelectorAll(".inpost-field-error").forEach(element=>element.classList.remove("inpost-field-error"));
+  const box=form?.querySelector("[data-inpost-form-errors]");if(box){box.hidden=true;box.innerHTML="";}
+}
+function inpostServiceBladPol(fields=[],form=document.getElementById("inpostServiceForm"),notify=true){
+  const details=inpostServiceSzczegolyBledu(fields);
+  inpostServiceWyczyscBledyFormularza(form);
+  details.forEach(detail=>{const input=form?.elements?.[inpostServiceNazwaPola(detail.field)];input?.classList?.add("inpost-field-error");});
+  const messages=[...new Set(details.map(item=>item.message).filter(Boolean))],box=form?.querySelector("[data-inpost-form-errors]");
+  if(box&&messages.length){box.hidden=false;box.innerHTML=`<b>Popraw dane przed nadaniem:</b><ul>${messages.map(message=>`<li>${esc(message)}</li>`).join("")}</ul>`;}
+  const firstField=details.map(detail=>form?.elements?.[inpostServiceNazwaPola(detail.field)]).find(Boolean);firstField?.focus?.();
+  if(notify&&messages[0])toast(messages[0]);
+  return details;
 }
 async function inpostServiceUtworz(event){
   event.preventDefault();if(inpostServiceStan.saving)return;
   const form=event.currentTarget,payload=inpostServicePayload(form),button=form.querySelector('[type="submit"]');
+  inpostServiceWyczyscBledyFormularza(form);
   inpostServiceStan={...inpostServiceStan,saving:true};if(button){button.disabled=true;button.textContent="⏳ Tworzę przesyłkę…";}
   try{
     const d=await chmura("inpost-service-create",{method:"POST",body:payload,timeout:90000});
@@ -986,7 +1051,7 @@ async function inpostServiceUtworz(event){
     inpostServiceNowyRequestId();await inpostServiceLaduj(true,true);
     toast(d.invoice?.error?`Przesyłka utworzona ✅ Faktura wymaga uwagi: ${d.invoice.error}`:`Przesyłka InPost utworzona ✅ ${d.item?.trackingNumber||"oczekuje na numer"}`);
     renderuj();
-  }catch(e){if(e.code==="previous_attempt_failed")inpostServiceNowyRequestId();inpostServiceBladPol(e.details);toast("Nie utworzono przesyłki: "+(e.message||e));}
+  }catch(e){if(e.code==="previous_attempt_failed"){inpostServiceNowyRequestId();if(form.elements.requestId)form.elements.requestId.value=inpostServiceStan.requestId;}inpostServiceBladPol(e.details,form,false);toast("Nie utworzono przesyłki: "+(e.message||e));}
   finally{inpostServiceStan={...inpostServiceStan,saving:false};if(button){button.disabled=false;button.textContent="🟡 Utwórz przesyłkę InPost";}}
 }
 async function inpostServiceZapiszUstawienia(event){
@@ -1370,6 +1435,7 @@ function inpostServiceMozeWycenic(payload){
     const address=payload.receiver?.address||{};
     if(!address.street||!address.buildingNumber||!address.postCode||!address.city)return false;
   }
+  if(inpostServiceMetodyWymagajacePunktu.has(String(payload.sendingMethod||""))&&!String(payload.dropoffPoint||"").trim())return false;
   return true;
 }
 function inpostServiceWycenaKwota(pricing={}){
@@ -1395,7 +1461,8 @@ function inpostServiceAktualizujWyceneUI(form,pricing=inpostServiceStan.pricing)
   box.innerHTML=`<div class="inpost-price-main"><span><small>Koszt nadania</small><strong>${zl(total)}</strong></span><span><small>Prowizja Artway-TM</small><strong>${zl(fee)}</strong></span><span class="total"><small>Kwota na FV klienta</small><strong>${zl(customer)}</strong></span></div>
     <div class="inpost-price-meta"><span class="lvl ${pricing.complete?"lvl-ok":"lvl-ostrzezenie"}">${esc(source)}</span><small>${esc(pricing.rateLabel||"stawka indywidualna")}</small>${Number(b.extrasGross)>0?`<small>Dopłaty: ${zl(b.extrasGross)}</small>`:""}<small>Opłata paliwowa: w cenie</small></div>
     ${pricing.complete?"":`<div class="inpost-price-warning"><b>Niepełna wycena opcji dodatkowych:</b> ${esc((pricing.unpricedOptions||[]).join(", ")||"brak stawki")}. Uzupełnij dopłaty w cenniku albo wpisz pełny koszt ręcznie — do tego czasu FV jest zablokowana.</div>`}
-    <div class="inpost-api-comparison"><span><b>Kontrola ShipX:</b> ${api.totalGross==null?"brak ceny API":zl(api.totalGross)}</span>${difference==null?"":`<span>Różnica: ${difference>0?"+":""}${zl(difference)}</span>`}</div>`;
+    ${pricing.apiWarning?`<div class="inpost-price-warning"><b>Cennik umowny działa, ale ShipX odrzucił kontrolę:</b> ${esc(pricing.apiWarning)}. Popraw wskazane dane przed utworzeniem przesyłki.</div>`:""}
+    <div class="inpost-api-comparison"><span><b>Kontrola ShipX:</b> ${pricing.apiWarning?"niepotwierdzona":api.totalGross==null?"brak ceny API":zl(api.totalGross)}</span>${difference==null?"":`<span>Różnica: ${difference>0?"+":""}${zl(difference)}</span>`}</div>`;
 }
 function inpostServiceLokalnaWycena(form){
   const list=inpostServiceStan.settings?.priceList||{},type=String(form?.deliveryType?.value||"locker"),weight=Number(form?.weight?.value)||0,template=String(form?.template?.value||"");
@@ -1444,16 +1511,13 @@ async function inpostServiceWycena(form=document.getElementById("inpostServiceFo
     const d=await chmura("inpost-service-quote",{method:"POST",body:payload,timeout:30000});
     inpostServiceStan.pricing=d.pricing||null;
   }catch(e){
-    if(e.code==="inpost_quote_validation")inpostServiceStan.pricing=null;
+    if(e.code==="inpost_quote_validation"){inpostServiceBladPol(e.details,form,false);inpostServiceStan.pricing={available:false,totalGross:null,message:e.message||"Uzupełnij dane nadania.",source:"validation"};}
     else inpostServiceStan.pricing={available:false,totalGross:null,message:e.message||String(e),source:"unavailable"};
   }
   inpostServiceAktualizujWyceneUI(form);
 }
 function inpostServiceUstawTyp(form){
-  const type=String(form?.deliveryType?.value||"locker");
-  form?.querySelectorAll("[data-inpost-only]").forEach(el=>el.hidden=!String(el.dataset.inpostOnly||"").split(",").includes(type));
-  if(type==="locker"&&form?.sendingMethod?.value==="dispatch_order")form.sendingMethod.value="parcel_locker";
-  form?.querySelectorAll('[data-receiver-address]').forEach(input=>input.required=type==="courier");
+  inpostServiceZastosujZgodnoscTypu(form);
   inpostServiceZaplanujWycene(form);
 }
 function inpostServiceOsobaFields(prefix,title,person={}){
@@ -1530,9 +1594,9 @@ function inpostServiceFormHTML(){
       <div class="inpost-options-layout" id="inpost-shipment-options">
         <fieldset><legend>🚚 Usługa i nadanie</legend><div class="inpost-form-grid">
           <label>Rodzaj dostawy<select name="deliveryType" onchange="inpostServiceUstawTyp(this.form)"><option value="locker">Paczkomat / PaczkoPunkt</option><option value="courier">Kurier InPost</option></select></label>
-          <label>Sposób nadania<select name="sendingMethod" onchange="inpostServiceUstawTyp(this.form)"><option value="parcel_locker">Paczkomat</option><option value="any_point">Dowolny punkt InPost</option><option value="pok">Punkt Obsługi Klienta</option><option value="pop">Punkt Obsługi Przesyłek</option><option value="branch">Oddział InPost</option><option value="dispatch_order">Odbiór przez kuriera</option></select></label>
+          <label>Sposób nadania<select name="sendingMethod" onchange="inpostServiceUstawTyp(this.form)">${inpostServiceMetodyNadaniaOpcjeHTML("locker","any_point")}</select></label>
           <div class="wide" data-inpost-only="locker"><label>Paczkomat / punkt odbiorcy *<div class="inpost-inline"><input id="inpostServiceTargetPoint" name="targetPoint" placeholder="np. BOJ01N"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape()">Mapa</button></div><small id="inpostServiceTargetPointLabel">Wybierz punkt na mapie albo wyszukaj poniżej.</small></label><div class="inpost-point-search"><input id="inpostServicePointSearch" placeholder="Miasto, kod pocztowy, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow()">Szukaj</button><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie('receiver')">Przy adresie odbiorcy</button></div><div id="inpostServicePointResults"></div></div>
-          <label>Punkt nadania (opcjonalnie)<input name="dropoffPoint" placeholder="kod punktu"></label>
+          <label><span data-inpost-dropoff-label>Punkt nadania</span><input name="dropoffPoint" placeholder="Nie jest wymagany"><small data-inpost-dropoff-hint>Dla wybranej metody punkt nadania nie jest wymagany.</small></label>
           <label class="check" data-inpost-only="courier"><input type="checkbox" name="pickupRequested"> Zleć odbiór przez kuriera</label>
         </div></fieldset>
         <fieldset><legend>📦 Paczka i opcje</legend><div class="inpost-form-grid">
@@ -1557,6 +1621,7 @@ function inpostServiceFormHTML(){
           <div class="backend-note"><b>FV: Artway‑TM → nadawca.</b> Odbiorca pozostaje wyłącznie stroną doręczenia.</div>
         </fieldset>
       </div>
+      <div class="inpost-form-errors" data-inpost-form-errors hidden></div>
       <div class="inpost-create-footer"><button class="btn" type="submit">🟡 Utwórz przesyłkę InPost</button></div>
     </form>
   </section>`;
@@ -12201,12 +12266,11 @@ allegroWystawianiePanelHTML=function(){
 let allegroOfertyStrona=1,allegroOfertyWynikiIds=[],allegroOfertyStronaIds=[];
 function allegroOfertyUstawStrone(value){allegroOfertyStrona=Math.max(1,Number(value)||1);renderuj();}
 function allegroOfertyUstawFiltr(key,value){
-  if(key==="publikacja")filtrStatusuAllegroOfert=String(value||"aktywne");
-  else if(key==="powiazanie")filtrAllegroOfert=String(value||"problemy");
+  if(key==="publikacja")filtrStatusuAllegroOfert=String(value||"sprzedaz");
   else if(key==="sort")sortAllegroOfert=String(value||"priorytet");
   allegroOfertyStrona=1;renderuj();
 }
-function allegroOfertyResetujFiltry(){szukajAllegroOfert="";filtrStatusuAllegroOfert="aktywne";filtrAllegroOfert="problemy";sortAllegroOfert="priorytet";allegroOfertyStrona=1;renderuj();}
+function allegroOfertyResetujFiltry(){szukajAllegroOfert="";filtrStatusuAllegroOfert="sprzedaz";filtrAllegroOfert="wszystkie";sortAllegroOfert="priorytet";allegroOfertyStrona=1;renderuj();}
 function allegroOfertyZaznaczZakres(scope="strona"){allegroZaznaczOfertyMapowania(scope==="filtr"?allegroOfertyWynikiIds:allegroOfertyStronaIds,true);}
 function allegroOfertyEksportujZakres(scope="filtr"){
   const ids=scope==="zaznaczone"?[...zaznaczoneMapowaniaAllegro]:allegroOfertyWynikiIds,rows=ids.map(id=>{const o=allegroOfertaPoId(id),productId=allegroProduktIdDlaOferty(id),p=productId?pobierzProduktAdmin(productId):null;if(!o)return null;return [o.id,o.name||"",o.status||o.publication?.status||"",o.externalId||"",o.ean||o.gtin||"",o.manufacturerCode||o.producerCode||"",productId||"",p?.nazwa||""];}).filter(Boolean);
@@ -12214,22 +12278,23 @@ function allegroOfertyEksportujZakres(scope="filtr"){
 }
 
 allegroOfertyTabelaHTML=function(){
-  const q=String(szukajAllegroOfert||"").toLowerCase().trim(),audyt=allegroAudytDuplikatow(),all=(Array.isArray(allegroOferty)?allegroOferty:[]).map(allegroAnalizaMapowaniaOferty),operational=all.filter(a=>allegroOferteMoznaWycofac(a.oferta));
-  const counts={wszystkie:all.length,aktywne:operational.length,sprzedaz:0,szkice:0,zakonczone:0,poprawne:0,kanoniczne:0,duplikat:0,synchronizacja:0,konflikt:0,sugestia:0,niepodpiete:0,sprawdz:0,problemy:0,duplikaty:audyt.oferty};
-  all.forEach(a=>{const pub=allegroStatusOfertyMeta(a.oferta);counts[pub.group]=(counts[pub.group]||0)+1;if(pub.withdrawable){counts[a.status]=(counts[a.status]||0)+1;if(!["poprawne","kanoniczne","synchronizacja"].includes(a.status))counts.problemy++;}});
-  let filtered=all.filter(a=>{const pub=allegroStatusOfertyMeta(a.oferta);if(filtrStatusuAllegroOfert==="aktywne"&&!pub.withdrawable)return false;if(!["wszystkie","aktywne"].includes(filtrStatusuAllegroOfert)&&pub.group!==filtrStatusuAllegroOfert)return false;if(filtrAllegroOfert==="problemy"&&(["poprawne","kanoniczne","synchronizacja"].includes(a.status)||!pub.withdrawable))return false;if(filtrAllegroOfert==="duplikaty"&&!audyt.offerIds.has(String(a.oferta.id)))return false;if(!["wszystkie","problemy","duplikaty"].includes(filtrAllegroOfert)&&a.status!==filtrAllegroOfert)return false;const o=a.oferta,p=a.mapped,s=a.suggestion?.produkt,text=`${o.id} ${o.name||""} ${o.externalId||""} ${o.ean||o.gtin||""} ${o.manufacturerCode||o.producerCode||""} ${p?.id||""} ${p?.nazwa||""} ${p?.sku||p?.externalId||""} ${s?.nazwa||""}`.toLowerCase();return !q||text.includes(q);});
-  const priority={konflikt:0,duplikat:1,sugestia:2,niepodpiete:3,sprawdz:4,synchronizacja:5,kanoniczne:6,poprawne:7};
-  filtered.sort((a,b)=>sortAllegroOfert==="nazwa"?String(a.oferta.name||"").localeCompare(String(b.oferta.name||""),"pl"):sortAllegroOfert==="status"?String(a.oferta.status||"").localeCompare(String(b.oferta.status||"")):(priority[a.status]??9)-(priority[b.status]??9)||Number(b.suggestion?.score||b.current?.score||0)-Number(a.suggestion?.score||a.current?.score||0));
+  const q=String(szukajAllegroOfert||"").toLowerCase().trim(),all=(Array.isArray(allegroOferty)?allegroOferty:[]).map(allegroAnalizaMapowaniaOferty);
+  const wymagaUwagi=a=>{const pub=allegroStatusOfertyMeta(a.oferta);return pub.group!=="zakonczone"&&(!a.mapped||["konflikt","duplikat","sugestia","niepodpiete","sprawdz"].includes(a.status));};
+  const counts={wszystkie:all.length,sprzedaz:0,szkice:0,zakonczone:0,uwaga:0};
+  all.forEach(a=>{const pub=allegroStatusOfertyMeta(a.oferta);counts[pub.group]=(counts[pub.group]||0)+1;if(wymagaUwagi(a))counts.uwaga++;});
+  if(!["sprzedaz","szkice","zakonczone","uwaga","wszystkie"].includes(filtrStatusuAllegroOfert))filtrStatusuAllegroOfert="sprzedaz";
+  let filtered=all.filter(a=>{const pub=allegroStatusOfertyMeta(a.oferta);if(filtrStatusuAllegroOfert==="uwaga"&&!wymagaUwagi(a))return false;if(!["wszystkie","uwaga"].includes(filtrStatusuAllegroOfert)&&pub.group!==filtrStatusuAllegroOfert)return false;const o=a.oferta,p=a.mapped,text=`${o.id} ${o.name||""} ${o.externalId||""} ${o.ean||o.gtin||""} ${o.manufacturerCode||o.producerCode||""} ${p?.id||""} ${p?.nazwa||""} ${p?.sku||p?.externalId||""}`.toLowerCase();return !q||text.includes(q);});
+  const priority={sprzedaz:0,szkice:1,zakonczone:2};
+  filtered.sort((a,b)=>sortAllegroOfert==="nazwa"?String(a.oferta.name||"").localeCompare(String(b.oferta.name||""),"pl"):sortAllegroOfert==="status"?String(a.oferta.status||"").localeCompare(String(b.oferta.status||"")):(priority[allegroStatusOfertyMeta(a.oferta).group]??9)-(priority[allegroStatusOfertyMeta(b.oferta).group]??9)||String(a.oferta.name||"").localeCompare(String(b.oferta.name||""),"pl"));
   const pageSize=Math.max(25,Number(allegroLimitWidokuOfert)||100),pages=Math.max(1,Math.ceil(filtered.length/pageSize));allegroOfertyStrona=Math.min(Math.max(1,allegroOfertyStrona),pages);const start=(allegroOfertyStrona-1)*pageSize,rows=filtered.slice(start,start+pageSize);
   allegroOfertyWynikiIds=filtered.map(a=>String(a.oferta.id));allegroOfertyStronaIds=rows.map(a=>String(a.oferta.id));
-  const offerIds=new Set(all.map(a=>String(a.oferta.id))),selectedIds=[...zaznaczoneMapowaniaAllegro].filter(id=>offerIds.has(String(id))),withdrawSelected=selectedIds.filter(id=>allegroOferteMoznaWycofac(allegroOfertaPoId(id))),safeVisible=rows.filter(a=>(a.correction||(!a.mapped?a.suggestion:null))?.valid&&!(a.correction||a.suggestion)?.occupied?.length&&allegroOferteMoznaWycofac(a.oferta)),safeSelected=all.filter(a=>zaznaczoneMapowaniaAllegro.has(String(a.oferta.id))&&(a.correction||(!a.mapped?a.suggestion:null))?.valid&&!(a.correction||a.suggestion)?.occupied?.length&&allegroOferteMoznaWycofac(a.oferta));
-  const activeFilters=[q,filtrStatusuAllegroOfert!=="aktywne",filtrAllegroOfert!=="problemy",sortAllegroOfert!=="priorytet"].filter(Boolean).length;
-  const fields=`<div class="allegro-listing-advanced-grid admin-search-full"><label class="allegro-listing-search-wide"><span>Oferta, produkt lub identyfikator</span><input value="${esc(szukajAllegroOfert)}" placeholder="Nazwa, ID oferty, EAN, SKU, EXTERNAL_ID lub kod producenta…" oninput="szukajAllegroOfert=this.value.toLowerCase();allegroOfertyStrona=1;zaplanujRenderPoWpisaniu()"></label><label><span>Status publikacji</span><select onchange="allegroOfertyUstawFiltr('publikacja',this.value)">${allegroPublikacjaOpcjeHTML([["aktywne",`Aktywne i szkice (${counts.aktywne})`],["sprzedaz",`W sprzedaży (${counts.sprzedaz})`],["szkice",`Szkice / nieaktywne (${counts.szkice})`],["zakonczone",`Zakończone (${counts.zakonczone})`],["wszystkie",`Cały rejestr (${counts.wszystkie})`]],filtrStatusuAllegroOfert)}</select></label><label><span>Stan powiązania</span><select onchange="allegroOfertyUstawFiltr('powiazanie',this.value)">${allegroPublikacjaOpcjeHTML([["problemy",`Wymaga decyzji (${counts.problemy})`],["wszystkie","Każdy stan powiązania"],["kanoniczne",`Oferty główne (${counts.kanoniczne})`],["synchronizacja",`Agent aktualizuje (${counts.synchronizacja})`],["duplikat",`Drugie oferty (${counts.duplikat})`],["konflikt",`Konflikty (${counts.konflikt})`],["sugestia",`Pewne sugestie (${counts.sugestia})`],["niepodpiete",`Niepodpięte (${counts.niepodpiete})`],["sprawdz",`Do sprawdzenia (${counts.sprawdz})`],["poprawne",`Poprawne (${counts.poprawne})`],["duplikaty",`Centrum duplikatów (${counts.duplikaty})`]],filtrAllegroOfert)}</select></label><label><span>Sortowanie</span><select onchange="allegroOfertyUstawFiltr('sort',this.value)">${allegroPublikacjaOpcjeHTML([["priorytet","Najpierw decyzje"],["nazwa","Nazwa A–Z"],["status","Status Allegro"]],sortAllegroOfert)}</select></label><label><span>Na stronie</span><select onchange="allegroLimitWidokuOfert=Number(this.value)||100;allegroOfertyStrona=1;renderuj()">${[25,50,100,250,500,1000].map(n=>`<option value="${n}" ${pageSize===n?"selected":""}>${n}</option>`).join("")}</select></label><button class="btn ghost allegro-listing-reset" type="button" onclick="allegroOfertyResetujFiltry()" ${activeFilters?"":"disabled"}>Wyczyść wszystkie filtry</button></div>`;
-  const targetIds=selectedIds.length?selectedIds:(safeVisible.map(a=>String(a.oferta.id))),targetSafe=selectedIds.length?safeSelected.length:safeVisible.length;
-  const extra=`<button class="btn ghost" ${allegroMapowanieMasowe.busy||!targetSafe?"disabled":""} onclick='allegroZastosujPewneSugestieMapowania(${JSON.stringify(targetIds)})'>${allegroMapowanieMasowe.busy?"⏳ Zapisuję…":`🧩 Połącz pewne (${targetSafe})`}</button><button class="btn danger" ${withdrawSelected.length&&!allegroWycofywanieOfert.busy?"":"disabled"} onclick='allegroPrzygotujWycofanieOfert(${JSON.stringify(withdrawSelected)})'>Zakończ zaznaczone (${withdrawSelected.length})</button>`;
+  const offerIds=new Set(all.map(a=>String(a.oferta.id))),selectedIds=[...zaznaczoneMapowaniaAllegro].filter(id=>offerIds.has(String(id))),withdrawSelected=selectedIds.filter(id=>allegroOferteMoznaWycofac(allegroOfertaPoId(id)));
+  const activeFilters=[q,filtrStatusuAllegroOfert!=="sprzedaz",sortAllegroOfert!=="priorytet"].filter(Boolean).length;
+  const fields=`<div class="allegro-listing-advanced-grid admin-search-full"><label class="allegro-listing-search-wide"><span>Oferta, produkt lub identyfikator</span><input value="${esc(szukajAllegroOfert)}" placeholder="Nazwa, ID oferty, EAN, SKU, EXTERNAL_ID lub kod producenta…" oninput="szukajAllegroOfert=this.value.toLowerCase();allegroOfertyStrona=1;zaplanujRenderPoWpisaniu()"></label><label><span>Status kanału</span><select onchange="allegroOfertyUstawFiltr('publikacja',this.value)">${allegroPublikacjaOpcjeHTML([["sprzedaz",`W sprzedaży / aktywne (${counts.sprzedaz})`],["szkice",`Szkice / nieaktywne (${counts.szkice})`],["zakonczone",`Wstrzymane i zakończone (${counts.zakonczone})`],["uwaga",`Wymaga uwagi Agenta (${counts.uwaga})`],["wszystkie",`Wszystkie statusy (${counts.wszystkie})`]],filtrStatusuAllegroOfert)}</select></label><label><span>Sortowanie</span><select onchange="allegroOfertyUstawFiltr('sort',this.value)">${allegroPublikacjaOpcjeHTML([["priorytet","Najpierw aktywne"],["nazwa","Nazwa A–Z"],["status","Status Allegro"]],sortAllegroOfert)}</select></label><label><span>Na stronie</span><select onchange="allegroLimitWidokuOfert=Number(this.value)||100;allegroOfertyStrona=1;renderuj()">${[25,50,100,250,500,1000].map(n=>`<option value="${n}" ${pageSize===n?"selected":""}>${n}</option>`).join("")}</select></label><button class="btn ghost allegro-listing-reset" type="button" onclick="allegroOfertyResetujFiltry()" ${activeFilters?"":"disabled"}>Pokaż aktywne</button></div>`;
+  const extra=`<button class="btn danger" ${withdrawSelected.length&&!allegroWycofywanieOfert.busy?"":"disabled"} onclick='allegroPrzygotujWycofanieOfert(${JSON.stringify(withdrawSelected)})'>Zakończ zaznaczone (${withdrawSelected.length})</button>`;
   const operations=adminOperacjeWynikowHTML({id:"allegro-offers",selected:selectedIds.length,pageCount:rows.length,resultCount:filtered.length,selectPage:"allegroOfertyZaznaczZakres('strona')",selectAll:"allegroOfertyZaznaczZakres('filtr')",clear:"zaznaczoneMapowaniaAllegro.clear();renderuj()",exportSelected:"allegroOfertyEksportujZakres('zaznaczone')",exportAll:"allegroOfertyEksportujZakres('filtr')",extra});
-  const cards=rows.length?allegroProgresywneKartyHTML(rows,allegroOfertaMapowanieCardHTML,"oferty"):`<div class="allegro-listing-empty"><span>⌕</span><b>Brak ofert w tym widoku</b><small>Zmień albo wyczyść aktywne filtry.</small></div>`;
-  return `<div class="allegro-listing-workspace allegro-offers-workspace"><section class="panel allegro-listing-hero"><div><span class="order-pro-label">KATALOG OFERT • API ALLEGRO</span><h2>🏷️ Oferty i powiązania produktów</h2><p>Jedna oferta główna jest trwale połączona z produktem sklepu. Dane sklepu pozostają źródłem nazwy, ceny, opisów, zdjęć i parametrów.</p></div><div class="allegro-listing-hero-actions"><button class="btn" onclick="allegroUruchomAutomatyczneMapowanie(false)" ${allegroAutoMapowanieSerwera.busy?"disabled":""}>${allegroAutoMapowanieSerwera.busy?"⏳ Kontroluję…":"🤖 Sprawdź nowe oferty"}</button><a class="btn ghost" href="#/admin/allegro/oferty">🟠 Wystaw produkt</a><a class="btn ghost" href="#/admin/allegro/ustawienia">⚙️ Ustawienia</a></div></section><section class="allegro-listing-metrics">${[["problemy","⚠","Do decyzji",counts.problemy],["kanoniczne","🔒","Oferty główne",counts.kanoniczne],["synchronizacja","↻","Agent aktualizuje",counts.synchronizacja],["duplikat","⧉","Drugie oferty",counts.duplikat],["niepodpiete","○","Niepodpięte",counts.niepodpiete],["wszystkie","▦","Wszystkie",counts.wszystkie]].map(([id,icon,label,value])=>`<button class="${filtrAllegroOfert===id?"active":""}" onclick="allegroOfertyUstawFiltr('powiazanie','${id}')"><span>${icon}</span><b>${value}</b><small>${label}</small></button>`).join("")}</section>${adminWyszukiwaniePanelHTML({id:"allegro-offers",description:"Połącz status publikacji, stan powiązania, identyfikatory i sortowanie. Duże listy są doładowywane stopniowo.",results:filtered.length,active:activeFilters>0,open:true,fields,actions:operations})}${allegroWycofaniePanelHTML()}${allegroAutoMapowanieSerwera.error?`<div class="backend-note allegro-mapping-error"><b>Błąd automatu:</b> ${esc(allegroAutoMapowanieSerwera.error)}</div>`:""}${allegroMapowanieMasowe.error?`<div class="backend-note allegro-mapping-error"><b>Błąd operacji:</b> ${esc(allegroMapowanieMasowe.error)}</div>`:""}${audyt.produkty&&filtrAllegroOfert==="duplikaty"?allegroCentrumDuplikatowHTML(audyt):""}<section class="panel allegro-listing-catalog"><div class="allegro-listing-results-head"><div><b>${filtered.length} ofert</b><small>Pokazano ${rows.length} • strona ${allegroOfertyStrona} z ${pages}</small></div><span>${selectedIds.length} zaznaczonych</span></div><div class="allegro-offer-map-list">${cards}</div>${pages>1?`<nav class="allegro-listing-pagination"><button class="btn ghost" onclick="allegroOfertyUstawStrone(${allegroOfertyStrona-1})" ${allegroOfertyStrona===1?"disabled":""}>← Poprzednia</button><span>Strona <b>${allegroOfertyStrona}</b> z <b>${pages}</b></span><button class="btn ghost" onclick="allegroOfertyUstawStrone(${allegroOfertyStrona+1})" ${allegroOfertyStrona===pages?"disabled":""}>Następna →</button></nav>`:""}</section></div>`;
+  const tableRows=rows.map(a=>{const o=a.oferta,p=a.mapped,pub=allegroStatusOfertyMeta(o),checked=zaznaczoneMapowaniaAllegro.has(String(o.id)),attention=wymagaUwagi(a);return `<tr data-stable-key="${esc(o.id)}"><td><input type="checkbox" ${checked?"checked":""} onchange="allegroPrzelaczOferteDoCeny(${jsArg(o.id)},this.checked)"></td><td data-label="Oferta"><div class="allegro-offer-title-cell">${o.mainImage?`<img src="${esc(o.mainImage)}" alt="" loading="lazy">`:`<span>🏷️</span>`}<div><b>${esc(o.name||"Oferta Allegro")}</b><small>ID ${esc(o.id)} • ${esc(o.externalId||"brak EXTERNAL_ID")}</small></div></div></td><td data-label="Status"><span class="allegro-publication-status ${pub.cls}">${pub.ico} ${esc(pub.label)}</span>${attention?'<small class="lvl lvl-ostrzezenie">Agent sprawdza powiązanie</small>':""}</td><td data-label="Produkt sklepu">${p?`<b>${esc(p.nazwa||"Produkt")}</b><small>ID ${esc(p.id)} • ${esc(p.externalId||p.sku||"—")}</small>`:'<span class="lvl lvl-ostrzezenie">Agent nie potwierdził produktu</span>'}</td><td data-label="Cena i stan"><b>${esc(o.priceText||"cena —")}</b><small>Stan ${esc(o.stockAvailable??"—")}</small></td><td data-label="Akcje"><div class="warehouse-worktable-actions">${p?`<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">Produkt</a>`:""}<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(o.id)}" target="_blank" rel="noopener">Allegro ↗</a>${pub.withdrawable?`<button class="btn danger" onclick='allegroPrzygotujWycofanieOfert([${jsArg(String(o.id))}])'>Zakończ</button>`:""}</div></td></tr>`;}).join("");
+  return `<div class="allegro-listing-workspace allegro-offers-workspace"><section class="panel allegro-listing-hero"><div><span class="order-pro-label">RZECZYWISTY STAN KANAŁU • API ALLEGRO</span><h2>🏷️ Sprzedaż Allegro</h2><p>Domyślnie widzisz wyłącznie aktywne oferty potwierdzone przez Allegro. Powiązania z produktami pozostają trwałe i są utrzymywane automatycznie poza tym widokiem.</p></div><div class="allegro-listing-hero-actions"><a class="btn ghost" href="#/admin/allegro/ustawienia">⚙️ Ustawienia synchronizacji</a></div></section><section class="allegro-listing-metrics">${[["sprzedaz","●","W sprzedaży / aktywne",counts.sprzedaz],["szkice","○","Szkice / nieaktywne",counts.szkice],["zakonczone","■","Wstrzymane / zakończone",counts.zakonczone],["uwaga","⚠","Wymaga uwagi",counts.uwaga],["wszystkie","▦","Wszystkie",counts.wszystkie]].map(([id,icon,label,value])=>`<button class="${filtrStatusuAllegroOfert===id?"active":""}" onclick="allegroOfertyUstawFiltr('publikacja','${id}')"><span>${icon}</span><b>${value}</b><small>${label}</small></button>`).join("")}</section>${adminWyszukiwaniePanelHTML({id:"allegro-offers",description:"Status oferty pochodzi z Allegro. Techniczne mapowanie działa w tle i nie wymaga ręcznej obsługi.",results:filtered.length,active:activeFilters>0,open:true,fields,actions:operations})}${allegroWycofaniePanelHTML()}<section class="panel allegro-listing-catalog"><div class="allegro-listing-results-head"><div><b>${filtered.length} ofert</b><small>Pokazano ${rows.length} • strona ${allegroOfertyStrona} z ${pages}</small></div><span>${selectedIds.length} zaznaczonych</span></div><div class="warehouse-worktable-wrap"><table class="log-table admin-responsive-table allegro-channel-offers-table"><thead><tr><th></th><th>Oferta</th><th>Status kanału</th><th>Produkt sklepu</th><th>Cena i stan</th><th>Akcje</th></tr></thead><tbody>${tableRows||'<tr><td colspan="6"><div class="allegro-listing-empty"><span>⌕</span><b>Brak ofert w tym widoku</b><small>Zmień albo wyczyść aktywne filtry.</small></div></td></tr>'}</tbody></table></div>${pages>1?`<nav class="allegro-listing-pagination"><button class="btn ghost" onclick="allegroOfertyUstawStrone(${allegroOfertyStrona-1})" ${allegroOfertyStrona===1?"disabled":""}>← Poprzednia</button><span>Strona <b>${allegroOfertyStrona}</b> z <b>${pages}</b></span><button class="btn ghost" onclick="allegroOfertyUstawStrone(${allegroOfertyStrona+1})" ${allegroOfertyStrona===pages?"disabled":""}>Następna →</button></nav>`:""}</section></div>`;
 };
 
 allegroZgodnoscPozycje=function(){
@@ -12269,32 +12334,33 @@ allegroStatusProduktuHTML=function(p={}){
 };
 
 function allegroCentrumOfertUstawTryb(tryb="publikacja",filtr=""){
-  allegroCentrumOfertTryb=tryb==="rejestr"?"rejestr":"publikacja";
-  if(allegroCentrumOfertTryb==="rejestr"&&filtr){
-    filtrAllegroOfert=filtr;
+  allegroCentrumOfertTryb=tryb==="sprzedaz"?"sprzedaz":"publikacja";
+  if(allegroCentrumOfertTryb==="sprzedaz"){
+    filtrStatusuAllegroOfert=filtr||"sprzedaz";
+    filtrAllegroOfert="wszystkie";
     allegroOfertyStrona=1;
   }
   renderuj();
 }
 
 function allegroOfertyIPublikacjaHTML(){
-  const st=allegroPanelOperacyjnyStaty(),tryb=allegroCentrumOfertTryb==="rejestr"?"rejestr":"publikacja";
+  const st=allegroPanelOperacyjnyStaty(),tryb=allegroCentrumOfertTryb==="sprzedaz"?"sprzedaz":"publikacja";
   const steps=[
     ["1","Dopasowanie","EAN, SKU i oferta główna"],
     ["2","Kontrola danych","kategoria, parametry i opis"],
     ["3","Publikacja","utworzenie albo aktualizacja"],
     ["4","Potwierdzenie","odczyt rzeczywistego stanu API"]
   ];
-  const content=tryb==="rejestr"?allegroOfertyTabelaHTML():allegroWystawianiePanelHTML();
+  const content=tryb==="sprzedaz"?allegroOfertyTabelaHTML():allegroWystawianiePanelHTML();
   return `<div class="allegro-unified-offers" data-allegro-offers-mode="${esc(tryb)}">
     <section class="panel allegro-unified-offers-command">
       <div class="allegro-unified-offer-flow">${steps.map(([n,title,description],index)=>`${index?`<i aria-hidden="true">›</i>`:""}<div><span>${n}</span><b>${esc(title)}</b><small>${esc(description)}</small></div>`).join("")}</div>
       <div class="allegro-unified-offers-switch">
-        <div><span class="order-pro-label">Obszar roboczy</span><b>Jedna podstrona — dwa potrzebne widoki danych</b><small>Zmiana widoku nie uruchamia mapowania, publikacji ani ponownego pobierania całej kartoteki.</small></div>
+        <div><span class="order-pro-label">Obszar roboczy</span><b>Publikacja oraz rzeczywisty stan sprzedaży</b><small>Powiązania pozostają trwałe w tle. W panelu pracujesz wyłącznie na ofertach i ich statusach kanału.</small></div>
         <nav aria-label="Widok ofert i publikacji">
-          <button type="button" class="${tryb==="publikacja"?"active":""}" aria-pressed="${tryb==="publikacja"}" onclick="allegroCentrumOfertUstawTryb('publikacja')"><span>🟠</span><div><b>Do działania i publikacji</b><small>${esc(st.zadaniaWystawiania)} zadań Agenta</small></div></button>
-          <button type="button" class="${tryb==="rejestr"?"active":""}" aria-pressed="${tryb==="rejestr"}" onclick="allegroCentrumOfertUstawTryb('rejestr')"><span>🏷️</span><div><b>Rejestr i powiązania</b><small>${esc(st.podpiete)} trwałych powiązań</small></div></button>
-          <button type="button" class="${tryb==="rejestr"&&filtrAllegroOfert==="problemy"?"active warning":""}" onclick="allegroCentrumOfertUstawTryb('rejestr','problemy')"><span>⚠️</span><div><b>Problemy i duplikaty</b><small>${esc(st.niepodpiete)} ofert bez powiązania</small></div></button>
+          <button type="button" class="${tryb==="publikacja"?"active":""}" aria-pressed="${tryb==="publikacja"}" onclick="allegroCentrumOfertUstawTryb('publikacja')"><span>🟠</span><div><b>Wystawianie i aktualizacje</b><small>${esc(st.zadaniaWystawiania)} zadań Agenta</small></div></button>
+          <button type="button" class="${tryb==="sprzedaz"&&filtrStatusuAllegroOfert==="sprzedaz"?"active":""}" aria-pressed="${tryb==="sprzedaz"}" onclick="allegroCentrumOfertUstawTryb('sprzedaz','sprzedaz')"><span>●</span><div><b>W sprzedaży / aktywne</b><small>Stan potwierdzony przez Allegro</small></div></button>
+          <button type="button" class="${tryb==="sprzedaz"&&filtrStatusuAllegroOfert==="uwaga"?"active warning":""}" onclick="allegroCentrumOfertUstawTryb('sprzedaz','uwaga')"><span>⚠️</span><div><b>Wymaga uwagi</b><small>${esc(st.niepodpiete)} ofert do kontroli Agenta</small></div></button>
         </nav>
       </div>
     </section>

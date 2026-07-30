@@ -242,6 +242,7 @@ function inpostServiceMozeWycenic(payload){
     const address=payload.receiver?.address||{};
     if(!address.street||!address.buildingNumber||!address.postCode||!address.city)return false;
   }
+  if(inpostServiceMetodyWymagajacePunktu.has(String(payload.sendingMethod||""))&&!String(payload.dropoffPoint||"").trim())return false;
   return true;
 }
 function inpostServiceWycenaKwota(pricing={}){
@@ -267,7 +268,8 @@ function inpostServiceAktualizujWyceneUI(form,pricing=inpostServiceStan.pricing)
   box.innerHTML=`<div class="inpost-price-main"><span><small>Koszt nadania</small><strong>${zl(total)}</strong></span><span><small>Prowizja Artway-TM</small><strong>${zl(fee)}</strong></span><span class="total"><small>Kwota na FV klienta</small><strong>${zl(customer)}</strong></span></div>
     <div class="inpost-price-meta"><span class="lvl ${pricing.complete?"lvl-ok":"lvl-ostrzezenie"}">${esc(source)}</span><small>${esc(pricing.rateLabel||"stawka indywidualna")}</small>${Number(b.extrasGross)>0?`<small>Dopłaty: ${zl(b.extrasGross)}</small>`:""}<small>Opłata paliwowa: w cenie</small></div>
     ${pricing.complete?"":`<div class="inpost-price-warning"><b>Niepełna wycena opcji dodatkowych:</b> ${esc((pricing.unpricedOptions||[]).join(", ")||"brak stawki")}. Uzupełnij dopłaty w cenniku albo wpisz pełny koszt ręcznie — do tego czasu FV jest zablokowana.</div>`}
-    <div class="inpost-api-comparison"><span><b>Kontrola ShipX:</b> ${api.totalGross==null?"brak ceny API":zl(api.totalGross)}</span>${difference==null?"":`<span>Różnica: ${difference>0?"+":""}${zl(difference)}</span>`}</div>`;
+    ${pricing.apiWarning?`<div class="inpost-price-warning"><b>Cennik umowny działa, ale ShipX odrzucił kontrolę:</b> ${esc(pricing.apiWarning)}. Popraw wskazane dane przed utworzeniem przesyłki.</div>`:""}
+    <div class="inpost-api-comparison"><span><b>Kontrola ShipX:</b> ${pricing.apiWarning?"niepotwierdzona":api.totalGross==null?"brak ceny API":zl(api.totalGross)}</span>${difference==null?"":`<span>Różnica: ${difference>0?"+":""}${zl(difference)}</span>`}</div>`;
 }
 function inpostServiceLokalnaWycena(form){
   const list=inpostServiceStan.settings?.priceList||{},type=String(form?.deliveryType?.value||"locker"),weight=Number(form?.weight?.value)||0,template=String(form?.template?.value||"");
@@ -316,16 +318,13 @@ async function inpostServiceWycena(form=document.getElementById("inpostServiceFo
     const d=await chmura("inpost-service-quote",{method:"POST",body:payload,timeout:30000});
     inpostServiceStan.pricing=d.pricing||null;
   }catch(e){
-    if(e.code==="inpost_quote_validation")inpostServiceStan.pricing=null;
+    if(e.code==="inpost_quote_validation"){inpostServiceBladPol(e.details,form,false);inpostServiceStan.pricing={available:false,totalGross:null,message:e.message||"Uzupełnij dane nadania.",source:"validation"};}
     else inpostServiceStan.pricing={available:false,totalGross:null,message:e.message||String(e),source:"unavailable"};
   }
   inpostServiceAktualizujWyceneUI(form);
 }
 function inpostServiceUstawTyp(form){
-  const type=String(form?.deliveryType?.value||"locker");
-  form?.querySelectorAll("[data-inpost-only]").forEach(el=>el.hidden=!String(el.dataset.inpostOnly||"").split(",").includes(type));
-  if(type==="locker"&&form?.sendingMethod?.value==="dispatch_order")form.sendingMethod.value="parcel_locker";
-  form?.querySelectorAll('[data-receiver-address]').forEach(input=>input.required=type==="courier");
+  inpostServiceZastosujZgodnoscTypu(form);
   inpostServiceZaplanujWycene(form);
 }
 function inpostServiceOsobaFields(prefix,title,person={}){
@@ -402,9 +401,9 @@ function inpostServiceFormHTML(){
       <div class="inpost-options-layout" id="inpost-shipment-options">
         <fieldset><legend>🚚 Usługa i nadanie</legend><div class="inpost-form-grid">
           <label>Rodzaj dostawy<select name="deliveryType" onchange="inpostServiceUstawTyp(this.form)"><option value="locker">Paczkomat / PaczkoPunkt</option><option value="courier">Kurier InPost</option></select></label>
-          <label>Sposób nadania<select name="sendingMethod" onchange="inpostServiceUstawTyp(this.form)"><option value="parcel_locker">Paczkomat</option><option value="any_point">Dowolny punkt InPost</option><option value="pok">Punkt Obsługi Klienta</option><option value="pop">Punkt Obsługi Przesyłek</option><option value="branch">Oddział InPost</option><option value="dispatch_order">Odbiór przez kuriera</option></select></label>
+          <label>Sposób nadania<select name="sendingMethod" onchange="inpostServiceUstawTyp(this.form)">${inpostServiceMetodyNadaniaOpcjeHTML("locker","any_point")}</select></label>
           <div class="wide" data-inpost-only="locker"><label>Paczkomat / punkt odbiorcy *<div class="inpost-inline"><input id="inpostServiceTargetPoint" name="targetPoint" placeholder="np. BOJ01N"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape()">Mapa</button></div><small id="inpostServiceTargetPointLabel">Wybierz punkt na mapie albo wyszukaj poniżej.</small></label><div class="inpost-point-search"><input id="inpostServicePointSearch" placeholder="Miasto, kod pocztowy, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow()">Szukaj</button><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie('receiver')">Przy adresie odbiorcy</button></div><div id="inpostServicePointResults"></div></div>
-          <label>Punkt nadania (opcjonalnie)<input name="dropoffPoint" placeholder="kod punktu"></label>
+          <label><span data-inpost-dropoff-label>Punkt nadania</span><input name="dropoffPoint" placeholder="Nie jest wymagany"><small data-inpost-dropoff-hint>Dla wybranej metody punkt nadania nie jest wymagany.</small></label>
           <label class="check" data-inpost-only="courier"><input type="checkbox" name="pickupRequested"> Zleć odbiór przez kuriera</label>
         </div></fieldset>
         <fieldset><legend>📦 Paczka i opcje</legend><div class="inpost-form-grid">
@@ -429,6 +428,7 @@ function inpostServiceFormHTML(){
           <div class="backend-note"><b>FV: Artway‑TM → nadawca.</b> Odbiorca pozostaje wyłącznie stroną doręczenia.</div>
         </fieldset>
       </div>
+      <div class="inpost-form-errors" data-inpost-form-errors hidden></div>
       <div class="inpost-create-footer"><button class="btn" type="submit">🟡 Utwórz przesyłkę InPost</button></div>
     </form>
   </section>`;

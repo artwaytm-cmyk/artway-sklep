@@ -18,6 +18,7 @@ import {
 import { normalizeInpostServiceTracking } from '../src/backend/lib/domain/inpost-service-tracking.mjs';
 import { createInpostServiceShipmentRoute } from '../src/backend/lib/inpost-service-shipment-route.mjs';
 import { createInpostRoute } from '../src/backend/lib/inpost-route.mjs';
+import { inpostErrorDetails, inpostErrorText } from '../src/backend/lib/domain/inpost-error.mjs';
 
 const sender = {
   companyName: 'Nadawca sp. z o.o.',
@@ -45,6 +46,7 @@ function draft(overrides = {}) {
     deliveryType: 'locker',
     targetPoint: 'BOJ01N',
     sendingMethod: 'parcel_locker',
+    dropoffPoint: 'BOJ01N',
     parcel: { template: 'small', weight: 1 },
     cod: { enabled: true, amount: 149.99 },
     insurance: { enabled: true, amount: 200 },
@@ -66,10 +68,55 @@ test('nadanie usługowe waliduje klienta i obsługuje Paczkomat, pobranie, ochro
   const payload = inpostServiceShipxPayload(value);
   assert.equal(payload.service, 'inpost_locker_standard');
   assert.equal(payload.custom_attributes.target_point, 'BOJ01N');
+  assert.equal(payload.custom_attributes.dropoff_point, 'BOJ01N');
   assert.deepEqual(payload.additional_services, ['labelless']);
   assert.equal(payload.end_of_week_collection, true);
   assert.deepEqual(payload.cod, { amount: 149.99, currency: 'PLN' });
   assert.deepEqual(payload.insurance, { amount: 200, currency: 'PLN' });
+});
+
+test('zmiana na kuriera usuwa odziedziczoną metodę Paczkomatu i nie wysyła błędnych custom_attributes', () => {
+  const value = draft({
+    deliveryType: 'courier',
+    targetPoint: '',
+    dropoffPoint: '',
+    sendingMethod: 'parcel_locker',
+    weekend: true,
+    additionalServices: ['sms'],
+  });
+  assert.equal(value.sendingMethod, '');
+  assert.equal(value.weekend, false);
+  assert.equal(validateInpostServiceDraft(value).ok, true);
+  const payload = inpostServiceShipxPayload(value);
+  assert.equal(payload.service, 'inpost_courier_standard');
+  assert.equal(payload.custom_attributes, undefined);
+  assert.deepEqual(payload.additional_services, ['sms']);
+});
+
+test('konkretny punkt nadania jest wymagany tylko dla metod, które tego potrzebują', () => {
+  const missing = draft({ sendingMethod: 'parcel_locker', dropoffPoint: '' });
+  const validation = validateInpostServiceDraft(missing);
+  assert.equal(validation.ok, false);
+  assert.ok(validation.errors.some((error) => error.field === 'dropoffPoint'));
+  const anyPoint = draft({ sendingMethod: 'any_point', dropoffPoint: '' });
+  assert.equal(validateInpostServiceDraft(anyPoint).ok, true);
+});
+
+test('zagnieżdżone błędy ShipX są czytelne i zachowują ścieżkę pola', () => {
+  const details = {
+    custom_attributes: {
+      sending_method: ['nie pasuje do wybranej usługi'],
+      dropoff_point: [{ message: 'wybierz punkt nadania' }],
+    },
+  };
+  assert.deepEqual(inpostErrorDetails(details), [
+    { field: 'custom_attributes.sending_method', message: 'nie pasuje do wybranej usługi' },
+    { field: 'custom_attributes.dropoff_point', message: 'wybierz punkt nadania' },
+  ]);
+  const message = inpostErrorText({ message: 'Błąd walidacji', details }, 'Błąd InPost');
+  assert.match(message, /custom_attributes\.sending_method: nie pasuje/);
+  assert.match(message, /custom_attributes\.dropoff_point: wybierz punkt nadania/);
+  assert.doesNotMatch(message, /\[object Object\]/);
 });
 
 test('wycena ShipX korzysta z tego samego szkicu i pokazuje pełny koszt z prowizją', () => {
@@ -237,6 +284,10 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /inpostServicePotwierdzenie/);
   assert.match(shipping, /Drukuj \/ zapisz PDF/);
   assert.match(shipping, /Historia transportu/);
+  assert.match(shipping, /inpostServiceZastosujZgodnoscTypu/);
+  assert.match(shipping, /Punkt nadania \*/);
+  assert.match(shipping, /Kontrola ShipX:<\/b>.*niepotwierdzona/s);
+  assert.equal((shipping.match(/function inpostServiceUstawTyp\(/g) || []).length, 1);
   assert.match(core, /#\/admin\/infakt\/wysylki/);
   assert.match(inventory, /function infaktWysylkiInpostPanelHTML/);
   assert.match(css, /\.inpost-service-workspace/);
@@ -374,4 +425,56 @@ test('endpoint wyceny naprawdę wysyła szkic do ShipX, a książka adresowa zap
   assert.equal(imported.status, 201);
   assert.equal(imported.body.created, 1);
   assert.equal(imported.body.total, 2);
+});
+
+test('endpoint tworzenia przesyłki kurierskiej nie przekazuje odziedziczonej metody Paczkomatu', async () => {
+  const storage = new Map(), calls = [];
+  const route = createInpostServiceShipmentRoute({
+    respond: (body, status = 200) => ({ body, status }),
+    isAdmin: () => true,
+    text: (value, max = 200) => String(value ?? '').slice(0, max),
+    readVersioned: async (key, fallback) => ({ value: storage.has(key) ? storage.get(key) : structuredClone(fallback), version: 1 }),
+    writeIfVersion: async (key, value) => { storage.set(key, structuredClone(value)); return { modified: true }; },
+    publicConfig: () => ({ configured: true }),
+    configure: () => ({ configured: true, orgId: 'ORG-1', lockerService: 'inpost_locker_standard', courierService: 'inpost_courier_standard' }),
+    organization: async () => ({ id: 'ORG-1' }),
+    serviceAvailability: async () => ({ services: ['inpost_courier_standard'], locker: false, courier: true, lockerService: 'inpost_locker_standard', courierService: 'inpost_courier_standard' }),
+    call: async (path, options) => {
+      calls.push({ path, options });
+      if (path.endsWith('/shipments/calculate')) return [{ id: 'REQ-COURIER', calculated_charge_amount: '17.58' }];
+      return { id: 'SHIP-1', status: 'confirmed', tracking_number: '620000000000000000000001' };
+    },
+    waitForLabel: async () => ({ id: 'SHIP-1', status: 'confirmed', tracking_number: '620000000000000000000001' }),
+    trackingNumber: (value) => value?.tracking_number || '',
+    shipmentStatus: (value) => value?.status || '',
+    labelReady: (value) => value?.status === 'confirmed',
+    offerId: () => '',
+    infaktPublicConfig: () => ({ configured: false }),
+    infaktCall: async () => ({}),
+    infaktReference: () => '',
+  });
+  const request = new Request('http://localhost/api?action=inpost-service-create', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      requestId: 'REQ-COURIER',
+      reference: 'USL-COURIER',
+      sender,
+      receiver,
+      deliveryType: 'courier',
+      sendingMethod: 'parcel_locker',
+      targetPoint: '',
+      dropoffPoint: '',
+      parcel: { template: 'small', weight: 1 },
+      billingMode: 'none',
+      commissionGross: 4,
+    }),
+  });
+  const result = await route(request, new URL(request.url), 'inpost-service-create');
+  assert.equal(result.status, 201);
+  assert.equal(result.body.item.status, 'label_ready');
+  const createCall = calls.find((entry) => /\/shipments$/.test(entry.path));
+  assert.ok(createCall);
+  assert.equal(createCall.options.bodyObj.service, 'inpost_courier_standard');
+  assert.equal(createCall.options.bodyObj.custom_attributes, undefined);
 });

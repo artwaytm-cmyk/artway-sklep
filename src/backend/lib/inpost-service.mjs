@@ -1,4 +1,5 @@
 import { tekst } from './core/http.mjs';
+import { inpostErrorDetails, inpostErrorText } from './domain/inpost-error.mjs';
 import { inpostWebhookSecret, inpostWebhookAutoryzowany, pierwszePole, inpostZdarzeniaZWebhooka, numerZReferencji, etapZInpostStatus, znajdzZamowienieInpost } from './inpost-webhook-support.mjs';
 
 export function createInpostService({ read, write, onOrderStatusTransition }) {
@@ -110,8 +111,8 @@ export function createInpostService({ read, write, onOrderStatusTransition }) {
       if (!r.ok) {
         const t = await r.text().catch(() => '');
         const dane = bezpiecznyJson(t);
-        const blad = new Error(bledyInpostTekst(dane, `InPost HTTP ${r.status}`));
-        blad.status = r.status; blad.code = dane?.error || dane?.code || 'inpost_http_error'; blad.inpost = dane; throw blad;
+        const blad = new Error(inpostErrorText(dane, `InPost HTTP ${r.status}`));
+        blad.status = r.status; blad.code = dane?.error || dane?.code || 'inpost_http_error'; blad.inpost = dane; blad.details = inpostErrorDetails(dane?.details); throw blad;
       }
       const buf = Buffer.from(await r.arrayBuffer());
       return { binary: true, contentType: ct || 'application/pdf', base64: buf.toString('base64') };
@@ -119,8 +120,8 @@ export function createInpostService({ read, write, onOrderStatusTransition }) {
     const t = await r.text();
     const dane = bezpiecznyJson(t);
     if (!r.ok) {
-      const blad = new Error(bledyInpostTekst(dane, `InPost HTTP ${r.status}`));
-      blad.status = r.status; blad.code = dane?.error || dane?.code || 'inpost_http_error'; blad.inpost = dane; throw blad;
+      const blad = new Error(inpostErrorText(dane, `InPost HTTP ${r.status}`));
+      blad.status = r.status; blad.code = dane?.error || dane?.code || 'inpost_http_error'; blad.inpost = dane; blad.details = inpostErrorDetails(dane?.details); throw blad;
     }
     return dane || {};
   }
@@ -190,9 +191,10 @@ export function createInpostService({ read, write, onOrderStatusTransition }) {
     const t = await r.text();
     const dane = bezpiecznyJson(t) || {};
     if (!r.ok) {
-      const blad = new Error(bledyInpostTekst(dane, `InPost Points HTTP ${r.status}`));
+      const blad = new Error(inpostErrorText(dane, `InPost Points HTTP ${r.status}`));
       blad.status = r.status;
       blad.code = 'inpost_points_error';
+      blad.details = inpostErrorDetails(dane?.details);
       throw blad;
     }
     return {
@@ -206,18 +208,6 @@ export function createInpostService({ read, write, onOrderStatusTransition }) {
   function bezpiecznyJson(t) {
     if (!t) return null;
     try { return JSON.parse(t); } catch (e) { return { raw: t }; }
-  }
-  function bledyInpostTekst(dane, fallback) {
-    if (!dane) return fallback;
-    if (dane.message && typeof dane.message === 'string') {
-      const det = dane.details && typeof dane.details === 'object'
-        ? Object.entries(dane.details).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join('; ')
-        : '';
-      return det ? `${dane.message} (${det})` : dane.message;
-    }
-    if (dane.description && typeof dane.description === 'string') return dane.description;
-    if (dane.error) return `${dane.error}${dane.error_description ? ': ' + dane.error_description : ''}`;
-    return fallback;
   }
   function telefonInpost(v) {
     const cyfry = String(v || '').replace(/[^0-9]/g, '');

@@ -637,6 +637,22 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
   await expect(page.getByText('FV: Artway‑TM → nadawca.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Przy adresie odbiorcy' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Utwórz przesyłkę InPost/ })).toBeVisible();
+  const shipmentForm = page.locator('#inpostServiceForm');
+  await shipmentForm.locator('[name="sendingMethod"]').selectOption('parcel_locker');
+  await shipmentForm.locator('[name="deliveryType"]').selectOption('courier');
+  await expect(shipmentForm.locator('[name="sendingMethod"]')).toHaveValue('');
+  await expect(shipmentForm.locator('[name="sendingMethod"] option')).toHaveText([
+    'Nadanie standardowe',
+    'Dowolny punkt InPost',
+    'Punkt Obsługi Klienta',
+    'Punkt Obsługi Przesyłek',
+    'Punkt kurierski InPost',
+    'Oddział InPost',
+  ]);
+  await expect(shipmentForm.locator('[name="dropoffPoint"]')).not.toHaveAttribute('required', '');
+  await shipmentForm.locator('[name="deliveryType"]').selectOption('locker');
+  await shipmentForm.locator('[name="sendingMethod"]').selectOption('parcel_locker');
+  await expect(shipmentForm.locator('[name="dropoffPoint"]')).toHaveAttribute('required', '');
   await page.evaluate(() => {
     inpostServiceStan.addressBook = [{
       id: 'IPA-E2E',
