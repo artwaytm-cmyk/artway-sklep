@@ -89,8 +89,7 @@ function publicationForRemote(product = {}, offer = {}, timestamp = '') {
 
 function lastPublicationAttemptAt(product = {}) {
   return Date.parse(text(
-    product.vonHalskyEditorialSyncCheckedAt
-    || product.vonHalskyEditorialSyncPendingAt
+    product.vonHalskyEditorialSyncPendingAt
     || product.contentEditorial?.channelStates?.vonHalsky?.publicationAttemptedAt,
     100,
   ));

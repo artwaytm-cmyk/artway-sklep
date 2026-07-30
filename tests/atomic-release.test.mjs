@@ -80,7 +80,9 @@ test('produkcja i CI korzystają z atomowej bramki publikacji', async () => {
   assert.match(deployScript, /systemctl', 'restart', backendService/);
   assert.match(deployScript, /function backendRequiresRestart\(\)/);
   assert.match(deployScript, /'src\/backend'/);
-  assert.match(deployScript, /if \(restartBackend\) restartProductionBackend\(\);[\s\S]*deployStaticRelease/);
+  assert.match(deployScript, /'db\/migrations'/);
+  assert.match(deployScript, /scripts\/migrate-postgres\.mjs/);
+  assert.match(deployScript, /if \(restartBackend\) \{[\s\S]*migrate-postgres\.mjs[\s\S]*restartProductionBackend\(\);[\s\S]*\}[\s\S]*deployStaticRelease/);
 });
 
 test('retencja nigdy nie usuwa katalogów ze starszych systemów publikacji', async (t) => {

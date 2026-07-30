@@ -35,6 +35,7 @@ import { createInpostService } from './inpost-service.mjs';
 import { createInpostRoute } from './inpost-route.mjs';
 import { createInpostServiceShipmentRoute } from './inpost-service-shipment-route.mjs';
 import { createVonHalskyRoute } from './von-halsky-route.mjs';
+import { createVonHalskyStateRepository } from './domain/von-halsky-state-repository.mjs';
 import { createStoreDataRoute } from './store-data-route.mjs';
 import { createCatalogProductFieldSaver, createPublishedCatalogProductFieldSaver } from './domain/catalog-product-field-save.mjs';
 import { createCentralProductFieldPublisher } from './domain/central-product-field-publication.mjs';
@@ -151,8 +152,7 @@ import {
   infaktDostawcyDozwoleni,
   produktBezDanychPrywatnych,
 } from './infakt-purchase.mjs';
-const STORE_NAME = 'artway-sklep';
-const repository = createStoreRepository({ name: STORE_NAME });
+const STORE_NAME = 'artway-sklep', repository = createStoreRepository({ name: STORE_NAME });
 const postgresPool = String(process.env.ARTWAY_STORE_DRIVER || '').trim().toLowerCase() === 'postgres' && process.env.DATABASE_URL
   ? postgresPoolFor(process.env.DATABASE_URL)
   : null;
@@ -167,8 +167,8 @@ const czytajUstawieniaBazowe = typeof repository.readSettingsBase === 'function'
 const czytajUstawieniaPrzyrostowo = typeof repository.readSettingsDelta === 'function'
   ? repository.readSettingsDelta
   : null;
-const czytajWersjonowane = repository.readVersioned;
-const zapiszJesliWersja = repository.writeIfVersion;
+const czytajWersjonowane = repository.readVersioned, zapiszJesliWersja = repository.writeIfVersion;
+const vonHalskyRepository = postgresPool ? createVonHalskyStateRepository({ pool: postgresPool, namespace: STORE_NAME, legacy: repository }) : repository;
 const zapiszUstawieniaBezpiecznie = createRevisionSafeWriter(repository, 'settings');
 async function zapisz(key, value) {
   if (key !== 'settings') return repository.write(key, value);
@@ -320,7 +320,7 @@ const agentEvents = createAgentEventSystem({
 });
 const { queue: agentEventQueue, emit: emitAgentEvent } = agentEvents;
 const vonHalskyRoute = createVonHalskyRoute({
-  respond: odpowiedz, isAdmin: czyAdmin, readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja,
+  respond: odpowiedz, isAdmin: czyAdmin, readVersioned: vonHalskyRepository.readVersioned, writeIfVersion: vonHalskyRepository.writeIfVersion,
   saveProductFields: (input) => zapiszIOpublikujPolaProduktuCentralnie(input),
   reportProgress: (work) => agentRuntime.report({ event: 'work_progress', source: 'von-halsky-api', work }),
   prepareProductWithAgent: (productId, actor, options) => agentSpecialists.prepareVonHalskyProposal(productId, actor, options),

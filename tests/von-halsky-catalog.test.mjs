@@ -1107,3 +1107,32 @@ test('uzgodnienie katalogu liczy wyłącznie zdalne PUBLISHED i usuwa fałszywe 
   assert.ok(mutationIds.length >= 2);
   assert.ok(mutationIds.every((mutationId) => !firstCycleMutationIds.has(mutationId)));
 });
+
+test('bieżący odczyt kontrolny nie odnawia bez końca czasu oczekiwania na nieistniejącą ofertę', async () => {
+  const product = {
+    id: 'STALE-PENDING',
+    externalId: 'STALE-PENDING-EXT',
+    vonHalskyOfferId: 'LOCAL-NOT-IN-API',
+    vonHalskyEditorialSyncState: 'publishing',
+    vonHalskyEditorialSyncPending: true,
+    vonHalskyEditorialSyncPendingAt: '2026-07-30T07:30:00.000Z',
+    vonHalskyEditorialSyncCheckedAt: '2026-07-30T08:00:00.000Z',
+  };
+  let savedProduct = structuredClone(product);
+  const result = await reconcileVonHalskyCatalog({
+    remoteOffers: [],
+    products: [product],
+    timestamp: '2026-07-30T08:00:00.000Z',
+    pendingGraceMs: 10 * 60_000,
+    saveProductFields: async ({ fields, remove = [] }) => {
+      savedProduct = { ...savedProduct, ...structuredClone(fields) };
+      for (const key of remove) delete savedProduct[key];
+      return { product: structuredClone(savedProduct), publication: { readbackConfirmed: true } };
+    },
+  });
+  assert.equal(result.counts.awaiting, 0);
+  assert.equal(result.counts.staleCleared, 1);
+  assert.equal(savedProduct.vonHalskyRemoteStatus, 'NOT_FOUND');
+  assert.equal(savedProduct.vonHalskyEditorialSyncState, 'decision_required');
+  assert.equal(savedProduct.vonHalskyOfferId, undefined);
+});

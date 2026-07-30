@@ -65,6 +65,8 @@ function backendRequiresRestart() {
       'package.json',
       'package-lock.json',
       'src/backend',
+      'db/migrations',
+      'scripts/migrate-postgres.mjs',
     ], { cwd: sourceRoot, encoding: 'utf8' }).trim();
     return changed.length > 0;
   } catch {
@@ -85,7 +87,10 @@ try {
   // przeładowywany wyłącznie wtedy, gdy commit naprawdę zmienił kod serwera
   // lub zależności. Dzięki temu zwykła publikacja UI nie tworzy krótkiego 502.
   const restartBackend = backendRequiresRestart();
-  if (restartBackend) restartProductionBackend();
+  if (restartBackend) {
+    execFileSync('node', ['scripts/migrate-postgres.mjs'], { cwd: sourceRoot, stdio: 'inherit' });
+    restartProductionBackend();
+  }
   const result = await deployStaticRelease({ sourceRoot, releasesRoot, currentLink, releaseId, commit, healthCheck: productionHealthCheck, keep });
   console.log(JSON.stringify({ ok: true, backendRestarted: restartBackend, ...result }, null, 2));
 } catch (error) {

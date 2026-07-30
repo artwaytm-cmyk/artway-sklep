@@ -20,6 +20,7 @@ import {
   vonHalskyAgentPreparationPatch,
 } from './domain/von-halsky-agent-preparation.mjs';
 import { resolveVonHalskyResponsibleProducer } from './domain/von-halsky-responsible-producer.mjs';
+import { vonHalskyCatalogTruthSummary } from './domain/von-halsky-catalog-reconciliation.mjs';
 
 const STORE_KEY = 'inpost_von_halsky_channel';
 let cachedCategoryIndex = null;
@@ -79,6 +80,25 @@ function cleanState(value = {}) {
     events: Array.isArray(value?.events) ? value.events.slice(0, 1000) : [],
     commands: Array.isArray(value?.commands) ? value.commands.slice(0, 500) : [],
     categories: Array.isArray(value?.categories) ? value.categories.slice(0, 10_000) : [],
+  };
+}
+
+function channelOperationalSummary(state = {}) {
+  const truth = vonHalskyCatalogTruthSummary(state.offers);
+  const commands = Array.isArray(state.commands) ? state.commands : [];
+  const pendingCommands = commands.filter((item) => (
+    !['SUCCESS', 'FAILURE', 'FAILED', 'CANCELLED'].includes(String(item?.status || 'PENDING').toUpperCase())
+  ));
+  return {
+    source: 'inpost-von-halsky-api',
+    verifiedAt: state.sync?.lastCatalogVerifiedAt || state.sync?.lastCatalogAt || null,
+    truth,
+    operations: {
+      pendingCommands: pendingCommands.length,
+      recentCommands: commands.length,
+    },
+    consistent: Number(state.sync?.remoteOfferCount ?? truth.total) === truth.total
+      && Number(state.sync?.publishedOfferCount ?? truth.published) === truth.published,
   };
 }
 
@@ -316,6 +336,7 @@ export function createVonHalskyRoute({
     if (action === 'von-halsky-overview') {
       if (req.method !== 'GET') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const state = cleanState((await readVersioned(STORE_KEY, initialState())).value);
+      const channel = channelOperationalSummary(state);
       return respond({
         ok: true,
         config: vonHalskyPublicConfig(env()),
@@ -330,6 +351,8 @@ export function createVonHalskyRoute({
         commands: state.commands,
         categoryCount: state.categories.length,
         updatedAt: state.updatedAt,
+        truth: channel.truth,
+        channelStatus: channel,
         channel: 'InPost Von Halsky',
       });
     }

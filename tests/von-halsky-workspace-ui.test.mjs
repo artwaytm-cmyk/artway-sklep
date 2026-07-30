@@ -82,30 +82,36 @@ test("wynik przygotowania i publikacji aktualizuje widok bez pełnego renderu st
   assert.match(source,/function vonHalskyMigawkaFiltrow/);
   assert.match(source,/function vonHalskyPrzywrocFiltry/);
   assert.match(source,/function vonHalskyZastosujAktualizacjeProduktow/);
-  assert.match(source,/function vonHalskyOdmalujWystawianieBezSkoku/);
-  assert.match(source,/current\.outerHTML=vonHalskyWystawianieHTML\(\)/);
-  assert.match(source,/requestAnimationFrame\(\(\)=>window\.scrollTo\(x,y\)\)/);
+  assert.match(source,/function vonHalskyAktualizujWystawianieDOM/);
+  assert.match(source,/\[data-vh-channel-truth\]/);
+  assert.match(source,/\[data-vh-stage-filters\]/);
+  assert.match(source,/\[data-vh-results-region\]/);
+  assert.doesNotMatch(source,/current\.outerHTML=vonHalskyWystawianieHTML\(\)/);
   assert.match(source,/vonHalskyZastosujAktualizacjeProduktow\(data\.productUpdates\|\|\[\]\)/);
   assert.match(source,/if\(Array\.isArray\(data\.offers\)\)vonHalskyStan\.offers=data\.offers/);
   assert.match(source,/setInterval\(async\(\)=>\{/);
   assert.match(source,/product-catalog-query/);
   assert.match(source,/ids:\[\.\.\.new Set\(ids\)\]\.join\(","\)/);
-  assert.match(source,/},4000\)/);
+  assert.match(source,/},5000\)/);
   assert.doesNotMatch(source,/sort:"najnowsze",page:1,limit:100/);
 });
 
 test("sprzedaż Von Halsky opiera się wyłącznie na potwierdzonym PUBLISHED z API",async()=>{
-  const [workspace,quality,style]=await Promise.all([
+  const [workspace,truthUi,quality,style]=await Promise.all([
     read("src/frontend/11b-von-halsky-workspace.js"),
+    read("src/frontend/11b-von-halsky-channel-truth.js"),
     read("src/frontend/11b-von-halsky-product-quality.js"),
     read("src/styles/37-von-halsky-workspace.css"),
   ]);
   assert.match(workspace,/von-halsky-reconcile-catalog/);
   assert.match(workspace,/status==="PUBLISHED"&&quality\.offerVerified/);
   assert.match(workspace,/API potwierdza:/);
+  assert.match(truthUi,/Stan potwierdzony bezpośrednio przez API/);
+  assert.match(truthUi,/osobno od liczby ofert/);
+  assert.match(workspace,/truth:data\.truth\|\|vonHalskyStan\.truth/);
   assert.match(quality,/offerVerified:Boolean\(remote&&ofertaId\)/);
   assert.doesNotMatch(quality,/ofertaId:String\(product\.vonHalskyOfferId/);
-  assert.match(workspace,/W publikacji/);
+  assert.match(truthUi,/W publikacji/);
   assert.match(style,/\.von-halsky-stage-filters\{grid-template-columns:repeat\(7,minmax\(0,1fr\)\)!important\}/);
 });
 

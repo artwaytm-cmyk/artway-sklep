@@ -733,6 +733,10 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.getByRole('heading', { name: 'Ostatnie operacje API' })).toHaveCount(0);
   await page.goto('/#/admin/von-halsky/wystawianie');
   await expect(page.getByRole('heading', { name: 'Przygotowanie i wystawianie produktów' })).toBeVisible();
+  await expect(page.locator('[data-vh-channel-truth]')).toContainText('Stan potwierdzony bezpośrednio przez API');
+  await expect(page.locator('[data-vh-channel-truth]')).toContainText('Oferty w API');
+  await expect(page.locator('[data-vh-channel-truth]')).toContainText('W sprzedaży');
+  await expect(page.locator('[data-vh-channel-truth]')).toContainText('Polecenia oczekujące');
   await expect(page.locator('.von-halsky-offer-flow')).toContainText('Dopasuj');
   await expect(page.locator('.von-halsky-offer-flow')).toContainText('Opublikuj');
   await expect(page.locator('.von-halsky-stage-filters')).toContainText('W sprzedaży');
@@ -744,6 +748,9 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.getByLabel('Praca Agenta')).toBeVisible();
   await expect(page.getByLabel('Status kanału')).toBeVisible();
   await expect(page.getByLabel('Dostępność')).toBeVisible();
+  await page.evaluate(() => { window.__vonHalskyFiltersNode = document.querySelector('[data-admin-search-id="von-halsky-products"]') || document.querySelector('.von-halsky-filter-grid')?.closest('section'); });
+  await page.waitForTimeout(5_500);
+  await expect.poll(() => page.evaluate(() => Boolean(window.__vonHalskyFiltersNode && window.__vonHalskyFiltersNode.isConnected))).toBe(true);
   await expect(page.locator('.von-halsky-publication-bar')).toContainText('Agent przygotowuje • administrator publikuje');
   await page.locator('.von-halsky-table tbody input[type="checkbox"]').first().check();
   await expect(page.locator('.von-halsky-publication-count strong')).toHaveText('1');
