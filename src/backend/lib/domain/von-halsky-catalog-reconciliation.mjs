@@ -4,6 +4,23 @@ const text = (value, max = 500) => String(value ?? '').replace(/\u0000/g, '').tr
 const upper = (value) => text(value, 60).toUpperCase();
 const asArray = (value) => Array.isArray(value) ? value : [];
 
+function stableOperationalValue(value) {
+  if (Array.isArray(value)) return value.map(stableOperationalValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !/(?:at|date|time|timestamp)$/i.test(key))
+    .map(([key, entry]) => [key, stableOperationalValue(entry)]));
+}
+
+function patchChangesProduct(product = {}, fields = {}, remove = []) {
+  if (asArray(remove).some((key) => Object.prototype.hasOwnProperty.call(product, key))) return true;
+  return Object.entries(fields).some(([key, value]) => {
+    if (/(?:at|date|time|timestamp)$/i.test(key)) return false;
+    return JSON.stringify(stableOperationalValue(product[key]))
+      !== JSON.stringify(stableOperationalValue(value));
+  });
+}
+
 function offerStatusPriority(status = '') {
   return ({
     PUBLISHED: 60,
@@ -181,6 +198,11 @@ export async function reconcileVonHalskyCatalog({
       const remove = localOfferId === remote.offerId
         ? ['vonHalskyOfferId', 'inpostVonHalskyOfferId', 'vonHalskyCommandId']
         : [];
+      counts.duplicateMappings += 1;
+      if (!patchChangesProduct(product, fields, remove)) {
+        counts.unchanged += 1;
+        continue;
+      }
       const saved = await saveProductFields({
         productId,
         fields,
@@ -189,7 +211,6 @@ export async function reconcileVonHalskyCatalog({
         actor: 'von-halsky-api',
         area: 'von-halsky-reconciliation',
       });
-      counts.duplicateMappings += 1;
       updates.push({
         productId,
         fields,
@@ -202,6 +223,15 @@ export async function reconcileVonHalskyCatalog({
     }
     if (remote) {
       const fields = publicationForRemote(product, remote, timestamp);
+      counts.linked += 1;
+      if (remote.status === 'PUBLISHED') counts.published += 1;
+      else if (['PENDING', 'PROCESSING'].includes(remote.status)) counts.pending += 1;
+      else if (['REJECTED', 'ERROR'].includes(remote.status)) counts.rejected += 1;
+      else if (['CLOSED', 'SOLDOUT', 'INACTIVE'].includes(remote.status)) counts.closed += 1;
+      if (!patchChangesProduct(product, fields)) {
+        counts.unchanged += 1;
+        continue;
+      }
       const saved = await saveProductFields({
         productId,
         fields,
@@ -209,11 +239,6 @@ export async function reconcileVonHalskyCatalog({
         actor: 'von-halsky-api',
         area: 'von-halsky-reconciliation',
       });
-      counts.linked += 1;
-      if (remote.status === 'PUBLISHED') counts.published += 1;
-      else if (['PENDING', 'PROCESSING'].includes(remote.status)) counts.pending += 1;
-      else if (['REJECTED', 'ERROR'].includes(remote.status)) counts.rejected += 1;
-      else if (['CLOSED', 'SOLDOUT', 'INACTIVE'].includes(remote.status)) counts.closed += 1;
       updates.push({
         productId,
         fields,
@@ -252,6 +277,11 @@ export async function reconcileVonHalskyCatalog({
         vonHalskyRemotePresent: false,
         vonHalskyRemoteVerifiedAt: timestamp,
       };
+      counts.awaiting += 1;
+      if (!patchChangesProduct(product, fields)) {
+        counts.unchanged += 1;
+        continue;
+      }
       const saved = await saveProductFields({
         productId,
         fields,
@@ -259,7 +289,6 @@ export async function reconcileVonHalskyCatalog({
         actor: 'von-halsky-api',
         area: 'von-halsky-reconciliation',
       });
-      counts.awaiting += 1;
       updates.push({ productId, fields, remove: [], product: saved?.product, confirmedAt: timestamp });
       continue;
     }
@@ -278,6 +307,11 @@ export async function reconcileVonHalskyCatalog({
       vonHalskyRemoteVerifiedAt: timestamp,
     };
     const remove = ['vonHalskyOfferId', 'inpostVonHalskyOfferId', 'vonHalskyCommandId'];
+    counts.staleCleared += 1;
+    if (!patchChangesProduct(product, fields, remove)) {
+      counts.unchanged += 1;
+      continue;
+    }
     const saved = await saveProductFields({
       productId,
       fields,
@@ -286,7 +320,6 @@ export async function reconcileVonHalskyCatalog({
       actor: 'von-halsky-api',
       area: 'von-halsky-reconciliation',
     });
-    counts.staleCleared += 1;
     updates.push({
       productId,
       fields,

@@ -147,7 +147,13 @@ function centralCatalogListProduct(product = {}, catalogMeta = {}, { admin = fal
   const result = {};
   for (const field of fields) if (Object.prototype.hasOwnProperty.call(product, field)) result[field] = product[field];
   result.id = text(product.id, 120);
-  if (admin) result.allegroAgentPreparationCurrent = centralAllegroPreparationCurrent(product);
+  if (admin) {
+    result.allegroAgentPreparationCurrent = centralAllegroPreparationCurrent(product);
+    result.vonHalskyPresentationDescriptionLength = text(
+      product.vonHalskyDescription || product.opis || product.dlugiOpis || product.description,
+      200000,
+    ).length;
+  }
   result._catalog = { ...catalogMeta, detailLevel: 'list' };
   return result;
 }

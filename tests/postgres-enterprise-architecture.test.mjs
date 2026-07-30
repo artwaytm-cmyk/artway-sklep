@@ -18,6 +18,7 @@ test('schemat PostgreSQL powstaje wyłącznie przez numerowane migracje', async 
     '0004_pitr_restore_verification.sql',
     '0005_product_payload_contraction.sql',
     '0006_product_payload_lookup_indexes.sql',
+    '0007_von_halsky_operational_read_models.sql',
   ]);
   const runtimeFiles = [
     'src/backend/lib/core/postgres-store-repository.mjs',

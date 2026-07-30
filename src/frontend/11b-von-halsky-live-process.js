@@ -54,15 +54,12 @@ async function vonHalskyPobierzLekkiStatus(){
   if(revisionChanged){
     vonHalskyUniewaznijWidokProduktow();
     const changedIds=[...new Set((data.sync?.lastChangedProductIds||[]).map(String).filter(Boolean))];
-    if(changedIds.length&&String(trasa()).startsWith("/admin/von-halsky/wystawianie")){
-      const rows=vonHalskyWiersze(),start=Math.max(0,(vonHalskyStrona-1)*vonHalskyNaStronie);
-      const visibleIds=new Set(rows.slice(start,start+vonHalskyNaStronie).map(({product})=>String(product.id)));
-      const ids=changedIds.filter(id=>visibleIds.has(id)).slice(0,Math.max(25,vonHalskyNaStronie));
-      if(ids.length){
-        const catalog=await chmura("product-catalog-query",{params:{audience:"admin",ids:ids.join(","),page:1,limit:ids.length},timeout:30000});
-        vonHalskyZastosujAktualizacjeProduktow((catalog?.items||[]).map(product=>({productId:product.id,product})));
-        visibleProductsChanged=true;
-      }
+    if(String(trasa()).startsWith("/admin/von-halsky/wystawianie")){
+      // Zmiana rewizji oznacza realną mutację, nie kolejny odczyt czasu.
+      // Jeden odczyt kolejki odświeża stronę, liczniki i właściwy filtr.
+      vonHalskyStan.productQueue.queryKey="";
+      await vonHalskyPobierzKolejkeProduktow({force:true});
+      visibleProductsChanged=changedIds.length>0;
     }
     vonHalskyOstatniaRewizjaKanalu=revision;
   }

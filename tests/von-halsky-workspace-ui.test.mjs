@@ -41,7 +41,7 @@ test("tabela Von Halsky przestrzega standardu desktop i mobile",async()=>{
   assert.doesNotMatch(style,/\.von-halsky-table\{min-width:1120px\}/);
   assert.doesNotMatch(style,/\.von-halsky-stage-filters\{display:flex;overflow-x:auto/);
   assert.match(style,/\.von-halsky-stage-filters\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)!important\}/);
-  assert.match(style,/\.von-halsky-stage-filters\{display:grid;grid-template-columns:repeat\(5,minmax\(0,1fr\)\)!important/);
+  assert.match(style,/\.von-halsky-stage-filters\{grid-template-columns:repeat\(7,minmax\(0,1fr\)\)!important/);
 });
 
 test("przygotowanie Von Halsky pokazuje trwały proces serwerowy niezależny od przeglądarki",async()=>{
@@ -119,7 +119,7 @@ test("sprzedaż Von Halsky opiera się wyłącznie na potwierdzonym PUBLISHED z 
   assert.match(quality,/offerVerified:Boolean\(remote&&ofertaId\)/);
   assert.doesNotMatch(quality,/ofertaId:String\(product\.vonHalskyOfferId/);
   assert.match(truthUi,/Po stronie API/);
-  assert.match(truthUi,/Wszystkie kartoteki/);
+  assert.match(truthUi,/Wewnętrzna kolejka Artway-TM/);
   assert.match(truthUi,/aria-pressed=/);
   assert.match(style,/\.von-halsky-stage-filters\{display:grid;grid-template-columns:repeat\(5,minmax\(0,1fr\)\)!important/);
 });
@@ -131,7 +131,8 @@ test("indeks ustawień Von Halsky ma działające przyciski i zielony stan aktyw
   ]);
   assert.match(source,/function vonHalskyPrzewinUstawienia/);
   assert.match(source,/data-von-settings-nav/);
-  assert.match(source,/scrollIntoView\(\{behavior:"smooth",block:"start"\}\)/);
+  assert.match(source,/von-halsky-setting-visible/);
+  assert.doesNotMatch(source,/scrollIntoView\(\{behavior:"smooth",block:"start"\}\)/);
   assert.match(style,/\.von-halsky-settings-index button\.active\{[^}]*background:#dcfce7/);
   assert.doesNotMatch(style,/\.von-halsky-settings-index\{[^}]*overflow:auto/);
 });

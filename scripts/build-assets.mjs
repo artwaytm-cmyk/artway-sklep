@@ -87,9 +87,11 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/11-allegro-workspace.js',
       'src/frontend/11b-von-halsky-product-quality.js',
       'src/frontend/11b-von-halsky-workspace.js',
+      'src/frontend/11d-von-halsky-settings-workspace.js',
       'src/frontend/11b-von-halsky-channel-truth.js',
       'src/frontend/11b-von-halsky-live-process.js',
       'src/frontend/11c-von-halsky-preparation.js',
+      'src/frontend/11d-von-halsky-operations-workspace.js',
       'src/frontend/11-inpost-order-contract-quote.js',
       'src/frontend/11-store-order-readiness.js',
       'src/frontend/11-store-orders.js',
@@ -301,9 +303,11 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
     sources: [
       'src/frontend/11b-von-halsky-product-quality.js',
       'src/frontend/11b-von-halsky-workspace.js',
+      'src/frontend/11d-von-halsky-settings-workspace.js',
       'src/frontend/11b-von-halsky-channel-truth.js',
       'src/frontend/11b-von-halsky-live-process.js',
       'src/frontend/11c-von-halsky-preparation.js',
+      'src/frontend/11d-von-halsky-operations-workspace.js',
     ],
   },
   {

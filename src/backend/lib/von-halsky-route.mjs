@@ -187,6 +187,9 @@ export function createVonHalskyRoute({
   writeIfVersion,
   readOverview,
   readStatus,
+  readDashboardSummary,
+  readRecordPage,
+  readProductQueue,
   env = () => process.env,
   fetchImpl = globalThis.fetch,
   loadCatalog = async () => [],
@@ -337,16 +340,30 @@ export function createVonHalskyRoute({
 
     if (action === 'von-halsky-overview') {
       if (req.method !== 'GET') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const snapshot = typeof readOverview === 'function'
-        ? await readOverview(initialState())
-        : (await readVersioned(STORE_KEY, initialState())).value;
+      const [snapshot, statusSnapshot] = await Promise.all([
+        typeof readOverview === 'function'
+          ? readOverview(initialState())
+          : readVersioned(STORE_KEY, initialState()).then((value) => value.value),
+        typeof readStatus === 'function' ? readStatus(initialState()) : Promise.resolve(null),
+      ]);
       const state = cleanState(snapshot);
-      const channel = channelOperationalSummary(state);
+      const channel = statusSnapshot?.truth
+        ? {
+            source: 'inpost-von-halsky-api',
+            verifiedAt: statusSnapshot.sync?.lastCatalogVerifiedAt || statusSnapshot.updatedAt || null,
+            truth: statusSnapshot.truth,
+            operations: {
+              pendingCommands: Number(statusSnapshot.commandSummary?.pending) || 0,
+              recentCommands: Number(statusSnapshot.commandSummary?.total) || 0,
+            },
+            consistent: true,
+          }
+        : channelOperationalSummary(state);
       return respond({
         ok: true,
         config: vonHalskyPublicConfig(env()),
         settings: state.settings,
-        sync: state.sync,
+        sync: statusSnapshot?.sync || state.sync,
         diagnostics: state.diagnostics,
         offers: state.offers,
         orders: state.orders,
@@ -359,6 +376,61 @@ export function createVonHalskyRoute({
         truth: channel.truth,
         channelStatus: channel,
         channel: 'InPost Von Halsky',
+      });
+    }
+
+    if (action === 'von-halsky-dashboard-summary') {
+      if (req.method !== 'GET') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (typeof readDashboardSummary !== 'function') {
+        return respond({ ok: false, error: 'Podsumowanie kanału nie jest dostępne.', code: 'von_halsky_summary_unavailable' }, 503);
+      }
+      return respond({ ok: true, ...(await readDashboardSummary(initialState())), channel: 'InPost Von Halsky' });
+    }
+
+    if (action === 'von-halsky-records') {
+      if (req.method !== 'GET') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const kind = matchingText(url.searchParams.get('kind'), 40);
+      if (!['orders', 'returns', 'claims', 'commands', 'events', 'diagnostics'].includes(kind)) {
+        return respond({ ok: false, error: 'Nieobsługiwany rodzaj danych.', code: 'von_halsky_record_kind' }, 422);
+      }
+      if (typeof readRecordPage !== 'function') {
+        return respond({ ok: false, error: 'Stronicowany odczyt nie jest dostępny.', code: 'von_halsky_records_unavailable' }, 503);
+      }
+      return respond({
+        ok: true,
+        kind,
+        ...(await readRecordPage(kind, {
+          query: url.searchParams.get('q'),
+          status: url.searchParams.get('status'),
+          limit: url.searchParams.get('limit'),
+          cursor: url.searchParams.get('cursor'),
+        })),
+      });
+    }
+
+    if (action === 'von-halsky-product-queue') {
+      if (req.method !== 'GET') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (typeof readProductQueue !== 'function') {
+        return respond({ ok: false, error: 'Kolejka produktów nie jest dostępna.', code: 'von_halsky_product_queue_unavailable' }, 503);
+      }
+      return respond({
+        ok: true,
+        ...(await readProductQueue({
+          query: url.searchParams.get('q'),
+          stage: url.searchParams.get('stage'),
+          quality: url.searchParams.get('quality'),
+          agent: url.searchParams.get('agent'),
+          channel: url.searchParams.get('channel'),
+          availability: url.searchParams.get('availability'),
+          producer: url.searchParams.get('producer'),
+          category: url.searchParams.get('category'),
+          problem: url.searchParams.get('problem'),
+          price: url.searchParams.get('price'),
+          sort: url.searchParams.get('sort'),
+          page: url.searchParams.get('page'),
+          limit: url.searchParams.get('limit'),
+          cursor: url.searchParams.get('cursor'),
+        })),
       });
     }
 

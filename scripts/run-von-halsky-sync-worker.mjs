@@ -6,9 +6,9 @@ const origin = String(
   || 'http://127.0.0.1:3000',
 ).replace(/\/api\/store.*$/i, '').replace(/\/+$/, '');
 const token = String(process.env.ARTWAY_ADMIN_TOKEN || '').trim();
-const idleMs = Math.max(5 * 60_000, Number(process.env.ARTWAY_VON_HALSKY_RECONCILE_MS) || 15 * 60_000);
+const configuredIdleMs = Math.max(5 * 60_000, Number(process.env.ARTWAY_VON_HALSKY_RECONCILE_MS) || 15 * 60_000);
 const pendingMs = Math.max(60_000, Number(process.env.ARTWAY_VON_HALSKY_PENDING_MS) || 3 * 60_000);
-const maximumErrorMs = Math.max(idleMs, Number(process.env.ARTWAY_VON_HALSKY_ERROR_MAX_MS) || 30 * 60_000);
+const maximumErrorMs = Math.max(configuredIdleMs, Number(process.env.ARTWAY_VON_HALSKY_ERROR_MAX_MS) || 30 * 60_000);
 
 if (!token) throw new Error('Brak ARTWAY_ADMIN_TOKEN dla procesu synchronizacji Von Halsky.');
 
@@ -52,15 +52,23 @@ async function reconcile() {
 
 async function main() {
   let failureCount = 0;
-  log('worker_started', { idleMs, pendingMs });
+  log('worker_started', { idleMs: configuredIdleMs, pendingMs, scheduleSource: 'server-settings' });
   await sleep(10_000);
   while (true) {
-    let nextMs = idleMs;
+    let nextMs = configuredIdleMs;
     try {
       const data = await reconcile();
       failureCount = 0;
       const pending = Math.max(0, Number(data?.truth?.pending) || 0);
-      nextMs = pending > 0 ? pendingMs : idleMs;
+      const serverIdleMs = Math.max(
+        15 * 60_000,
+        (Number(data?.schedule?.intervalMinutes) || configuredIdleMs / 60_000) * 60_000,
+      );
+      const serverPendingMs = Math.max(
+        60_000,
+        (Number(data?.schedule?.pendingIntervalMinutes) || pendingMs / 60_000) * 60_000,
+      );
+      nextMs = pending > 0 ? serverPendingMs : serverIdleMs;
       log('reconciliation_completed', {
         revision: data?.revision || '',
         total: Number(data?.truth?.total) || 0,

@@ -144,9 +144,18 @@ export function createVonHalskyCatalogRoute(context = {}) {
             .map((item) => String(item?.productId || ''))
             .filter(Boolean),
         )].slice(0, 2_000);
+        let channelChanged = changedProductIds.length > 0;
         const updated = await mutate((current) => {
+          const operationalSignature = (offers = [], commands = []) => JSON.stringify({
+            offers: offers.map((item) => [item.offerId, item.externalId, item.status, item.validationErrors, item.rejectionReasons])
+              .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
+            commands: commands.map((item) => [item.commandId, item.status, item.entityId, item.type])
+              .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
+          });
+          const beforeSignature = operationalSignature(current.offers, current.commands);
           current.offers = remoteOffers;
           current.commands = reconcileVonHalskyCommands(current.commands, remoteOffers, timestamp);
+          channelChanged = channelChanged || beforeSignature !== operationalSignature(current.offers, current.commands);
           const pendingCommandCount = current.commands.filter((item) => (
             !['SUCCESS', 'FAILURE', 'FAILED', 'CANCELLED', 'NOT_FOUND'].includes(String(item?.status || 'PENDING').toUpperCase())
           )).length;
@@ -163,26 +172,34 @@ export function createVonHalskyCatalogRoute(context = {}) {
             pendingCommandCount,
             lastError: '',
             lastRequestId: remoteResult.requestId || '',
-            reconciliationRevision: timestamp,
+            reconciliationRevision: channelChanged
+              ? timestamp
+              : current.sync.reconciliationRevision || timestamp,
             lastReconciliationSource: source,
             lastChangedProductIds: changedProductIds,
             reconciliationMode: config.webhookConfigured ? 'webhook_with_polling_fallback' : 'background_polling',
           };
           return current;
         });
-        await recordDiagnostic({
-          operation: 'catalog-reconciliation',
-          status: 'ok',
-          message: `API: ${reconciliation.truth.total}; w sprzedaży: ${reconciliation.truth.published}; usunięte fałszywe powiązania: ${reconciliation.counts.staleCleared}; rozdzielone duplikaty: ${reconciliation.counts.duplicateMappings}.`,
-          requestId: remoteResult.requestId || '',
-        });
+        if (channelChanged || source !== 'background-worker') {
+          await recordDiagnostic({
+            operation: 'catalog-reconciliation',
+            status: 'ok',
+            message: `API: ${reconciliation.truth.total}; w sprzedaży: ${reconciliation.truth.published}; usunięte fałszywe powiązania: ${reconciliation.counts.staleCleared}; rozdzielone duplikaty: ${reconciliation.counts.duplicateMappings}.`,
+            requestId: remoteResult.requestId || '',
+          });
+        }
         const payload = {
           ok: true,
           truth: reconciliation.truth,
           reconciliation: reconciliation.counts,
           changedProductIds,
-          revision: timestamp,
+          revision: updated.sync.reconciliationRevision,
           sync: updated.sync,
+          schedule: {
+            intervalMinutes: Math.max(15, Number(updated.settings?.syncIntervalMinutes) || 15),
+            pendingIntervalMinutes: 3,
+          },
         };
         if (!compact) {
           payload.offers = remoteOffers;

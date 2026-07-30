@@ -1223,8 +1223,8 @@ test('uzgodnienie katalogu liczy wyłącznie zdalne PUBLISHED i usuwa fałszywe 
     timestamp: '2026-07-30T08:15:00.000Z',
     saveProductFields,
   });
-  assert.ok(mutationIds.length >= 2);
-  assert.ok(mutationIds.every((mutationId) => !firstCycleMutationIds.has(mutationId)));
+  assert.equal(mutationIds.length, 0);
+  assert.ok(firstCycleMutationIds.size >= 2);
 });
 
 test('bieżący odczyt kontrolny nie odnawia bez końca czasu oczekiwania na nieistniejącą ofertę', async () => {

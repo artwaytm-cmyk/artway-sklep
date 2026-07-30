@@ -728,7 +728,9 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.locator('.module-tabs-panel a[href="#/admin/von-halsky/oferty"]')).toHaveCount(0);
   await expect(page.locator('.module-tabs-panel a[href="#/admin/von-halsky/powiazania"]')).toHaveCount(0);
   await expect(page.locator('.module-tabs-panel a[href="#/admin/von-halsky/zamowienia"]')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Najbliższe działania' })).toBeVisible();
+  await expect(page.locator('.von-halsky-dashboard-kpis')).toHaveCSS('display', 'grid');
+  await expect(page.getByRole('heading', { name: 'Ostatnie 14 dni' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Kondycja synchronizacji' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Onboarding kanału' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Ostatnie operacje API' })).toHaveCount(0);
   await page.goto('/#/admin/von-halsky/wystawianie');
@@ -740,7 +742,7 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.locator('.von-halsky-offer-flow')).toContainText('Dopasuj');
   await expect(page.locator('.von-halsky-offer-flow')).toContainText('Opublikuj');
   await expect(page.locator('.von-halsky-channel-truth')).toContainText('W sprzedaży');
-  await expect(page.locator('.von-halsky-stage-filters')).toContainText('Wszystkie kartoteki');
+  await expect(page.locator('[data-vh-stage-filters]')).toContainText('Wewnętrzna kolejka Artway-TM');
   await expect(page.locator('.von-halsky-stage-filters')).toContainText('Do wystawienia');
   await expect(page.locator('.von-halsky-stage-filters')).toContainText('Do przygotowania');
   await expect(page.locator('.von-halsky-table')).toBeVisible();
@@ -779,16 +781,17 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await page.locator('.von-halsky-settings-index button', { hasText: 'Agent' }).click();
   await expect(page.locator('.von-halsky-settings-index button.active')).toHaveText('Agent');
   await expect(page.locator('#von-halsky-settings-agent')).toBeInViewport();
+  await expect(page.getByRole('heading', { name: 'Agent przygotowania ofert' })).toBeVisible();
+  await expect(page.getByLabel('Minimalna pewność kategorii')).toHaveValue('82');
+  await page.locator('.von-halsky-settings-index button', { hasText: 'Polityka danych' }).click();
+  await expect(page.locator('.von-halsky-settings-index button.active')).toHaveText('Polityka danych');
+  await expect(page.getByRole('heading', { name: 'Źródła i priorytety danych' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Decyzja ręczna' })).toBeVisible();
   await page.locator('.von-halsky-settings-index button', { hasText: 'Diagnostyka' }).click();
   await expect(page.locator('.von-halsky-settings-index button.active')).toHaveText('Diagnostyka');
   await expect(page.locator('#von-halsky-settings-diagnostics')).toBeInViewport();
-  await expect(page.getByRole('heading', { name: 'Agent przygotowania ofert' })).toBeVisible();
-  await expect(page.getByLabel('Minimalna pewność kategorii')).toHaveValue('82');
-  await expect(page.getByRole('heading', { name: 'Źródła i priorytety danych' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Ostatnie operacje API' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Decyzja ręczna' })).toBeVisible();
   await expect(page.locator('[name="testOfferCode"]')).toHaveCount(0);
-  await expect(page.getByText('brak automatycznego tworzenia nowych ofert', { exact: true })).toBeVisible();
   await expect.poll(() => page.locator('#artwayAdminStyle-vonHalsky').evaluate((link) => Boolean(link.sheet))).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/#/admin/von-halsky/wystawianie');
@@ -809,7 +812,7 @@ test('panel ponawia modułowy CSS i nie pokazuje podstrony bez zastosowanych sty
   await expect.poll(() => page.locator('#artwayAdminStyle-vonHalsky').evaluate((link) => Boolean(link.sheet))).toBe(true);
   // Wspólna warstwa panelu może świadomie zmienić nagłówek na flex,
   // dlatego obecność stylu modułu potwierdzamy na jego własnej siatce KPI.
-  await expect(page.locator('.von-halsky-stat-grid')).toHaveCSS('display', 'grid');
+  await expect(page.locator('.von-halsky-dashboard-kpis')).toHaveCSS('display', 'grid');
   await expect(page.locator('#artwayAdminStyle-vonHalsky')).toHaveAttribute('data-loading', 'false');
 });
 

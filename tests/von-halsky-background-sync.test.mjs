@@ -14,7 +14,8 @@ test('uzgadnianie Von Halsky działa jako osobny proces serwerowy z backoffem', 
   assert.match(worker, /von-halsky-reconcile-catalog/);
   assert.match(worker, /compact: true/);
   assert.match(worker, /source: 'background-worker'/);
-  assert.match(worker, /pending > 0 \? pendingMs : idleMs/);
+  assert.match(worker, /pending > 0 \? serverPendingMs : serverIdleMs/);
+  assert.match(worker, /schedule\?\.intervalMinutes/);
   assert.match(worker, /failureCount/);
   assert.match(service, /run-von-halsky-sync-worker\.mjs/);
   assert.match(service, /ARTWAY_VON_HALSKY_RECONCILE_MS=900000/);

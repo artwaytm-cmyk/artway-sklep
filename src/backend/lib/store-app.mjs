@@ -321,7 +321,11 @@ const agentEvents = createAgentEventSystem({
 const { queue: agentEventQueue, emit: emitAgentEvent } = agentEvents;
 const vonHalskyRoute = createVonHalskyRoute({
   respond: odpowiedz, isAdmin: czyAdmin, readVersioned: vonHalskyRepository.readVersioned, writeIfVersion: vonHalskyRepository.writeIfVersion,
-  readOverview: vonHalskyRepository.readOverview, readStatus: vonHalskyRepository.readStatus, saveProductFields: (input) => zapiszIOpublikujPolaProduktuCentralnie(input),
+  readOverview: vonHalskyRepository.readOverview, readStatus: vonHalskyRepository.readStatus,
+  readDashboardSummary: vonHalskyRepository.readDashboardSummary,
+  readRecordPage: vonHalskyRepository.readRecordPage,
+  readProductQueue: vonHalskyRepository.readProductQueue,
+  saveProductFields: (input) => zapiszIOpublikujPolaProduktuCentralnie(input),
   reportProgress: (work) => agentRuntime.report({ event: 'work_progress', source: 'von-halsky-api', work }),
   prepareProductWithAgent: (productId, actor, options) => agentSpecialists.prepareVonHalskyProposal(productId, actor, options),
   inspectSource: pobierzProduktProducentaZPamiecia,
@@ -576,12 +580,10 @@ const {
 function producentEmailZlecenia(order = {}, supplier = {}) {
   return renderSupplierOrderEmail(order, supplier);
 }
-
 // zostaw tylko dozwolone klucze wspólne i pilnuj rozmiaru
 function oczyscUstawienia(obj) {
   return sanitizeManufacturerFieldsInSettings(filterKnownSettingsDomains(obj));
 }
-
 async function czytajUsunieteZamowienia() {
   const rec = await czytaj('deleted_orders', { items: [] });
   return Array.isArray(rec.items) ? rec.items : [];
@@ -598,7 +600,6 @@ async function dopiszUsunieteZamowienie(raw) {
   await zapisz('deleted_orders', { items, updated_at: new Date().toISOString() });
   return rec;
 }
-
 // ─── ALLEGRO API (OAuth, zamówienia, oferty, mapowania) ───
 function allegroEnv() {
   return String(process.env.ALLEGRO_ENV || 'production').trim().toLowerCase() === 'sandbox' ? 'sandbox' : 'production';
@@ -1217,7 +1218,6 @@ function allegroMapowaniaItems(raw) {
   if (!raw || typeof raw !== 'object') return {};
   return raw.items && typeof raw.items === 'object' ? raw.items : raw;
 }
-
 function allegroNormalizujKlucz(v = '') {
   return tekst(v, 500).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 }
@@ -3036,7 +3036,6 @@ export default async (req) => {
     }
     const infaktResponse = await infaktRoute(req, url, action);
     if (infaktResponse) return infaktResponse;
-
     const agentOperationsResponse = await agentOperationsRoute(req, url, action);
     if (agentOperationsResponse) return agentOperationsResponse;
 
