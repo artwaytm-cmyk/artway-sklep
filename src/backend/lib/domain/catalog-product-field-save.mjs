@@ -62,6 +62,7 @@ export const CATALOG_PRODUCT_PREPARATION_FIELDS = new Set([
   'vonHalskyEditorialSyncRunId', 'vonHalskyEditorialSyncState',
   'vonHalskyEditorialSyncCheckedAt', 'vonHalskyEditorialSyncError',
   'vonHalskyEditorialSyncedAt',
+  'vonHalskyRemoteStatus', 'vonHalskyRemotePresent', 'vonHalskyRemoteVerifiedAt',
   'allegroDescriptionSource', 'allegroEditorialSyncPending',
   'allegroEditorialSyncPendingAt', 'allegroEditorialSyncRunId',
   'allegroEditorialSyncState', 'allegroEditorialSyncCheckedAt',

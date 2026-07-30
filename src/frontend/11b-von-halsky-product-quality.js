@@ -24,6 +24,14 @@ function vonHalskyGpsr(product={}){
   const missing=[!name&&"nazwa",!address&&"adres",!email&&"e-mail",!phone&&"telefon"].filter(Boolean);
   return {required:product.vonHalskyGpsrRequired===true,ready:missing.length===0,name,address,email,phone,missing,source:String(value.source||"")};
 }
+function vonHalskyZdalnaOfertaProduktu(product={}){
+  const externalId=String(product.externalId||product.sku||product.id||""),localOfferId=String(product.vonHalskyOfferId||product.inpostVonHalskyOfferId||"");
+  const priority={PUBLISHED:60,PENDING:50,PROCESSING:40,CLOSED:30,SOLDOUT:25,INACTIVE:20,REJECTED:10,ERROR:5};
+  return (Array.isArray(vonHalskyStan.offers)?vonHalskyStan.offers:[])
+    .map(item=>item?.offer||item||{})
+    .filter(item=>(localOfferId&&String(item.id||item.offerId||"")===localOfferId)||(externalId&&String(item.externalId||"")===externalId))
+    .sort((left,right)=>(priority[String(right.status||"").toUpperCase()]||0)-(priority[String(left.status||"").toUpperCase()]||0))[0]||null;
+}
 function vonHalskyOcenaProduktu(product={}){
   if(product&&typeof product==="object"&&vonHalskyOcenaRenderCache.has(product))return vonHalskyOcenaRenderCache.get(product);
   const presentation=vonHalskyPrezentacjaProduktu(product),nazwa=presentation.name,surowyOpis=presentation.description,opis=presentation.description,ean=vonHalskyGtin(product);
@@ -44,9 +52,8 @@ function vonHalskyOcenaProduktu(product={}){
   if(!Object.keys(product.parametry||product.parameters||{}).length)ostrzezenia.push("Brak parametrów kategorii");
   const dostepny=typeof produktDostepnyWSprzedazy==="function"?produktDostepnyWSprzedazy(product):product.sprzedazAktywna!==false;
   if(!dostepny)braki.push("Sprzedaż wstrzymana");
-  const remote=(vonHalskyStan.offers||[]).find(item=>String(item.externalId||"")===String(product.externalId||product.sku||product.id||""));
-  const ofertaId=String(product.vonHalskyOfferId||product.inpostBuyOfferId||remote?.offerId||"");
-  const result={gotowy:braki.length===0,wynik:Math.max(0,Math.round(100-braki.length*18-ostrzezenia.length*3)),braki,ostrzezenia,ean,kod,marka,opis,nazwa,cena:Number.isFinite(cena)?cena:0,dostepny,ofertaId,offerStatus:String(remote?.status||""),categoryId:String(product.vonHalskyCategoryId||""),categoryPath:String(product.vonHalskyCategoryPath||""),categoryResolution:product.vonHalskyCategoryResolution||null,gpsr,zdjecie:zdjecia[0]||"",presentation};
+  const remote=vonHalskyZdalnaOfertaProduktu(product),ofertaId=String(remote?.id||remote?.offerId||"");
+  const result={gotowy:braki.length===0,wynik:Math.max(0,Math.round(100-braki.length*18-ostrzezenia.length*3)),braki,ostrzezenia,ean,kod,marka,opis,nazwa,cena:Number.isFinite(cena)?cena:0,dostepny,ofertaId,localOfferId:String(product.vonHalskyOfferId||""),offerStatus:String(remote?.status||product.vonHalskyRemoteStatus||""),offerVerified:Boolean(remote&&ofertaId),categoryId:String(product.vonHalskyCategoryId||""),categoryPath:String(product.vonHalskyCategoryPath||""),categoryResolution:product.vonHalskyCategoryResolution||null,gpsr,zdjecie:zdjecia[0]||"",presentation};
   if(product&&typeof product==="object")vonHalskyOcenaRenderCache.set(product,result);
   return result;
 }

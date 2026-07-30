@@ -86,6 +86,33 @@ test("wynik przygotowania i publikacji od razu aktualizuje filtr bez przeładowa
   assert.match(source,/},15000\)/);
 });
 
+test("sprzedaż Von Halsky opiera się wyłącznie na potwierdzonym PUBLISHED z API",async()=>{
+  const [workspace,quality,style]=await Promise.all([
+    read("src/frontend/11b-von-halsky-workspace.js"),
+    read("src/frontend/11b-von-halsky-product-quality.js"),
+    read("src/styles/37-von-halsky-workspace.css"),
+  ]);
+  assert.match(workspace,/von-halsky-reconcile-catalog/);
+  assert.match(workspace,/status==="PUBLISHED"&&quality\.offerVerified/);
+  assert.match(workspace,/API potwierdza:/);
+  assert.match(quality,/offerVerified:Boolean\(remote&&ofertaId\)/);
+  assert.doesNotMatch(quality,/ofertaId:String\(product\.vonHalskyOfferId/);
+  assert.match(workspace,/W publikacji/);
+  assert.match(style,/\.von-halsky-stage-filters\{grid-template-columns:repeat\(7,minmax\(0,1fr\)\)!important\}/);
+});
+
+test("indeks ustawień Von Halsky ma działające przyciski i zielony stan aktywny",async()=>{
+  const [source,style]=await Promise.all([
+    read("src/frontend/11b-von-halsky-workspace.js"),
+    read("src/styles/37-von-halsky-workspace.css"),
+  ]);
+  assert.match(source,/function vonHalskyPrzewinUstawienia/);
+  assert.match(source,/data-von-settings-nav/);
+  assert.match(source,/scrollIntoView\(\{behavior:"smooth",block:"start"\}\)/);
+  assert.match(style,/\.von-halsky-settings-index button\.active\{[^}]*background:#dcfce7/);
+  assert.doesNotMatch(style,/\.von-halsky-settings-index\{[^}]*overflow:auto/);
+});
+
 test("błąd API Von Halsky nie uruchamia nieskończonej pętli renderowania",async()=>{
   const source=await read("src/frontend/11b-von-halsky-workspace.js");
   assert.match(source,/catch\(error\)\{[\s\S]*?vonHalskyStan\.loaded=true;[\s\S]*?vonHalskyStan\.error=/);

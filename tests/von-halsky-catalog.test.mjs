@@ -24,6 +24,10 @@ import {
   resolveVonHalskyResponsibleProducer,
   responsibleProducerFromSourceText,
 } from '../src/backend/lib/domain/von-halsky-responsible-producer.mjs';
+import {
+  reconcileVonHalskyCatalog,
+  vonHalskyCatalogTruthSummary,
+} from '../src/backend/lib/domain/von-halsky-catalog-reconciliation.mjs';
 
 test('osobna bramka Von Halsky blokuje logistykę, linki i nieobsługiwany HTML', () => {
   const safe = vonHalskyCheckEditorial({
@@ -860,6 +864,7 @@ test('ręczna publikacja tworzy wyłącznie zaznaczoną ofertę i zapisuje reque
   let revision = 0;
   let catalogPayload;
   let mutationRequests = 0;
+  let remoteVisible = false;
   const env = {
     INPOST_VON_HALSKY_API_BASE_URL: 'https://api.example.test',
     INPOST_VON_HALSKY_AUTH_URL: 'https://auth.example.test/token',
@@ -873,10 +878,24 @@ test('ręczna publikacja tworzy wyłącznie zaznaczoną ofertę i zapisuje reque
   };
   const fetchImpl = async (url, options = {}) => {
     if (String(url).includes('/token')) return new Response(JSON.stringify({ access_token: 'token', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } });
-    if ((options.method || 'GET') === 'GET') return new Response(JSON.stringify({ data: [], page: { limit: 30, offset: 0, total: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+    if ((options.method || 'GET') === 'GET') return new Response(JSON.stringify({
+      data: remoteVisible ? [{
+        offer: {
+          id: '22222222-2222-4222-8222-222222222222',
+          externalId: 'P-7',
+          status: 'PUBLISHED',
+        },
+      }] : [],
+      page: { limit: 30, offset: 0, total: remoteVisible ? 1 : 0 },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
     mutationRequests += 1;
-    catalogPayload = JSON.parse(options.body);
-    return new Response(JSON.stringify([{ commandId: '11111111-1111-4111-8111-111111111111', offerId: '22222222-2222-4222-8222-222222222222', externalId: 'P-7' }]), { status: 201, headers: { 'content-type': 'application/json', 'x-request-id': 'catalog-req-7' } });
+    const payload = JSON.parse(options.body);
+    if (Array.isArray(payload)) {
+      catalogPayload = payload;
+      remoteVisible = true;
+      return new Response(JSON.stringify([{ commandId: '11111111-1111-4111-8111-111111111111', offerId: '22222222-2222-4222-8222-222222222222', externalId: 'P-7' }]), { status: 201, headers: { 'content-type': 'application/json', 'x-request-id': 'catalog-req-7' } });
+    }
+    return new Response(JSON.stringify({ commandId: '33333333-3333-4333-8333-333333333333' }), { status: 202, headers: { 'content-type': 'application/json', 'x-request-id': 'catalog-update-7' } });
   };
   const respond = (body, status = 200) => ({ body, status });
   const route = createVonHalskyRoute({
@@ -938,13 +957,19 @@ test('ręczna publikacja tworzy wyłącznie zaznaczoną ofertę i zapisuje reque
   assert.equal(repeated.body.created, 0);
   assert.equal(repeated.body.updated, 1);
   assert.equal(repeated.body.productUpdates[0].productId, 'P-7');
-  assert.equal(repeated.body.productUpdates[0].fields.vonHalskyEditorialSyncPending, false);
-  assert.equal(repeated.body.productUpdates[0].fields.vonHalskyEditorialSyncState, 'synced');
+  assert.equal(repeated.body.productUpdates[0].fields.vonHalskyEditorialSyncPending, true);
+  assert.equal(repeated.body.productUpdates[0].fields.vonHalskyEditorialSyncState, 'publishing');
+  const reconcileRequest = new Request('https://artwaytm.pl/api?action=von-halsky-reconcile-catalog', { method: 'POST' });
+  const reconciled = await route(reconcileRequest, new URL(reconcileRequest.url), 'von-halsky-reconcile-catalog');
+  assert.equal(reconciled.status, 200);
+  assert.equal(reconciled.body.truth.published, 1);
+  assert.equal(reconciled.body.productUpdates[0].fields.vonHalskyEditorialSyncState, 'synced');
   assert.equal(mutationRequests, 2);
 });
 
-test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny postęp pracy', async () => {
+test('publikacja wskazanego produktu czeka na odczyt API, a potem zapisuje trwałe potwierdzenie', async () => {
   const records = new Map(), revisions = new Map(), progress = [], products = new Map();
+  let remoteVisible = false;
   const env = {
     INPOST_VON_HALSKY_API_BASE_URL: 'https://api.example.test',
     INPOST_VON_HALSKY_AUTH_URL: 'https://auth.example.test/token',
@@ -970,12 +995,22 @@ test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny 
     readVersioned: async (key, fallback) => ({ value: structuredClone(records.get(key) ?? fallback), revision: revisions.get(key) || 0 }),
     writeIfVersion: async (key, value) => { records.set(key, structuredClone(value)); revisions.set(key, (revisions.get(key) || 0) + 1); return { modified: true }; },
     env: () => env,
-    fetchImpl: async (url, options = {}) => String(url).includes('/token')
-      ? new Response(JSON.stringify({ access_token: 'token', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } })
-      : (options.method || 'GET') === 'GET'
-        ? new Response(JSON.stringify({ data: [], page: { limit: 30, offset: 0, total: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } })
-        : new Response(JSON.stringify([{ commandId: '11111111-1111-4111-8111-111111111111', offerId: '22222222-2222-4222-8222-222222222222', externalId: 'EXT-17' }]), { status: 201, headers: { 'content-type': 'application/json', 'x-request-id': 'vh-receipt-17' } }),
-    loadCatalog: async () => [product],
+    fetchImpl: async (url, options = {}) => {
+      if (String(url).includes('/token')) return new Response(JSON.stringify({ access_token: 'token', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if ((options.method || 'GET') === 'GET') return new Response(JSON.stringify({
+        data: remoteVisible ? [{
+          offer: {
+            id: '22222222-2222-4222-8222-222222222222',
+            externalId: 'EXT-17',
+            status: 'PUBLISHED',
+          },
+        }] : [],
+        page: { limit: 30, offset: 0, total: remoteVisible ? 1 : 0 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+      remoteVisible = true;
+      return new Response(JSON.stringify([{ commandId: '11111111-1111-4111-8111-111111111111', offerId: '22222222-2222-4222-8222-222222222222', externalId: 'EXT-17' }]), { status: 201, headers: { 'content-type': 'application/json', 'x-request-id': 'vh-receipt-17' } });
+    },
+    loadCatalog: async () => [...products.values()].map((item) => structuredClone(item)),
     saveProductFields: async ({ productId, fields = {}, remove = [] }) => {
       const next = { ...(products.get(String(productId)) || { id: productId }), ...structuredClone(fields) };
       for (const field of remove) delete next[field];
@@ -994,10 +1029,61 @@ test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny 
   const result = await route(request, new URL(request.url), 'von-halsky-sync-catalog');
   assert.equal(result.status, 200);
   assert.equal(result.body.sent, 1);
-  const saved = products.get('P-17');
+  let saved = products.get('P-17');
+  assert.equal(saved.vonHalskyEditorialSyncState, 'publishing');
+  assert.equal(saved.contentEditorial.channelStates.vonHalsky.publicationStatus, 'publishing');
+  assert.equal(result.body.productUpdates[0].fields.vonHalskyEditorialSyncPending, true);
+  assert.deepEqual(progress.map((item) => item.phase), ['sending_to_von_halsky', 'accepted_by_von_halsky']);
+  const reconcileRequest = new Request('https://artwaytm.pl/api?action=von-halsky-reconcile-catalog', { method: 'POST' });
+  const reconciled = await route(reconcileRequest, new URL(reconcileRequest.url), 'von-halsky-reconcile-catalog');
+  assert.equal(reconciled.status, 200);
+  assert.equal(reconciled.body.truth.published, 1);
+  saved = products.get('P-17');
   assert.equal(saved.vonHalskyEditorialSyncState, 'synced');
   assert.equal(saved.contentEditorial.channelStates.vonHalsky.publicationStatus, 'confirmed');
-  assert.equal(saved.contentEditorial.channelStates.vonHalsky.publicationReceipt, 'vh-receipt-17');
-  assert.equal(result.body.productUpdates[0].fields.vonHalskyEditorialSyncPending, false);
-  assert.deepEqual(progress.map((item) => item.phase), ['sending_to_von_halsky', 'confirmed_by_von_halsky']);
+  assert.equal(saved.contentEditorial.channelStates.vonHalsky.publicationReceipt, '22222222-2222-4222-8222-222222222222');
+  assert.equal(reconciled.body.productUpdates[0].fields.vonHalskyEditorialSyncPending, false);
+});
+
+test('uzgodnienie katalogu liczy wyłącznie zdalne PUBLISHED i usuwa fałszywe lokalne powiązania', async () => {
+  const products = new Map([
+    ['REAL', {
+      id: 'REAL', externalId: 'REAL-EXT', vonHalskyOfferId: 'REMOTE-1',
+      vonHalskyEditorialSyncState: 'publishing', vonHalskyEditorialSyncPending: true,
+    }],
+    ['STALE', {
+      id: 'STALE', externalId: 'STALE-EXT', vonHalskyOfferId: 'LOCAL-ONLY',
+      vonHalskyEditorialSyncState: 'synced', vonHalskyEditorialSyncPending: false,
+    }],
+  ]);
+  const remoteOffers = [
+    { offerId: 'REMOTE-1', externalId: 'REAL-EXT', status: 'PUBLISHED' },
+    { offerId: 'REMOTE-2', externalId: 'WAIT-EXT', status: 'PENDING' },
+  ];
+  assert.deepEqual(vonHalskyCatalogTruthSummary(remoteOffers), {
+    total: 2,
+    published: 1,
+    pending: 1,
+    rejected: 0,
+    closed: 0,
+    statuses: { PUBLISHED: 1, PENDING: 1 },
+  });
+  const result = await reconcileVonHalskyCatalog({
+    remoteOffers,
+    products: [...products.values()],
+    timestamp: '2026-07-30T08:00:00.000Z',
+    saveProductFields: async ({ productId, fields, remove = [] }) => {
+      const next = { ...products.get(productId), ...structuredClone(fields) };
+      for (const key of remove) delete next[key];
+      products.set(productId, next);
+      return { product: structuredClone(next), publication: { readbackConfirmed: true } };
+    },
+  });
+  assert.equal(result.truth.published, 1);
+  assert.equal(result.counts.staleCleared, 1);
+  assert.equal(products.get('REAL').vonHalskyRemoteStatus, 'PUBLISHED');
+  assert.equal(products.get('REAL').vonHalskyEditorialSyncState, 'synced');
+  assert.equal(products.get('STALE').vonHalskyOfferId, undefined);
+  assert.equal(products.get('STALE').vonHalskyRemoteStatus, 'NOT_FOUND');
+  assert.equal(products.get('STALE').vonHalskyEditorialSyncState, 'decision_required');
 });

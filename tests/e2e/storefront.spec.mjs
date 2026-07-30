@@ -766,6 +766,14 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.locator('.von-halsky-api-readiness article')).toHaveCount(4);
   await expect(page.locator('.von-halsky-settings-layout')).toBeVisible();
   await expect(page.locator('.von-halsky-settings-index')).toContainText('Polityka danych');
+  await expect(page.locator('.von-halsky-settings-index button')).toHaveCount(7);
+  await expect(page.locator('.von-halsky-settings-index button.active')).toHaveText('Tożsamość');
+  await page.locator('.von-halsky-settings-index button', { hasText: 'Agent' }).click();
+  await expect(page.locator('.von-halsky-settings-index button.active')).toHaveText('Agent');
+  await expect(page.locator('#von-halsky-settings-agent')).toBeInViewport();
+  await page.locator('.von-halsky-settings-index button', { hasText: 'Diagnostyka' }).click();
+  await expect(page.locator('.von-halsky-settings-index button.active')).toHaveText('Diagnostyka');
+  await expect(page.locator('#von-halsky-settings-diagnostics')).toBeInViewport();
   await expect(page.getByRole('heading', { name: 'Agent przygotowania ofert' })).toBeVisible();
   await expect(page.getByLabel('Minimalna pewność kategorii')).toHaveValue('82');
   await expect(page.getByRole('heading', { name: 'Źródła i priorytety danych' })).toBeVisible();

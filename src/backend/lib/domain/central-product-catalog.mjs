@@ -127,6 +127,7 @@ function centralCatalogListProduct(product = {}, catalogMeta = {}, { admin = fal
     'vonHalskyResponsibleProducerMissing', 'vonHalskyResponsibleProducerEvidence',
     'vonHalskyContentMode', 'vonHalskyTitle', 'vonHalskyShortDescription', 'vonHalskyDescription',
     'vonHalskyEditorialSyncState', 'vonHalskyEditorialSyncPending', 'vonHalskyEditorialSyncRunId',
+    'vonHalskyRemoteStatus', 'vonHalskyRemotePresent', 'vonHalskyRemoteVerifiedAt',
     'vonHalskyAgentStatus', 'vonHalskyAgentPreparedAt', 'vonHalskyAgentRulesVersion', 'vonHalskyAgentDocumentation',
     'vonHalskyAgentScore', 'vonHalskyAgentIssues', 'vonHalskyAgentWarnings', 'vonHalskyAgentError',
     'vonHalskyAgentCategorySuggestion', 'vonHalskyAgentAttributeCoverage', 'vonHalskyAgentMissingAttributes',
