@@ -6708,6 +6708,7 @@ async function vonHalskyLaduj(force=false,{render=true,processes=true}={}){
   vonHalskyStan.loading=false;
   if(render&&String(trasa()).startsWith("/admin/von-halsky/wystawianie")&&document.querySelector(".von-halsky-listing-workspace"))vonHalskyAktualizujWystawianieDOM();
   else if(render&&String(trasa()).startsWith("/admin/von-halsky/ustawienia")&&typeof vonHalskyAktualizujUstawieniaDOM==="function")vonHalskyAktualizujUstawieniaDOM();
+  else if(render&&String(trasa())==="/admin/von-halsky"&&typeof vonHalskyAktualizujPulpitDOM==="function")vonHalskyAktualizujPulpitDOM();
   else if(render&&String(trasa()).startsWith("/admin/von-halsky"))renderuj();
 }
 async function vonHalskyUzgodnijKatalog({silent=false,repeat=false,render=true}={}){
@@ -6918,8 +6919,8 @@ function vonHalskySubnavHTML(aktywny="pulpit"){
   const stats=vonHalskyStatystyki();
   return adminSubnavHTML([
     {id:"pulpit",href:"#/admin/von-halsky",label:"📊 Pulpit"},
-    {id:"wystawianie",href:"#/admin/von-halsky/wystawianie",label:"🏷️ Wystawianie",badge:stats.doDzialania||""},
     {id:"zamowienia",href:"#/admin/von-halsky/zamowienia",label:"📦 Zamówienia"},
+    {id:"wystawianie",href:"#/admin/von-halsky/wystawianie",label:"🏷️ Wystawianie",badge:stats.doDzialania||""},
     {id:"ustawienia",href:"#/admin/von-halsky/ustawienia",label:"⚙️ Ustawienia"}
   ],aktywny);
 }
@@ -6930,7 +6931,7 @@ function vonHalskyNaglowekHTML(aktywny="pulpit"){
     zamowienia:["📦","Obsługa sprzedaży","Zamówienia InPost+","Po połączeniu kanału nowe zamówienia trafią do tej kolejki jako całe zlecenia, a wysyłka pozostanie w Centrum wysyłek.",[["Połączenie",vonHalskyPolaczenieEtykieta()],["Ostatni odczyt",allegroDataTxt(vonHalskyStan.sync?.lastOrdersAt)],["Kanał","InPost+"]]],
     ustawienia:["⚙️","Konfiguracja kanału","Zaawansowane ustawienia Von Halsky","Integracja, synchronizacja, polityka danych, onboarding i diagnostyka są zarządzane wyłącznie tutaj.",[["Metoda","Bezpośrednie API"],["Interwał",`${vonHalskyStan.settings.syncIntervalMinutes||15} min`],["Dane API",vonHalskyStan.config.configured?"gotowe":"oczekują"]]]
   }[aktywny]||[];
-  return `<section class="panel von-halsky-workspace-head"><div class="von-halsky-workspace-title"><span>${cfg[0]}</span><div><small>${esc(cfg[1])}</small><h1>${esc(cfg[2])}</h1><p>${esc(cfg[3])}</p></div></div><div class="von-halsky-workspace-metrics">${(cfg[4]||[]).map(([label,value])=>`<div><small>${esc(label)}</small><b>${esc(value)}</b></div>`).join("")}</div></section>`;
+  return `<section class="panel von-halsky-workspace-head" data-vh-channel-header><div class="von-halsky-workspace-title"><span>${cfg[0]}</span><div><small>${esc(cfg[1])}</small><h1>${esc(cfg[2])}</h1><p>${esc(cfg[3])}</p></div></div><div class="von-halsky-workspace-metrics">${(cfg[4]||[]).map(([label,value])=>`<div><small>${esc(label)}</small><b>${esc(value)}</b></div>`).join("")}</div></section>`;
 }
 function vonHalskyPolaczenieEtykieta(){
   if(vonHalskyStan.sync?.status==="connected")return "połączone";
@@ -7566,7 +7567,8 @@ async function vonHalskyLadujDashboard(force=false){
   const dashboard=vonHalskyStan.dashboard;
   if(dashboard.loading||(!force&&dashboard.loaded))return;
   dashboard.loading=true;dashboard.error="";
-  if(String(trasa())==="/admin/von-halsky")vonHalskyAktualizujDashboardDOM();
+  const current=String(trasa())==="/admin/von-halsky"?document.querySelector("[data-vh-dashboard]"):null;
+  current?.classList.add("is-refreshing");current?.setAttribute("aria-busy","true");
   try{
     const data=await chmura("von-halsky-dashboard-summary",{timeout:20000});
     Object.assign(dashboard,{loaded:true,orders:data.orders||dashboard.orders,commands:data.commands||dashboard.commands,rejectionReasons:data.rejectionReasons||[],recent:data.recent||[],updatedAt:data.updatedAt||"",error:""});
@@ -7578,11 +7580,14 @@ async function vonHalskyLadujDashboard(force=false){
   if(String(trasa())==="/admin/von-halsky")vonHalskyAktualizujDashboardDOM();
 }
 function vonHalskyAktualizujDashboardDOM(){
-  const current=document.querySelector("[data-vh-dashboard]");
-  if(!current)return false;
-  const template=document.createElement("template");template.innerHTML=vonHalskyDashboardWorkspaceHTML().trim();
-  const next=template.content.firstElementChild;if(!next)return false;
-  current.replaceWith(next);return true;
+  if(typeof vonHalskyPodmienWyspe==="function")return vonHalskyPodmienWyspe("[data-vh-dashboard]",vonHalskyDashboardWorkspaceHTML());
+  return false;
+}
+function vonHalskyAktualizujPulpitDOM(){
+  if(String(trasa())!=="/admin/von-halsky")return false;
+  const header=typeof vonHalskyPodmienWyspe==="function"&&vonHalskyPodmienWyspe("[data-vh-channel-header]",vonHalskyNaglowekHTML("pulpit"));
+  const dashboard=vonHalskyAktualizujDashboardDOM();
+  return Boolean(header||dashboard);
 }
 function vonHalskyDashboardChartHTML(){
   const rows=vonHalskyDziennyZakres(14),max=Math.max(1,...rows.map(row=>row.total));
@@ -7602,8 +7607,7 @@ function vonHalskyDashboardWorkspaceHTML(){
   ];
   const reasons=(dashboard.rejectionReasons||[]).map(item=>`<a href="#/admin/von-halsky/wystawianie" onclick="vonHalskyEtap='aktualizacja';vonHalskyProblem='wszystkie'"><span>!</span><div><b>${esc(item.label)}</b><small>Powód zwrócony przez API</small></div><em>${Number(item.count)||0}</em></a>`).join("");
   const recent=(dashboard.recent||[]).slice(0,8).map(item=>{const data=item.data||{},ok=String(data.status||"").toLowerCase()==="ok"||String(data.status||"").toUpperCase()==="SUCCESS";return `<article class="${ok?"ok":""}"><span>${ok?"✓":"•"}</span><div><b>${esc(data.message||data.type||data.operation||item.kind)}</b><small>${esc(item.kind)} • ${esc(allegroDataTxt(item.updatedAt))}</small></div></article>`;}).join("");
-  return `<div class="von-halsky-dashboard-pro" data-vh-dashboard>
-    ${dashboard.loading?`<div class="von-halsky-inline-loading"><span></span><b>Aktualizuję statystyki kanału…</b></div>`:""}
+  return `<div class="von-halsky-dashboard-pro${dashboard.loading?" is-refreshing":""}" data-vh-dashboard aria-busy="${dashboard.loading?"true":"false"}">
     ${dashboard.error?`<div class="backend-note warning"><b>Nie pobrano statystyk</b><span>${esc(dashboard.error)}</span><button class="btn ghost" onclick="vonHalskyLadujDashboard(true)">Ponów</button></div>`:""}
     <section class="von-halsky-dashboard-kpis">${cards.map(([icon,value,label,note,href,cls])=>`<a class="${cls}" href="${href}"><span>${icon}</span><div><b>${esc(value)}</b><strong>${esc(label)}</strong><small>${esc(note)}</small></div><em>Otwórz →</em></a>`).join("")}</section>
     <section class="von-halsky-dashboard-main">${vonHalskyDashboardChartHTML()}<aside class="panel von-halsky-sync-health"><div class="order-section-head"><div><span class="order-pro-label">Automatyzacja serwera</span><h2>Kondycja synchronizacji</h2></div><span class="lvl ${sync.status==="connected"?"lvl-ok":"lvl-ostrzezenie"}">${esc(vonHalskyPolaczenieEtykieta())}</span></div><dl><div><dt>Ostatnie uzgodnienie</dt><dd>${esc(last?allegroDataTxt(last):"brak")}</dd></div><div><dt>Tryb</dt><dd>${sync.reconciliationMode==="webhook_with_polling_fallback"?"Webhook + kontrola":"Kontrola serwerowa"}</dd></div><div><dt>Regularny interwał</dt><dd>${interval} min</dd></div><div><dt>Przy ofertach oczekujących</dt><dd>3 min</dd></div><div><dt>Polecenia oczekujące</dt><dd>${Number(commands.pending)||0}</dd></div></dl><button class="btn ghost" onclick="vonHalskyOdswiezPelnyStatus().then(()=>vonHalskyLadujDashboard(true))">Uzgodnij teraz</button></aside></section>

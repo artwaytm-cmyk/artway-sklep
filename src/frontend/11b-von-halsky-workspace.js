@@ -77,6 +77,7 @@ async function vonHalskyLaduj(force=false,{render=true,processes=true}={}){
   vonHalskyStan.loading=false;
   if(render&&String(trasa()).startsWith("/admin/von-halsky/wystawianie")&&document.querySelector(".von-halsky-listing-workspace"))vonHalskyAktualizujWystawianieDOM();
   else if(render&&String(trasa()).startsWith("/admin/von-halsky/ustawienia")&&typeof vonHalskyAktualizujUstawieniaDOM==="function")vonHalskyAktualizujUstawieniaDOM();
+  else if(render&&String(trasa())==="/admin/von-halsky"&&typeof vonHalskyAktualizujPulpitDOM==="function")vonHalskyAktualizujPulpitDOM();
   else if(render&&String(trasa()).startsWith("/admin/von-halsky"))renderuj();
 }
 async function vonHalskyUzgodnijKatalog({silent=false,repeat=false,render=true}={}){
@@ -287,8 +288,8 @@ function vonHalskySubnavHTML(aktywny="pulpit"){
   const stats=vonHalskyStatystyki();
   return adminSubnavHTML([
     {id:"pulpit",href:"#/admin/von-halsky",label:"📊 Pulpit"},
-    {id:"wystawianie",href:"#/admin/von-halsky/wystawianie",label:"🏷️ Wystawianie",badge:stats.doDzialania||""},
     {id:"zamowienia",href:"#/admin/von-halsky/zamowienia",label:"📦 Zamówienia"},
+    {id:"wystawianie",href:"#/admin/von-halsky/wystawianie",label:"🏷️ Wystawianie",badge:stats.doDzialania||""},
     {id:"ustawienia",href:"#/admin/von-halsky/ustawienia",label:"⚙️ Ustawienia"}
   ],aktywny);
 }
@@ -299,7 +300,7 @@ function vonHalskyNaglowekHTML(aktywny="pulpit"){
     zamowienia:["📦","Obsługa sprzedaży","Zamówienia InPost+","Po połączeniu kanału nowe zamówienia trafią do tej kolejki jako całe zlecenia, a wysyłka pozostanie w Centrum wysyłek.",[["Połączenie",vonHalskyPolaczenieEtykieta()],["Ostatni odczyt",allegroDataTxt(vonHalskyStan.sync?.lastOrdersAt)],["Kanał","InPost+"]]],
     ustawienia:["⚙️","Konfiguracja kanału","Zaawansowane ustawienia Von Halsky","Integracja, synchronizacja, polityka danych, onboarding i diagnostyka są zarządzane wyłącznie tutaj.",[["Metoda","Bezpośrednie API"],["Interwał",`${vonHalskyStan.settings.syncIntervalMinutes||15} min`],["Dane API",vonHalskyStan.config.configured?"gotowe":"oczekują"]]]
   }[aktywny]||[];
-  return `<section class="panel von-halsky-workspace-head"><div class="von-halsky-workspace-title"><span>${cfg[0]}</span><div><small>${esc(cfg[1])}</small><h1>${esc(cfg[2])}</h1><p>${esc(cfg[3])}</p></div></div><div class="von-halsky-workspace-metrics">${(cfg[4]||[]).map(([label,value])=>`<div><small>${esc(label)}</small><b>${esc(value)}</b></div>`).join("")}</div></section>`;
+  return `<section class="panel von-halsky-workspace-head" data-vh-channel-header><div class="von-halsky-workspace-title"><span>${cfg[0]}</span><div><small>${esc(cfg[1])}</small><h1>${esc(cfg[2])}</h1><p>${esc(cfg[3])}</p></div></div><div class="von-halsky-workspace-metrics">${(cfg[4]||[]).map(([label,value])=>`<div><small>${esc(label)}</small><b>${esc(value)}</b></div>`).join("")}</div></section>`;
 }
 function vonHalskyPolaczenieEtykieta(){
   if(vonHalskyStan.sync?.status==="connected")return "połączone";

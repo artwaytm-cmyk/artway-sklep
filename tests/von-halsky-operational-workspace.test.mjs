@@ -33,11 +33,17 @@ test('pulpit i zamówienia Von Halsky mają jeden responsywny standard operacyjn
   assert.match(operations, /von-halsky-dashboard-summary/);
   assert.match(operations, /von-halsky-records/);
   assert.match(operations, /Eksport CSV/);
+  assert.match(operations, /vonHalskyAktualizujPulpitDOM/);
+  assert.match(operations, /aria-busy/);
+  assert.match(operations, /vonHalskyPodmienWyspe\("\[data-vh-dashboard\]"/);
   assert.doesNotMatch(operations, /\bconfirm\(/);
   assert.doesNotMatch(operations, /\bprompt\(/);
   assert.match(workspace, /typeof vonHalskyOrdersWorkspaceHTML/);
   assert.match(workspace, /typeof vonHalskyDashboardWorkspaceHTML/);
+  assert.match(workspace, /typeof vonHalskyAktualizujPulpitDOM/);
+  assert.ok(workspace.indexOf('label:"📦 Zamówienia"')<workspace.indexOf('label:"🏷️ Wystawianie"'));
   assert.match(style, /\.von-halsky-dashboard-kpis/);
+  assert.match(style, /\.von-halsky-dashboard-pro\.is-refreshing::after/);
   assert.match(style, /\.von-halsky-order-tabbar/);
   assert.match(style, /@media\(max-width:700px\)/);
 });
