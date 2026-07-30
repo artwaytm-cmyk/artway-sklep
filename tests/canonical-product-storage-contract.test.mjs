@@ -104,8 +104,8 @@ test('products.json jest tylko generowaną projekcją PostgreSQL przed wydaniem'
     readFile('scripts/generate-canonical-products-snapshot.mjs', 'utf8'),
   ]);
   assert.match(deploy, /generate-canonical-products-snapshot\.mjs/);
-  assert.match(snapshot, /FROM artway_products/);
-  assert.match(snapshot, /SELECT public_list_data/);
+  assert.match(snapshot, /FROM artway_storefront_products/);
+  assert.match(snapshot, /SELECT list_data/);
   assert.doesNotMatch(snapshot, /SELECT public_data/);
   assert.match(snapshot, /record_status='active'/);
   assert.doesNotMatch(snapshot, /artway_produkty_dodane|localStorage/);
