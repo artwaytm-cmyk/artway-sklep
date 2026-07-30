@@ -375,7 +375,7 @@ requireMarkers('połączonych assets JS', app, [
   '#/admin/magazyn/dostawcy',
   'Próg ostrzeżenia u producenta',
   'stan_u_producenta',
-  '#/admin/allegro/rentownosc',
+  '#/admin/asortyment/oplacalnosc',
   'name="allegroCommissionAmount"',
   'Otwórz istniejącą ofertę',
   'Opłacalność i wyliczenie marżowe',

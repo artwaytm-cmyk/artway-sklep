@@ -14,7 +14,7 @@ test('magazyn ma jedną nawigację pogrupowaną według procesu pracy', () => {
   for (const route of ['dostawcy', 'stany', 'lokalizacje', 'etykiety-qr', 'plan', 'ruchy']) assert.ok(section.includes(`#/admin/magazyn/${route}`));
   assert.match(section, /warehouse-module-nav/);
   assert.match(section, /warehouse-module-links/);
-  assert.match(section, /description:"Zatowarowanie • PZ\/WZ"/);
+  assert.match(section, /label:"Plan zatowarowania",description:"Zakupy • PZ\/WZ"/);
   assert.match(section, /aria-current="page"/);
 });
 

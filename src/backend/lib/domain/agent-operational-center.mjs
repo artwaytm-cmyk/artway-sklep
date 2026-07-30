@@ -163,13 +163,13 @@ export function createAgentOperationalCenter(deps = {}) {
     addPriority('warning', 'allegro', activeAllegro.length, 'Aktywne zamówienia Allegro do kontroli magazynowej', '#/admin/allegro/zamowienia', 'Sprawdź rozpoznanie pozycji i realne braki. Lokalizacje obsługuje osobna kolejka magazynu.');
     addPriority('warning', 'magazyn', warehouseLocationTasks.length, 'Towar w aktywnych zamówieniach bez lokalizacji', '#/admin/magazyn/stany', 'Ustal fizyczne miejsce produktu. Towar pozostaje zarezerwowany i nie blokuje realizacji zamówienia.');
     addPriority('warning', 'producent', supplierLow.length, 'Niski stan produktów u producentów', '#/admin/magazyn/dostawcy', 'Kontroluj najpierw najlepiej sprzedające się produkty.');
-    addPriority('warning', 'produkty', offerTasks.length, 'Otwarte zadania wystawiania produktów na Allegro', '#/admin/allegro/wystawianie', 'Uzupełnij wymagane dane i ponów wystawienie.');
+    addPriority('warning', 'produkty', offerTasks.length, 'Otwarte zadania wystawiania produktów na Allegro', '#/admin/allegro/oferty', 'Uzupełnij wymagane dane i ponów wystawienie.');
     addPriority('warning', 'producenci', supplierOrders.length, 'Otwarte dokumenty zamówień do producentów', '#/admin/magazyn/plan', 'Sprawdź aktualną rewizję przed zatwierdzeniem i wysyłką.');
     addPriority('warning', 'faktury', companyOrdersWithoutInvoice.length, 'Zamówienia firmowe nie mają jeszcze szkicu ani faktury', '#/admin/infakt/zamowienia', 'Sprawdź dane nabywcy i utwórz dokument w inFakt.');
     addPriority('info', 'produkty', producerLinks.length, 'Linki producentów czekają na pobranie danych', '#/admin/agent-ai/plan', 'Ponów analizę linków i uzupełnij kartoteki.');
     const qualitySummary = catalogQualityRec?.report?.summary || {};
     addPriority('warning', 'produkty', Number(qualitySummary.critical || 0) + Number(qualitySummary.orphanEdits || 0), 'Katalog produktów wymaga kontroli jakości', '#/admin/asortyment/jakosc', 'Uruchom audyt katalogu, zastosuj bezpieczne poprawki i uzupełnij wyłącznie brakujące fakty.');
-    if (offerErrorRec?.message || offerErrorRec?.error) addPriority('warning', 'allegro', 1, 'Ostatnia operacja oferty Allegro zakończyła się błędem', '#/admin/allegro/wystawianie', 'Otwórz diagnostykę oferty i przekaż braki Agentowi.');
+    if (offerErrorRec?.message || offerErrorRec?.error) addPriority('warning', 'allegro', 1, 'Ostatnia operacja oferty Allegro zakończyła się błędem', '#/admin/allegro/oferty', 'Otwórz diagnostykę oferty i przekaż braki Agentowi.');
     const openDiagnostics = (Array.isArray(diagnosticsRec?.items) ? diagnosticsRec.items : [])
       .filter((item) => ['open', 'investigating'].includes(String(item?.status || 'open')));
     const diagnosticErrors = openDiagnostics.filter((item) => item?.level === 'blad').length;

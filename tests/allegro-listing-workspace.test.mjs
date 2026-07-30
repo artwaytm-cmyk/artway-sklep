@@ -190,7 +190,8 @@ test("karta produktu wykonuje się z rzeczywistym wspólnym formatowaniem ceny",
 test("wystawianie jest kolejką działań, a nie kopią pełnego katalogu Allegro",async()=>{
   const listing=await read("src/frontend/12b-allegro-listing-workspace.js"),workspace=await read("src/frontend/12c-commerce-catalog-actions.js");
   assert.match(listing,/actionable:availability\.withdrawnNoStock\|\|\(availability\.saleAvailable&&\(noOffer\|\|unresolved\|\|inactive\|\|needsUpdate\)\)/);
-  assert.match(workspace,/all=catalogProducts\.filter\(p=>allegroPublikacjaMetaProduktu\(p\)\.actionable\)/);
+  assert.match(workspace,/all=catalogProducts\.filter\(p=>metaFor\(p\)\.actionable\)/);
+  assert.match(workspace,/metaCache=new Map\(\)/);
   assert.match(workspace,/Widzisz wyłącznie produkty wymagające działania/);
   assert.match(workspace,/Aktualne, poprawne oferty są automatycznie pomijane/);
   assert.match(workspace,/Cała kolejka działań/);

@@ -8,8 +8,8 @@ test('nawigacja Allegro pokazuje tylko liczniki wymagające działania', async (
   const end = source.indexOf('function allegroWorkspaceSectionHTML', start);
   const nav = source.slice(start, end);
 
-  assert.match(nav, /id:"oferty",href:"#\/admin\/allegro\/oferty",label:"🏷️ Oferty"}/);
-  assert.ok(!/id:"oferty"[^\n]+badge:/.test(nav), 'rozmiar katalogu ofert nie może być alarmem w menu');
+  assert.match(nav, /id:"oferty",href:"#\/admin\/allegro\/oferty",label:"🏷️ Oferty i publikacja",badge:zadaniaWystawiania/);
+  assert.doesNotMatch(nav, /badge:st\.oferty/, 'rozmiar katalogu ofert nie może być alarmem w menu');
   assert.match(nav, /badge:st\.aktywneZamowienia/);
   assert.match(nav, /badge:st\.wiadomosci/);
   assert.match(nav, /badge:st\.dyskusje/);
@@ -26,6 +26,6 @@ test('pulpit Allegro rozdziela kolejkę pracy od danych katalogowych', async () 
     assert.ok(source.includes(marker), `brak sekcji pulpitu: ${marker}`);
     assert.ok(css.includes(`.${marker}`), `brak stylu sekcji pulpitu: ${marker}`);
   }
-  assert.match(source, /Liczniki w menu pokazują wyłącznie realną pracę/);
-  assert.match(source, /aktywna==="start"\?"":allegroWorkspaceSectionHTML/);
+  assert.match(source, /zadaniaWystawiania=allegroAktywneZadaniaAgentaOfert\(\)\.length/);
+  assert.match(source, /allegroWorkspaceSectionHTML\(aktywna,mapped,niepodpiete,staty\)/);
 });

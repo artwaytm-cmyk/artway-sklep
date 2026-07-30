@@ -3,7 +3,6 @@ function agentAISubnavHTML(aktywny="pulpit"){
   const aktywneZadania=agentAIAnalizaAktywna(analiza),problemy=aktywneZadania.length;
   const plan=aktywneZadania.length;
   const produktyWdrozenie=agentAIProduktyWdrozenie().length;
-  const zlecenia=(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny).length;
   const producenciGotowi=(producenciKartoteka||[]).filter(p=>p.active!==false&&p.orderEmail).length;
   const pamiec=(agentAIPamiec||[]).length;
   return adminSubnavHTML([
@@ -13,7 +12,6 @@ function agentAISubnavHTML(aktywny="pulpit"){
     {id:"uprawnienia",href:"#/admin/agent-ai/uprawnienia",label:"🛡️ Uprawnienia"},
     {id:"plan",href:"#/admin/agent-ai/plan",label:"🧭 Plan operacyjny",badge:plan||""},
     {id:"produkty",href:"#/admin/agent-ai/produkty",label:"✨ Nowe produkty",badge:produktyWdrozenie||""},
-    {id:"zakupy",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania",badge:zlecenia||""},
     {id:"producenci",href:"#/admin/agent-ai/producenci",label:"🏭 Producenci i kontakt",badge:producenciGotowi||""},
     {id:"pamiec",href:"#/admin/agent-ai/pamiec",label:"🧠 Pamięć",badge:pamiec||""},
     {id:"historia",href:"#/admin/agent-ai/historia",label:"🕓 Historia",badge:Object.values(agentAIPlanCykl||{}).filter(x=>["done","resolved"].includes(x.state)).length||""}
@@ -90,12 +88,9 @@ function allegroSubnavHTML(aktywny="start",st=allegroPanelOperacyjnyStaty()){
   return adminSubnavHTML([
     {id:"start",href:"#/admin/allegro",label:"📊 Pulpit"},
     {id:"zamowienia",href:"#/admin/allegro/zamowienia",label:"📦 Zamówienia",badge:st.aktywneZamowienia||""},
-    {id:"oferty",href:"#/admin/allegro/oferty",label:"🏷️ Oferty"},
-    {id:"wystawianie",href:"#/admin/allegro/wystawianie",label:"🟠 Wystawianie",badge:zadaniaWystawiania||""},
-    {id:"rentownosc",href:"#/admin/allegro/rentownosc",label:"📈 Opłacalność"},
+    {id:"oferty",href:"#/admin/allegro/oferty",label:"🏷️ Oferty i publikacja",badge:zadaniaWystawiania||""},
     {id:"wiadomosci",href:"#/admin/allegro/wiadomosci",label:"💬 Wiadomości",badge:st.wiadomosci||""},
     {id:"dyskusje",href:"#/admin/allegro/dyskusje",label:"🛟 Dyskusje",badge:st.dyskusje||""},
-    {id:"tabela",href:"#/admin/magazyn/plan",label:"📦 Plan zatowarowania"},
     {id:"zgodnosc",href:"#/admin/allegro/zgodnosc",label:"🛡️ Zgodność",badge:st.naruszenia||""},
     {id:"ustawienia",href:"#/admin/allegro/ustawienia",label:"⚙️ Ustawienia"}
   ],aktywny);
@@ -104,15 +99,13 @@ function allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete,st=allegroPanelO
   const cfg={
     start:{ico:"🟠",kicker:"Centrum Allegro",title:"Pulpit integracji",opis:"Jedno miejsce do kontroli zamówień, katalogu ofert, wystawiania i komunikacji.",metryki:[["Połączenie",allegroStan.connected?"Aktywne":"Wymaga uwagi"],["Oferty",st.oferty],["Do obsługi",st.aktywneZamowienia]]},
     zamowienia:{ico:"📦",kicker:"Sprzedaż",title:"Kolejka zamówień Allegro",opis:"Status pochodzi z Allegro. Obsługa sprawdza rozpoznanie, stan i realny brak; fizyczne miejsce prowadzi osobno magazyn.",metryki:[["Do obsługi",st.aktywneZamowienia],["Z brakami",st.braki],["Ostatni odczyt",allegroDataTxt(allegroPodsumowanie.orders?.updated_at)||"oczekuje"]]},
-    oferty:{ico:"🏷️",kicker:"Katalog Allegro",title:"Oferty i powiązania",opis:"Profesjonalny katalog ofert z miniaturą, identyfikatorami, ceną, stanem i kontrolą powiązania z produktem sklepu.",metryki:[["Wszystkie",st.oferty],["Podpięte",mapped],["Do powiązania",niepodpiete]]},
-    wystawianie:{ico:"🟠",kicker:"Publikowanie",title:"Przygotowanie ofert",opis:"Kontrola kompletności danych produktu przed utworzeniem bezpiecznego szkicu oferty.",metryki:[["Produkty",st.produkty],["Zadania agenta",st.zadaniaWystawiania],["Widok","stronicowany"]]},
-    rentownosc:{ico:"📈",kicker:"Finanse produktu",title:"Opłacalność sklepu, Allegro i Von Halsky",opis:"Trzy oddzielne ceny, cele marży i rekomendacje kanałowe. Von Halsky domyślnie dziedziczy cenę Allegro, ale może mieć własną wartość.",metryki:[["Produkty",st.produkty],["Kalkulacja","na aktywnej stronie"],["Cele",`Sklep ${sklepDocelowaMarza}% • Allegro ${allegroDocelowaMarza}% • Von Halsky ${vonHalskyDocelowaMarza}%`]]},
+    oferty:{ico:"🏷️",kicker:"Kompletny proces ofertowy",title:"Oferty i publikacja Allegro",opis:"Dopasowanie produktu, kontrola danych, przygotowanie, publikacja i rejestr istniejących ofert działają w jednym spójnym procesie.",metryki:[["Wszystkie oferty",st.oferty],["Powiązane",mapped],["Do działania",st.zadaniaWystawiania+niepodpiete]]},
     wiadomosci:{ico:"💬",kicker:"Obsługa klienta",title:"Centrum wiadomości",opis:"Wyszukiwanie, filtry, historia korespondencji i wewnętrzne zamykanie spraw bez wysyłania wiadomości.",metryki:[["Wątki",allegroKomunikacjaStaty().threads.length],["Do odpowiedzi",allegroKomunikacjaStaty().threadNeed],["Załatwione",allegroKomunikacjaStaty().threads.filter(allegroKomunikacjaZalatwiona).length]]},
     dyskusje:{ico:"🛟",kicker:"Dyskusje i reklamacje",title:"Obsługa zgłoszeń Allegro",opis:"Oddzielny rejestr dyskusji i reklamacji z filtrami oficjalnego statusu oraz statusem wewnętrznym.",metryki:[["Zgłoszenia",allegroKomunikacjaStaty().issues.length],["Do odpowiedzi",allegroKomunikacjaStaty().issueNeed],["Załatwione",allegroKomunikacjaStaty().issues.filter(allegroKomunikacjaZalatwiona).length]]},
     zgodnosc:{ico:"🛡️",kicker:"Bezpieczeństwo opisów",title:"Ochrona ofert Allegro",opis:"Tarcza wykrywa treści naruszające zasady Allegro, blokuje ryzykowną publikację i naprawia opis bez zmiany jego układu.",metryki:[["Skontrolowane",(allegroStan.complianceAudit?.items||[]).length],["Do naprawy",(allegroStan.complianceAudit?.items||[]).filter(x=>!x.ok&&!x.fixed&&!x.error).length],["Naprawione",(allegroStan.complianceAudit?.items||[]).filter(x=>x.fixed).length]]},
     ustawienia:{ico:"⚙️",kicker:"Konfiguracja",title:"Ustawienia integracji Allegro",opis:"Połączenie OAuth, zakresy uprawnień, środowisko i kontrola synchronizacji w jednym miejscu.",metryki:[["API",allegroStan.configured?"OK":"Brak"],["OAuth",allegroStan.connected?"Połączone":"Rozłączone"],["Środowisko",allegroStan.env||"production"]]}
   }[aktywna]||{};
-  return `<section class="panel allegro-workspace-section"><div class="allegro-workspace-title"><span>${cfg.ico||"🟠"}</span><div><small>${esc(cfg.kicker||"Allegro")}</small><h2>${esc(cfg.title||"Panel Allegro")}</h2><p>${esc(cfg.opis||"")}</p></div></div><div class="allegro-workspace-metrics">${(cfg.metryki||[]).map(([l,v])=>`<div><small>${esc(l)}</small><b>${esc(v)}</b></div>`).join("")}</div></section>`;
+  return `<section class="panel allegro-workspace-section" data-allegro-channel-header><div class="allegro-workspace-title"><span>${cfg.ico||"🟠"}</span><div><small>${esc(cfg.kicker||"Allegro")}</small><h1>${esc(cfg.title||"Panel Allegro")}</h1><p>${esc(cfg.opis||"")}</p></div></div><div class="allegro-workspace-metrics">${(cfg.metryki||[]).map(([l,v])=>`<div><small>${esc(l)}</small><b>${esc(v)}</b></div>`).join("")}</div></section>`;
 }
 function allegroStartPanelHTML(st=allegroPanelOperacyjnyStaty()){
   const sync=st.synchronizacja||{},ostatniaOferta=sync.lastLightSyncAt||sync.lastFullSyncAt,ostatniaKomunikacja=allegroKomunikacja?.updated_at;
@@ -125,8 +118,8 @@ function allegroStartPanelHTML(st=allegroPanelOperacyjnyStaty()){
   const katalogProc=st.oferty?Math.round(st.podpiete/st.oferty*100):100;
   return `<div class="allegro-command-center">
     <section class="panel allegro-command-hero">
-      <div class="allegro-command-hero-copy"><span class="order-pro-label">Centrum operacyjne sprzedaży</span><h1>🟠 Panel Allegro</h1><p>Zlecenia, katalog ofert, publikowanie, opłacalność i obsługa klienta są rozdzielone na jasne etapy. Liczniki w menu pokazują wyłącznie realną pracę — nigdy rozmiar całego katalogu.</p><div class="allegro-command-health"><span class="${allegroStan.connected?"ok":"warning"}"><i></i>${allegroStan.connected?"API Allegro połączone":"Połączenie wymaga uwagi"}</span><span>↻ zamówienia i komunikacja co 15 min</span><span>🏷️ ostatni odczyt ofert: ${esc(ostatniaOferta?allegroDataTxt(ostatniaOferta):"oczekuje")}</span></div></div>
-      <div class="allegro-command-hero-actions"><a class="btn" href="#/admin/allegro/zamowienia">📦 Obsłuż zamówienia${st.aktywneZamowienia?` (${st.aktywneZamowienia})`:""}</a><a class="btn ghost" href="#/admin/allegro/wystawianie">🟠 Wystaw produkt</a><a class="btn ghost" href="#/admin/allegro/ustawienia">⚙️ Ustawienia integracji</a></div>
+      <div class="allegro-command-hero-copy"><span class="order-pro-label">Stan operacyjny kanału</span><h2>Najważniejsze działania na teraz</h2><p>Zamówienia, oferty, publikacja i obsługa klienta mają osobne odpowiedzialności, ale korzystają z jednego potwierdzonego stanu Allegro.</p><div class="allegro-command-health"><span class="${allegroStan.connected?"ok":"warning"}"><i></i>${allegroStan.connected?"API Allegro połączone":"Połączenie wymaga uwagi"}</span><span>↻ zamówienia i komunikacja co 15 min</span><span>🏷️ ostatni odczyt ofert: ${esc(ostatniaOferta?allegroDataTxt(ostatniaOferta):"oczekuje")}</span></div></div>
+      <div class="allegro-command-hero-actions"><a class="btn" href="#/admin/allegro/zamowienia">📦 Obsłuż zamówienia${st.aktywneZamowienia?` (${st.aktywneZamowienia})`:""}</a><a class="btn ghost" href="#/admin/allegro/oferty">🟠 Oferty i publikacja</a><a class="btn ghost" href="#/admin/allegro/ustawienia">⚙️ Ustawienia integracji</a></div>
     </section>
     <div class="orders-stat-grid allegro-command-kpis">
       <a class="order-stat-card stat-filter ${st.aktywneZamowienia?"hot":"money"}" href="#/admin/allegro/zamowienia"><span>📦</span><b>${st.aktywneZamowienia}</b><small>zamówień do obsługi</small></a>
@@ -140,7 +133,7 @@ function allegroStartPanelHTML(st=allegroPanelOperacyjnyStaty()){
       <section class="panel allegro-catalog-overview"><div class="order-section-head"><div><span class="order-pro-label">Katalog sprzedażowy</span><h2>Oferty i powiązania</h2><p class="order-detail-lead">Liczby katalogowe są widoczne tutaj, bez pomarańczowego alarmu w menu.</p></div><a class="btn ghost" href="#/admin/allegro/oferty">Otwórz katalog</a></div><div class="allegro-catalog-progress"><div><b>${katalogProc}%</b><small>ofert podpiętych do produktów sklepu</small></div><progress max="100" value="${katalogProc}"></progress></div><div class="allegro-catalog-numbers"><span><small>Wszystkie oferty</small><b>${st.oferty}</b></span><span class="ok"><small>Podpięte</small><b>${st.podpiete}</b></span><span class="${st.niepodpiete?"warning":"ok"}"><small>Do powiązania</small><b>${st.niepodpiete}</b></span><span><small>Produkty sklepu</small><b>${st.produkty}</b></span></div></section>
     </div>
     <section class="panel allegro-system-overview"><div class="order-section-head"><div><span class="order-pro-label">Automatyka i integracje</span><h2>Stan kanałów Allegro</h2></div><a class="btn ghost" href="#/admin/allegro/ustawienia">Pełne ustawienia</a></div><div class="allegro-system-grid"><article><span class="${allegroStan.connected?"ok":"warning"}">${allegroStan.connected?"✓":"!"}</span><div><b>Połączenie API</b><small>${allegroStan.connected?"Autoryzacja aktywna":"Wymaga ponownego połączenia"}</small></div></article><article><span class="ok">↻</span><div><b>Zamówienia</b><small>automatyczna kontrola co 15 minut</small></div></article><article><span class="ok">🏷️</span><div><b>Oferty</b><small>${esc(ostatniaOferta?`ostatnio ${allegroDataTxt(ostatniaOferta)}`:"pierwsza synchronizacja oczekuje")}</small></div></article><article><span class="${ostatniaKomunikacja?"ok":"neutral"}">💬</span><div><b>Wiadomości i dyskusje</b><small>${esc(ostatniaKomunikacja?`ostatnio ${allegroDataTxt(ostatniaKomunikacja)}`:"brak ostatniego odczytu")}</small></div></article><article><span class="ok">🛡️</span><div><b>Ochrona opisów</b><small>blokada treści niezgodnych przed publikacją</small></div></article><article><span class="neutral">📈</span><div><b>Opłacalność</b><small>ceny sklepu i Allegro liczone osobno</small></div></article></div></section>
-    <section class="panel allegro-module-directory"><div class="order-section-head"><div><span class="order-pro-label">Nawigacja procesowa</span><h2>Wszystkie obszary pracy</h2></div></div><div>${[["📦","Zamówienia","Zlecenia, stan, braki i realizacja","#/admin/allegro/zamowienia"],["🏷️","Oferty","Katalog i powiązania produktów","#/admin/allegro/oferty"],["🟠","Wystawianie","Przygotowanie i publikowanie","#/admin/allegro/wystawianie"],["📈","Opłacalność","Marża, prowizje i rekomendacje","#/admin/allegro/rentownosc"],["💬","Wiadomości","Korespondencja z klientami","#/admin/allegro/wiadomosci"],["🛟","Dyskusje","Reklamacje i sprawy formalne","#/admin/allegro/dyskusje"],["🛡️","Zgodność","Kontrola opisów i bezpieczeństwo","#/admin/allegro/zgodnosc"],["⚙️","Ustawienia","OAuth, synchronizacja i automatyka","#/admin/allegro/ustawienia"]].map(([i,t,d,h])=>`<a href="${h}"><span>${i}</span><div><b>${t}</b><small>${d}</small></div><em>→</em></a>`).join("")}</div></section>
+    <section class="panel allegro-module-directory"><div class="order-section-head"><div><span class="order-pro-label">Nawigacja procesowa</span><h2>Wszystkie obszary pracy</h2></div></div><div>${[["📦","Zamówienia","Zlecenia, stan, braki i realizacja","#/admin/allegro/zamowienia"],["🏷️","Oferty i publikacja","Dopasowanie, przygotowanie, publikacja i rejestr","#/admin/allegro/oferty"],["💬","Wiadomości","Korespondencja z klientami","#/admin/allegro/wiadomosci"],["🛟","Dyskusje","Reklamacje i sprawy formalne","#/admin/allegro/dyskusje"],["🛡️","Zgodność","Kontrola opisów i bezpieczeństwo","#/admin/allegro/zgodnosc"],["⚙️","Ustawienia","OAuth, synchronizacja i automatyka","#/admin/allegro/ustawienia"]].map(([i,t,d,h])=>`<a href="${h}"><span>${i}</span><div><b>${t}</b><small>${d}</small></div><em>→</em></a>`).join("")}</div></section>
   </div>`;
 }
 function allegroPostepUstawienHTML(){
@@ -326,8 +319,9 @@ function rentownoscKanalowaPanelHTML(){
   </div>`;
 }
 function widokAdminAllegro(sekcja="start"){
-  const aktywna=["zamowienia","oferty","wystawianie","rentownosc","wiadomosci","dyskusje","zgodnosc","ustawienia"].includes(sekcja)?sekcja:"start";
-  const zakres=aktywna==="zamowienia"?"orders":["oferty","wystawianie","rentownosc","zgodnosc"].includes(aktywna)?"offers":aktywna==="ustawienia"?"config":"summary";
+  const alias={wystawianie:"oferty"}[sekcja]||sekcja;
+  const aktywna=["zamowienia","oferty","wiadomosci","dyskusje","zgodnosc","ustawienia"].includes(alias)?alias:"start";
+  const zakres=aktywna==="zamowienia"?"orders":["oferty","zgodnosc"].includes(aktywna)?"offers":aktywna==="ustawienia"?"config":"summary";
   allegroLadujJesliTrzeba(zakres);
   if(["wiadomosci","dyskusje"].includes(sekcja)&&!allegroKomunikacja?.updated_at&&!allegroKomunikacja?.sprawdzono&&!allegroStan.ladowanie) setTimeout(()=>allegroWczytajKomunikacje(true),0);
   if(["wiadomosci","dyskusje"].includes(sekcja)) setTimeout(()=>allegroAktywujKafelkiKomunikacji(sekcja==="dyskusje"?"issue":"thread"),0);
@@ -335,9 +329,21 @@ function widokAdminAllegro(sekcja="start"){
   return adminSzkielet("/admin/allegro", `
   <div class="module-page-stack allegro-module-page">
   ${allegroSubnavHTML(aktywna,staty)}
-  ${aktywna==="start"?"":allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete,staty)}
-  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?allegroOfertyTabelaHTML():aktywna==="wystawianie"?allegroWystawianiePanelHTML():aktywna==="rentownosc"?rentownoscKanalowaPanelHTML():aktywna==="wiadomosci"?allegroKomunikacjaPanelHTML("thread"):aktywna==="dyskusje"?allegroKomunikacjaPanelHTML("issue"):aktywna==="zgodnosc"?allegroZgodnoscPanelHTML():aktywna==="ustawienia"?allegroUstawieniaPanelHTML():allegroStartPanelHTML(staty)}
+  ${allegroWorkspaceSectionHTML(aktywna,mapped,niepodpiete,staty)}
+  ${aktywna==="zamowienia"?allegroZamowieniaTabelaHTML():aktywna==="oferty"?(typeof allegroOfertyIPublikacjaHTML==="function"?allegroOfertyIPublikacjaHTML():allegroWystawianiePanelHTML()):aktywna==="wiadomosci"?allegroKomunikacjaPanelHTML("thread"):aktywna==="dyskusje"?allegroKomunikacjaPanelHTML("issue"):aktywna==="zgodnosc"?allegroZgodnoscPanelHTML():aktywna==="ustawienia"?allegroUstawieniaPanelHTML():allegroStartPanelHTML(staty)}
   ${allegroStan.error?`<div class="backend-note allegro-info-bottom" style="border-color:#fed7aa;background:#fff7ed;color:#9a3412"><b>Allegro:</b> ${esc(allegroStan.error)}</div>`:""}
   </div>
   `);
+}
+
+function widokAdminOplacalnosc(){
+  allegroLadujJesliTrzeba("offers");
+  const all=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  return asortymentSzkielet("oplacalnosc",`<div class="assortment-profitability-workspace">
+    <section class="panel assortment-profitability-head">
+      <div class="assortment-profitability-title"><span>📈</span><div><small>Asortyment • finanse produktów</small><h1>Opłacalność wszystkich kanałów</h1><p>Ceny zakupu, prowizje, koszty, cele marżowe i rekomendacje sklepu, Allegro oraz Von Halsky znajdują się przy wspólnej kartotece produktów.</p></div></div>
+      <div class="assortment-profitability-metrics"><div><small>Produkty</small><b>${esc(all.length)}</b></div><div><small>Kanały</small><b>3</b></div><div><small>Zapis</small><b>PostgreSQL</b></div></div>
+    </section>
+    ${rentownoscKanalowaPanelHTML()}
+  </div>`);
 }

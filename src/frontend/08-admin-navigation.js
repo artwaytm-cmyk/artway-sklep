@@ -45,7 +45,7 @@ function personalizacjaSzkielet(tab, tresc){
 }
 /* Asortyment = produkty, katalogi, mapowanie i rabaty w JEDNYM dziale z zakładkami */
 const TABY_ASORTYMENTU = [
-  ["produkty","🏷️ Produkty"], ["jakosc","🧪 Jakość katalogu"], ["kategorie","🗂️ Katalogi"], ["mapowanie","🧩 Mapowanie"], ["rabaty","🎁 Kody rabatowe"], ["opinie","⭐ Opinie"]
+  ["produkty","🏷️ Produkty"], ["jakosc","🧪 Jakość katalogu"], ["kategorie","🗂️ Katalogi"], ["mapowanie","🧩 Mapowanie"], ["oplacalnosc","📈 Opłacalność"], ["rabaty","🎁 Kody rabatowe"], ["opinie","⭐ Opinie"]
 ];
 function asortymentSzkielet(tab, tresc){
   return adminSzkielet("/admin/asortyment", `

@@ -510,10 +510,14 @@ test('właściciel nadaje, odbiera i usuwa konto bez lokalnego pozornego zapisu'
 });
 
 test('główne działy administratora mają jeden profesjonalny szablon i nie tworzą poziomego suwaka', async ({ page }) => {
+  // Kontrola świadomie otwiera kolejno jedenaście niezależnych, dynamicznie
+  // ładowanych obszarów. Limit pojedynczej podstrony nadal wynosi 12 sekund;
+  // większy budżet dotyczy wyłącznie całego przekrojowego przebiegu.
+  test.setTimeout(120_000);
   const assertRuntime = observeRuntime(page);
   await loginAdmin(page);
   const routes = [
-    '/admin/allegro/wystawianie',
+    '/admin/allegro/oferty',
     '/admin/asortyment/produkty',
     '/admin/magazyn/stany',
     '/admin/zamowienia',
@@ -536,10 +540,11 @@ test('główne działy administratora mają jeden profesjonalny szablon i nie tw
   assertRuntime();
 });
 
-test('Wystawianie rozdziela brak towaru od szkiców i nie pokazuje ogólnego filtra nieaktywnych', async ({ page }) => {
+test('Oferty i publikacja rozdzielają brak towaru od szkiców i nie pokazują ogólnego filtra nieaktywnych', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
   await loginAdmin(page);
-  await page.goto('/#/admin/allegro/wystawianie');
+  await page.goto('/#/admin/allegro/oferty');
+  await expect(page.locator('[data-allegro-offers-mode="publikacja"]')).toBeVisible();
   const queueFilter = page.getByLabel('Dokładny stan kolejki');
   await expect(queueFilter).toBeVisible();
   for (const label of ['Bez oferty Allegro', 'Szkice do aktywacji', 'Zakończone z innego powodu', 'Wycofane — brak towaru']) {

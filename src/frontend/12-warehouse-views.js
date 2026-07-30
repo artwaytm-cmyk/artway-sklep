@@ -10,7 +10,7 @@ function magazynSubnavHTML(aktywny="pulpit"){
     {id:"pulpit",href:"#/admin/magazyn",icon:"📊",label:"Pulpit",description:"Priorytety"},
     {id:"dostawcy",href:"#/admin/magazyn/dostawcy",icon:"🏭",label:"Dostępność",description:"Producent • sprzedaż • pokrycie",badge:braki||""},
     {id:"stany",href:"#/admin/magazyn/stany",icon:"📦",label:"Stany",description:"Fizyczny towar teraz"},
-    {id:"plan",href:"#/admin/magazyn/plan",icon:"📥",label:"Plan i dokumenty",description:"Zatowarowanie • PZ/WZ",badge:planAkcje||""},
+    {id:"plan",href:"#/admin/magazyn/plan",icon:"📥",label:"Plan zatowarowania",description:"Zakupy • PZ/WZ",badge:planAkcje||""},
     {id:"lokalizacje",href:"#/admin/magazyn/lokalizacje",icon:"🗺️",label:"Lokalizacje",description:"Obszary • regały • półki",badge:bezLok||""},
     {id:"etykiety-qr",href:"#/admin/magazyn/etykiety-qr",icon:"🏷️",label:"Etykiety QR",description:"Druk i skanowanie"},
     {id:"ruchy",href:"#/admin/magazyn/ruchy",icon:"🧾",label:"Ruchy i ustawienia",description:"Audyt magazynu"}

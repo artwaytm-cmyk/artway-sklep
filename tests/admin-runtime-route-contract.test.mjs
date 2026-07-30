@@ -28,9 +28,28 @@ test('trasa asortymentu ładuje widok produktów z pakietu inventory', () => {
 
 test('każda widoczna podstrona Allegro ma jawny odbiornik routera', async () => {
   const router = await read('src/frontend/06-router-and-storefront.js');
-  for (const section of ['zamowienia', 'oferty', 'wystawianie', 'rentownosc', 'wiadomosci', 'dyskusje', 'zgodnosc', 'ustawienia']) {
+  for (const section of ['zamowienia', 'oferty', 'wiadomosci', 'dyskusje', 'zgodnosc', 'ustawienia']) {
     assert.match(router, new RegExp(`t===["']\\/admin\\/allegro\\/${section}["']`), `brak trasy Allegro: ${section}`);
   }
+  assert.match(router, /t==="\/admin\/allegro\/wystawianie"[\s\S]+replaceState\([^;]+#\/admin\/allegro\/oferty/);
+  assert.match(router, /t==="\/admin\/allegro\/rentownosc"[\s\S]+replaceState\([^;]+#\/admin\/asortyment\/oplacalnosc/);
+  assert.match(router, /s==="oplacalnosc"\?widokAdminOplacalnosc\(\)/);
+});
+
+test('Allegro ma jeden widoczny proces ofertowy, a finanse i zatowarowanie są w swoich działach', async () => {
+  const [workspace, navigation, warehouse, unified] = await Promise.all([
+    read('src/frontend/11-allegro-workspace.js'),
+    read('src/frontend/08-admin-navigation.js'),
+    read('src/frontend/12-warehouse-views.js'),
+    read('src/frontend/12c-commerce-catalog-actions.js'),
+  ]);
+  assert.match(workspace, /label:"🏷️ Oferty i publikacja"/);
+  assert.doesNotMatch(workspace, /label:"🟠 Wystawianie"/);
+  assert.doesNotMatch(workspace, /label:"📈 Rentowność"/);
+  assert.match(navigation, /\["oplacalnosc","📈 Opłacalność"\]/);
+  assert.match(warehouse, /icon:"📥",label:"Plan zatowarowania"/);
+  assert.match(unified, /function allegroOfertyIPublikacjaHTML\(/);
+  assert.match(unified, /Dopasowanie[\s\S]+Kontrola danych[\s\S]+Publikacja[\s\S]+Potwierdzenie/);
 });
 
 test('trasy panelu ładują jawnie moduły wymagane przez swoje widoki', async () => {
@@ -38,6 +57,7 @@ test('trasy panelu ładują jawnie moduły wymagane przez swoje widoki', async (
   assert.match(router, /t==="\/admin"\|\|t\.startsWith\("\/admin\/pulpit"\)\)add\("shipping","commerce","communications","inventory","system"\)/);
   assert.match(router, /t\.startsWith\("\/admin\/agent-ai"\)\)add\("agent","warehouse","commerce","communications","inventory","productEditor"\)/);
   assert.match(router, /t\.startsWith\("\/admin\/allegro"\)[^\n]+add\("agent","warehouse","commerce","communications","inventory","productEditor"\)/);
+  assert.match(router, /\["\/admin\/allegro\/oferty","\/admin\/allegro\/wystawianie"\]\.includes\(t\)\)add\("commerce","communications","inventory"\)/);
   assert.match(router, /\["\/admin\/magazyn\/lokalizacje","\/admin\/magazyn\/etykiety-qr"\][^\n]+add\("warehouse"\)/);
   assert.match(router, /t==="\/diagnostyka"\|\|t==="\/admin\/system\/diagnostyka"\)add\("agent","warehouse","shipping","commerce","commerceSettings","communications","inventory","seo","catalog","personalization","system","vonHalsky"\)/);
   assert.match(router, /t\.startsWith\("\/admin\/system"\)\)add\("system"\)/);

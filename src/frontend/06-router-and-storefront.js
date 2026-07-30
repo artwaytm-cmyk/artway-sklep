@@ -12,6 +12,15 @@ const adminObietniceStyle = new Map();
 const sklepZaladowaneModuly = new Set();
 const sklepObietniceModulow = new Map();
 let adminStylePromise = null;
+let adminRenderPoZaladowaniuFrame = 0;
+function adminZaplanujRenderPoZaladowaniu(){
+  if(adminRenderPoZaladowaniuFrame)return;
+  adminRenderPoZaladowaniuFrame=requestAnimationFrame(()=>{
+    adminRenderPoZaladowaniuFrame=0;
+    const route=trasa();
+    if((route.startsWith("/admin")||route==="/diagnostyka")&&adminModulyTrasyGotowe(route))renderuj();
+  });
+}
 function adminArkuszStylowGotowy(id=""){
   const link=document.getElementById(id);
   if(!link?.isConnected||!link.sheet)return false;
@@ -41,6 +50,7 @@ function adminModulyDlaTrasy(route=""){
   else if(t.startsWith("/admin/magazyn"))add("agent","warehouse","commerce","inventory");
   else if(t.startsWith("/admin/wysylki"))add("agent","warehouse","shipping","commerce","inventory");
   else if(t.startsWith("/admin/von-halsky"))add("inventory","vonHalsky");
+  else if(["/admin/allegro/oferty","/admin/allegro/wystawianie"].includes(t))add("commerce","communications","inventory");
   else if(["/admin/allegro/komunikacja","/admin/allegro/wiadomosci","/admin/allegro/dyskusje"].includes(t))add("agent","warehouse","commerce","communications","inventory");
   else if(t.startsWith("/admin/allegro")||t.startsWith("/admin/zamowien")||t.startsWith("/admin/zamowienie/")||t.startsWith("/admin/klient")){add("agent","warehouse","commerce","communications","inventory","productEditor");if(t==="/admin/allegro/ustawienia")add("commerceSettings");}
   else if(t.startsWith("/admin/infakt"))add("inventory");
@@ -94,7 +104,7 @@ function zaladujAdminStyle(version){
     document.getElementById("artwayAdminStyles")?.remove();
     const link=document.createElement("link");link.id="artwayAdminStyles";link.rel="stylesheet";link.dataset.loading="true";link.href=`/assets/admin.css?v=${encodeURIComponent(version)}${proba?`&retry=${Date.now()}`:""}`;
     const blad=()=>{link.remove();if(proba<2)setTimeout(()=>wczytaj(proba+1).then(resolve,reject),250*(proba+1));else reject(new Error("Nie udało się zastosować stylów panelu administratora"));};
-    link.onload=()=>requestAnimationFrame(()=>{link.dataset.loading="false";adminBazowyArkuszGotowy()?resolve():blad();});
+    link.onload=()=>requestAnimationFrame(()=>{link.dataset.loading="false";if(adminBazowyArkuszGotowy()){adminZaplanujRenderPoZaladowaniu();resolve();}else blad();});
     link.onerror=blad;document.head.appendChild(link);
   });
   adminStylePromise=wczytaj().catch(error=>{adminStylePromise=null;throw error;});
@@ -108,7 +118,7 @@ function zaladujAdminModul(modul,version){
   const id=`artwayAdminModule-${modul}`,wczytaj=(proba=0)=>new Promise((resolve,reject)=>{
     document.getElementById(id)?.remove();
     const script=document.createElement("script");script.id=id;script.src=`/assets/${asset}.js?v=${encodeURIComponent(version)}${proba?`&retry=${Date.now()}`:""}`;script.async=true;script.fetchPriority="high";
-    script.onload=()=>{adminZaladowaneModuly.add(modul);if(modul==="core")window.__artwayAdminReady=true;resolve();};
+    script.onload=()=>{adminZaladowaneModuly.add(modul);if(modul==="core")window.__artwayAdminReady=true;adminZaplanujRenderPoZaladowaniu();resolve();};
     script.onerror=()=>{script.remove();if(proba<1)setTimeout(()=>wczytaj(proba+1).then(resolve,reject),250);else reject(new Error(`Nie udało się wczytać modułu panelu: ${modul}`));};document.body.appendChild(script);
   });
   const promise=wczytaj().catch(error=>{adminObietniceModulow.delete(modul);document.getElementById(id)?.remove();throw error;});
@@ -124,7 +134,7 @@ function zaladujAdminStyleModul(modul,version){
     document.getElementById(id)?.remove();
     const link=document.createElement("link");link.id=id;link.rel="stylesheet";link.dataset.loading="true";link.href=`/assets/${asset}.css?v=${encodeURIComponent(version)}${proba?`&retry=${Date.now()}`:""}`;
     const blad=()=>{link.remove();if(proba<2)setTimeout(()=>wczytaj(proba+1).then(resolve,reject),250*(proba+1));else reject(new Error(`Nie udało się zastosować stylów modułu ${modul}`));};
-    link.onload=()=>requestAnimationFrame(()=>{link.dataset.loading="false";if(adminArkuszModuluGotowy(modul)){adminZaladowaneStyle.add(modul);resolve();}else blad();});
+    link.onload=()=>requestAnimationFrame(()=>{link.dataset.loading="false";if(adminArkuszModuluGotowy(modul)){adminZaladowaneStyle.add(modul);adminZaplanujRenderPoZaladowaniu();resolve();}else blad();});
     link.onerror=blad;
     document.head.appendChild(link);
   });
@@ -133,7 +143,7 @@ function zaladujAdminStyleModul(modul,version){
 }
 function zaladujPanelAdmina(route=trasa()){
   const version = document.querySelector('meta[name="artway-version"]')?.content || "dev";
-  const modules=adminModulyDlaTrasy(route);
+  const routeKey=String(route||"").split("?")[0],modules=adminModulyDlaTrasy(routeKey);
   const core=modules.includes("core")?zaladujAdminModul("core",version):Promise.resolve();
   // Moduły panelu mają zależności od wspólnego UI i powłoki. Dynamiczne
   // skrypty z async=false uruchamiane równolegle potrafiły pozostać w kolejce
@@ -141,7 +151,13 @@ function zaladujPanelAdmina(route=trasa()){
   // następny moduł zaczyna się dopiero po potwierdzonym onload poprzedniego.
   const scripts=core.then(()=>modules
     .filter(module=>module!=="core")
-    .reduce((kolejka,module)=>kolejka.then(()=>zaladujAdminModul(module,version)),Promise.resolve()));
+    .reduce((kolejka,module)=>kolejka.then(()=>{
+      // Nie kontynuujemy ciężkiego łańcucha poprzedniej podstrony. Moduł już
+      // rozpoczęty kończy bezpiecznie ładowanie, ale następne dobiera aktualna
+      // trasa. Dzięki temu szybkie przejście z logowania nie blokuje Allegro.
+      if(trasa()!==routeKey)return;
+      return zaladujAdminModul(module,version);
+    }),Promise.resolve()));
   const styles=Promise.all(modules.map(module=>zaladujAdminStyleModul(module,version)));
   return Promise.all([zaladujAdminStyle(version),styles,scripts]).then(result=>{if(typeof zaplanujWstepneLadowaniePanelu==="function")zaplanujWstepneLadowaniePanelu(version);return result;});
 }
@@ -368,9 +384,15 @@ function renderuj(){
       else if(t.startsWith("/admin/zamowienie/")) w.innerHTML = widokAdminZamowienie(decodeURIComponent(t.split("/")[3]||""));
       else if(t==="/admin/allegro") w.innerHTML = widokAdminAllegro();
       else if(t==="/admin/allegro/zamowienia") w.innerHTML = widokAdminAllegro("zamowienia");
-      else if(t==="/admin/allegro/oferty") w.innerHTML = widokAdminAllegro("oferty");
-      else if(t==="/admin/allegro/wystawianie") w.innerHTML = widokAdminAllegro("wystawianie");
-      else if(t==="/admin/allegro/rentownosc") w.innerHTML = widokAdminAllegro("rentownosc");
+      else if(t==="/admin/allegro/oferty") w.innerHTML=widokAdminAllegro("oferty");
+      else if(t==="/admin/allegro/wystawianie"){
+        history.replaceState(null,"",`${location.pathname}${location.search}#/admin/allegro/oferty`);
+        w.innerHTML = widokAdminAllegro("oferty");
+      }
+      else if(t==="/admin/allegro/rentownosc"){
+        history.replaceState(null,"",`${location.pathname}${location.search}#/admin/asortyment/oplacalnosc`);
+        w.innerHTML = widokAdminOplacalnosc();
+      }
       else if(t==="/admin/allegro/komunikacja" || t==="/admin/allegro/wiadomosci") w.innerHTML = widokAdminAllegro("wiadomosci");
       else if(t==="/admin/allegro/dyskusje") w.innerHTML = widokAdminAllegro("dyskusje");
       else if(t==="/admin/allegro/zgodnosc") w.innerHTML = widokAdminAllegro("zgodnosc");
@@ -401,7 +423,7 @@ function renderuj(){
       else if(t.startsWith("/admin/seo/")) w.innerHTML = widokAdminSEO(t.split("/")[3]||"pulpit");
       else if(t.startsWith("/admin/asortyment/")){
         const s=t.split("/")[3]||"produkty";
-        w.innerHTML = s==="jakosc"?widokAdminJakoscKatalogu():s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="rabaty"?widokAdminRabatyZaawansowane():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
+        w.innerHTML = s==="jakosc"?widokAdminJakoscKatalogu():s==="kategorie"?widokAdminKategorie():s==="mapowanie"?widokAdminMapowanie():s==="oplacalnosc"?widokAdminOplacalnosc():s==="rabaty"?widokAdminRabatyZaawansowane():s==="opinie"?widokAdminOpinie():widokAdminProdukty();
       }
       else if(t.startsWith("/admin/personalizacja/")){
         const s=t.split("/")[3]||"home";
