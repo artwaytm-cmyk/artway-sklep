@@ -155,6 +155,7 @@ export async function reconcileVonHalskyCatalog({
     unchanged: 0,
   };
   const currentMs = Date.parse(timestamp) || Date.now();
+  const cycleId = text(timestamp, 40).replace(/[^0-9A-Za-z_-]/g, '') || String(currentMs);
   const assignments = chooseRemoteProductAssignments(products, index);
   for (const product of asArray(products)) {
     const productId = text(product?.id, 160);
@@ -185,7 +186,7 @@ export async function reconcileVonHalskyCatalog({
         productId,
         fields,
         remove,
-        mutationId: `von-halsky-reconcile-duplicate:${productId}:${remote.offerId}`,
+        mutationId: `von-halsky-reconcile-duplicate:${productId}:${remote.offerId}:${cycleId}`,
         actor: 'von-halsky-api',
         area: 'von-halsky-reconciliation',
       });
@@ -205,7 +206,7 @@ export async function reconcileVonHalskyCatalog({
       const saved = await saveProductFields({
         productId,
         fields,
-        mutationId: `von-halsky-reconcile:${productId}:${remote.offerId}:${remote.status}`,
+        mutationId: `von-halsky-reconcile:${productId}:${remote.offerId}:${remote.status}:${cycleId}`,
         actor: 'von-halsky-api',
         area: 'von-halsky-reconciliation',
       });
@@ -252,7 +253,7 @@ export async function reconcileVonHalskyCatalog({
       const saved = await saveProductFields({
         productId,
         fields,
-        mutationId: `von-halsky-reconcile-awaiting:${productId}:${localOfferId || 'command'}`,
+        mutationId: `von-halsky-reconcile-awaiting:${productId}:${localOfferId || 'command'}:${cycleId}`,
         actor: 'von-halsky-api',
         area: 'von-halsky-reconciliation',
       });
@@ -279,7 +280,7 @@ export async function reconcileVonHalskyCatalog({
       productId,
       fields,
       remove,
-      mutationId: `von-halsky-reconcile-missing:${productId}:${localOfferId || 'command'}`,
+      mutationId: `von-halsky-reconcile-missing:${productId}:${localOfferId || 'command'}:${cycleId}`,
       actor: 'von-halsky-api',
       area: 'von-halsky-reconciliation',
     });

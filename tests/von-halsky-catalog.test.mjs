@@ -1046,6 +1046,7 @@ test('publikacja wskazanego produktu czeka na odczyt API, a potem zapisuje trwa�
 });
 
 test('uzgodnienie katalogu liczy wyłącznie zdalne PUBLISHED i usuwa fałszywe lokalne powiązania', async () => {
+  const mutationIds = [];
   const products = new Map([
     ['REAL', {
       id: 'REAL', externalId: 'REAL-EXT', vonHalskyOfferId: 'REMOTE-1',
@@ -1072,16 +1073,18 @@ test('uzgodnienie katalogu liczy wyłącznie zdalne PUBLISHED i usuwa fałszywe 
     closed: 0,
     statuses: { PUBLISHED: 1, PENDING: 1 },
   });
+  const saveProductFields = async ({ productId, fields, remove = [], mutationId }) => {
+    mutationIds.push(mutationId);
+    const next = { ...products.get(productId), ...structuredClone(fields) };
+    for (const key of remove) delete next[key];
+    products.set(productId, next);
+    return { product: structuredClone(next), publication: { readbackConfirmed: true } };
+  };
   const result = await reconcileVonHalskyCatalog({
     remoteOffers,
     products: [...products.values()],
     timestamp: '2026-07-30T08:00:00.000Z',
-    saveProductFields: async ({ productId, fields, remove = [] }) => {
-      const next = { ...products.get(productId), ...structuredClone(fields) };
-      for (const key of remove) delete next[key];
-      products.set(productId, next);
-      return { product: structuredClone(next), publication: { readbackConfirmed: true } };
-    },
+    saveProductFields,
   });
   assert.equal(result.truth.published, 1);
   assert.equal(result.counts.staleCleared, 1);
@@ -1093,4 +1096,14 @@ test('uzgodnienie katalogu liczy wyłącznie zdalne PUBLISHED i usuwa fałszywe 
   assert.equal(products.get('STALE').vonHalskyEditorialSyncState, 'decision_required');
   assert.equal(products.get('DUPLICATE').vonHalskyRemoteStatus, 'DUPLICATE_MAPPING');
   assert.equal(products.get('DUPLICATE').vonHalskyRemotePresent, false);
+  const firstCycleMutationIds = new Set(mutationIds);
+  mutationIds.length = 0;
+  await reconcileVonHalskyCatalog({
+    remoteOffers,
+    products: [...products.values()],
+    timestamp: '2026-07-30T08:15:00.000Z',
+    saveProductFields,
+  });
+  assert.ok(mutationIds.length >= 2);
+  assert.ok(mutationIds.every((mutationId) => !firstCycleMutationIds.has(mutationId)));
 });
