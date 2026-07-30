@@ -13,27 +13,37 @@ export const CENTRAL_IMPORTED_PRODUCT_MATCH_SQL = `
     FROM artway_product_payloads x
     JOIN artway_products p USING(namespace,product_id)
     WHERE p.namespace=$1 AND p.record_status<>'removed'
-      AND $2<>'' AND x.data->>'importItemKey'=$2
+      AND $2<>''
+      AND COALESCE(x.data->>'importItemKey','')<>''
+      AND x.data->>'importItemKey'=$2
     UNION ALL
     SELECT x.data,'source_url',2,p.updated_at
     FROM artway_product_payloads x
     JOIN artway_products p USING(namespace,product_id)
     WHERE p.namespace=$1 AND p.record_status<>'removed'
       AND $3<>'' AND (
-        x.data->>'sourceUrl'=$3 OR x.data->>'producentUrl'=$3
+        (
+          COALESCE(x.data->>'sourceUrl','')<>''
+          AND x.data->>'sourceUrl'=$3
+        ) OR (
+          COALESCE(x.data->>'producentUrl','')<>''
+          AND x.data->>'producentUrl'=$3
+        )
       )
     UNION ALL
     SELECT x.data,'gtin',3,p.updated_at
     FROM artway_products p
     JOIN artway_product_payloads x USING(namespace,product_id)
     WHERE p.namespace=$1 AND p.record_status<>'removed'
-      AND $4<>'' AND p.ean=$4
+      AND $4<>'' AND p.ean<>'' AND p.ean=$4
     UNION ALL
     SELECT x.data,'external_id',4,p.updated_at
     FROM artway_products p
     JOIN artway_product_payloads x USING(namespace,product_id)
     WHERE p.namespace=$1 AND p.record_status<>'removed'
-      AND $5<>'' AND (p.external_id=$5 OR p.sku=$5)
+      AND $5<>'' AND (
+        p.external_id=$5 OR (p.sku<>'' AND p.sku=$5)
+      )
     UNION ALL
     SELECT x.data,'manufacturer_code',5,p.updated_at
     FROM artway_product_payloads x
@@ -41,6 +51,7 @@ export const CENTRAL_IMPORTED_PRODUCT_MATCH_SQL = `
     WHERE p.namespace=$1 AND p.record_status<>'removed'
       AND $6<>'' AND $7<>''
       AND regexp_replace(lower(p.producer),'[^a-z0-9]+','','g')=$6
+      AND COALESCE(x.data->>'kodProducenta',x.data->>'mpn','')<>''
       AND regexp_replace(lower(COALESCE(
         x.data->>'kodProducenta',x.data->>'mpn',''
       )),'[^a-z0-9]+','','g')=$7
