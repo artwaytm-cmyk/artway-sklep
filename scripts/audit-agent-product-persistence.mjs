@@ -49,7 +49,7 @@ for (const row of rows) {
     if (migrateFingerprint) report.migratedFingerprints += 1;
     if (closeRepairSignal) report.closedRepairSignals += 1;
     if (apply) {
-      const mutationId = `agent-quality-ready-cleanup-v1:${row.product_id}`;
+      const mutationId = `agent-quality-ready-cleanup-v2:${row.product_id}:${timestamp.replace(/\D/g, '')}`;
       const fields = {
         ...(migrateFingerprint ? { allegroAgentPreparationFingerprint: fingerprint } : {}),
         ...(closeRepairSignal ? {
@@ -96,7 +96,7 @@ for (const row of rows) {
     ...(store.ready ? [] : ['redakcja opisu sklepu przez Agenta']),
     ...(allegro.ready ? [] : ['redakcja opisu Allegro przez Agenta']),
   ];
-  const mutationId = `agent-quality-repair-v1:${row.product_id}`;
+  const mutationId = `agent-quality-repair-v2:${row.product_id}:${timestamp.replace(/\D/g, '')}`;
   await catalog.patchProductFields(row.product_id, {
     contentEditorial: {
       ...editorial,
