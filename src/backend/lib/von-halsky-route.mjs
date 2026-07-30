@@ -254,9 +254,10 @@ export function createVonHalskyRoute({
 
   async function updateProductPublication(products = [], status = 'confirmed', details = {}) {
     const rows = (Array.isArray(products) ? products : []).filter((product) => product?.id !== undefined && product?.id !== null);
-    if (!rows.length) return;
+    if (!rows.length) return [];
     if (typeof saveProductFields === 'function') {
       const timestamp = details.timestamp || new Date().toISOString();
+      const confirmations = [];
       for (const product of rows) {
         const id = String(product.id);
         const fields = buildEditorialPublicationPatch({
@@ -269,15 +270,21 @@ export function createVonHalskyRoute({
           error: details.error || '',
           nextRetryAt: details.nextRetryAt || '',
         });
-        await saveProductFields({
+        const saved = await saveProductFields({
           productId: id,
           fields,
           mutationId: `von-halsky-publication:${id}:${details.receiptId || timestamp}`,
           actor: 'von-halsky-api',
           area: 'von-halsky-publication',
         });
+        confirmations.push({
+          productId: id,
+          fields,
+          readbackConfirmed: saved?.publication?.readbackConfirmed === true,
+          confirmedAt: timestamp,
+        });
       }
-      return;
+      return confirmations;
     }
     throw Object.assign(
       new Error('Centralna kartoteka produktów nie jest dostępna; potwierdzenie Von Halsky nie może zostać zapisane zastępczo.'),

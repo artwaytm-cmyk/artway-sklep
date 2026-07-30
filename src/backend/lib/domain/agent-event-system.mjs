@@ -96,6 +96,8 @@ export function createAgentEventSystem({
     route,
     publicOrigin = 'https://artwaytm.pl',
     adminToken = '',
+    saveProductFields = null,
+    getProduct = null,
   } = {}) {
     return async (task = {}) => {
       const productId = String(task.productId || '');
@@ -129,12 +131,48 @@ export function createAgentEventSystem({
         error.code = 'von_halsky_product_not_ready';
         throw error;
       }
+      const product = typeof getProduct === 'function' ? await getProduct(productId) : null;
+      const states = product?.contentEditorial?.channelStates || {};
+      const channelsReady = states.store?.status === 'ready'
+        && states.allegro?.status === 'ready'
+        && (
+          states.vonHalsky?.status === 'ready'
+          || String(product?.vonHalskyAgentStatus || '').toLowerCase() === 'ready'
+        );
+      let qualityConfirmation = null;
+      if (channelsReady && typeof saveProductFields === 'function') {
+        const confirmedAt = new Date().toISOString();
+        const fields = {
+          agentQualityReviewStatus: 'confirmed',
+          agentQualityConfirmedAt: confirmedAt,
+          agentQualityReadbackConfirmed: true,
+          agentQualityRunId: String(task.id || result.runId || ''),
+          agentQualityInputFingerprint: String(product?.contentEditorial?.inputFingerprint || ''),
+          agentQualityChannels: {
+            store: { status: 'ready', preparedAt: states.store?.preparedAt || '' },
+            allegro: { status: 'ready', preparedAt: states.allegro?.preparedAt || product?.allegroAgentPreparedAt || '' },
+            vonHalsky: { status: 'ready', preparedAt: states.vonHalsky?.preparedAt || result.confirmedAt || '' },
+          },
+          agentQualitySavedFields: [...new Set([
+            ...(Array.isArray(task?.savedFields) ? task.savedFields : []),
+            ...(Array.isArray(result?.savedFields) ? result.savedFields : []),
+          ])].slice(0, 180),
+        };
+        qualityConfirmation = await saveProductFields({
+          productId,
+          fields,
+          mutationId: `agent-quality-confirmed:${productId}:${task.id || Date.now()}`,
+          actor: 'agent-quality-controller',
+          area: 'agent-quality-confirmation',
+        });
+      }
       return {
         channel: 'vonHalsky',
         status: result.status,
         readbackConfirmed: true,
         productId,
         savedFields: result.savedFields || [],
+        qualityConfirmed: qualityConfirmation?.publication?.readbackConfirmed === true,
       };
     };
   }

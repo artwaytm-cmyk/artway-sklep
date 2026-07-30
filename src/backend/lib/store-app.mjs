@@ -387,6 +387,8 @@ const przygotujProduktVonHalskyPoPelnejKontroli = agentEvents.vonHalskyFinisher(
   route: vonHalskyRoute,
   publicOrigin: process.env.ARTWAY_PUBLIC_ORIGIN,
   adminToken: process.env.ARTWAY_ADMIN_TOKEN,
+  saveProductFields: zapiszIOpublikujPolaProduktuCentralnie,
+  getProduct: (productId) => centralProductCatalog.get(productId, { admin: true }),
 });
 const allegroPreparationRoute = createAllegroPreparationRoute({
   respond: odpowiedz, isAdmin: czyAdmin, sessionOf: requestSession, text: tekst,

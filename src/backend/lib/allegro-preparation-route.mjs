@@ -43,6 +43,12 @@ export function createAllegroPreparationRoute(deps = {}) {
       const state = await queue.enqueue(candidates.map((item) => item.id), {
         operation: 'product-full-review',
         requestedBy: 'agent-zdarzeniowy',
+        priorityByProduct: Object.fromEntries(candidates.map((item) => [item.id, item.priority])),
+        priorityReasonByProduct: Object.fromEntries(candidates.map((item) => [
+          item.id,
+          `${item.reason}: luka jakości ${item.qualityGap}`,
+        ])),
+        defaultPriority: 100,
       });
       return {
         skipped: false,

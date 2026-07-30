@@ -44,21 +44,46 @@ test("tabela Von Halsky przestrzega standardu desktop i mobile",async()=>{
 });
 
 test("przygotowanie Von Halsky pokazuje rzeczywisty postęp i zapisuje produkty pojedynczo",async()=>{
-  const [source,editor,style]=await Promise.all([
+  const [workspace,preparation,editor,style]=await Promise.all([
     read("src/frontend/11b-von-halsky-workspace.js"),
+    read("src/frontend/11c-von-halsky-preparation.js"),
     read("src/frontend/12-product-editor-workspace.js"),
     read("src/styles/37-von-halsky-workspace.css"),
   ]);
+  const source=workspace+preparation;
   assert.match(source,/Rzeczywisty postęp przygotowania/);
   assert.match(source,/for\(let index=0;index<ids\.length;index\+=1\)/);
   assert.match(source,/body:\{productIds:\[productId\]\}/);
   assert.match(source,/vonHalskyAktualizujPostepDOM/);
+  assert.match(source,/function vonHalskyWstrzymajPrzygotowanie/);
+  assert.match(source,/function vonHalskyWznowPrzygotowanie/);
+  assert.match(source,/function vonHalskyZatrzymajPrzygotowanie/);
+  assert.match(source,/Wstrzymaj po bieżącym/);
+  assert.match(source,/leftQuality\.wynik-rightQuality\.wynik/);
   assert.match(source,/Zapis centralny potwierdzony/);
   assert.match(source,/href="#\/admin\/produkty\/edytuj\//);
   assert.match(style,/\.von-halsky-progress-track/);
   assert.match(editor,/productEditorVonHalskyAuditHTML/);
   assert.match(editor,/Zapisane w tej kartotece/);
   assert.match(editor,/vonHalskyAgentReadbackConfirmed/);
+});
+
+test("wynik przygotowania i publikacji od razu aktualizuje filtr bez przeładowania strony",async()=>{
+  const [workspace,preparation]=await Promise.all([
+    read("src/frontend/11b-von-halsky-workspace.js"),
+    read("src/frontend/11c-von-halsky-preparation.js"),
+  ]);
+  const source=workspace+preparation;
+  assert.match(source,/function vonHalskyMigawkaFiltrow/);
+  assert.match(source,/function vonHalskyPrzywrocFiltry/);
+  assert.match(source,/function vonHalskyZastosujAktualizacjeProduktow/);
+  assert.match(source,/if\(result\?\.product\)vonHalskyZastosujAktualizacjeProduktow/);
+  assert.match(source,/vonHalskyZastosujAktualizacjeProduktow\(data\.productUpdates\|\|\[\]\)/);
+  assert.match(source,/if\(Array\.isArray\(data\.offers\)\)vonHalskyStan\.offers=data\.offers/);
+  assert.match(source,/setInterval\(async\(\)=>\{/);
+  assert.match(source,/product-catalog-query/);
+  assert.match(source,/sort:"najnowsze",page:1,limit:100/);
+  assert.match(source,/},15000\)/);
 });
 
 test("błąd API Von Halsky nie uruchamia nieskończonej pętli renderowania",async()=>{

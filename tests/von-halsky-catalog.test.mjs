@@ -287,7 +287,8 @@ test('wynik Agenta Von Halsky zapisuje dowody, braki i wersję reguł', () => {
   assert.equal(patch.vonHalskyAgentEvidence.attributesMapped, 1);
   assert.deepEqual(patch.vonHalskyAgentMissingAttributes, ['Wiek']);
   assert.deepEqual(patch.vonHalskyAgentSavedFields, ['vonHalskyTitle', 'vonHalskyDescription']);
-  assert.equal(patch.vonHalskyAgentReadbackConfirmed, true);
+  assert.equal(patch.vonHalskyAgentReadbackConfirmed, false);
+  assert.equal(patch.vonHalskyAgentSaveState, 'pending_readback');
   assert.equal(patch.vonHalskyAgentPreparationRunId, 'run-vh-1');
   assert.match(patch.vonHalskyAgentRulesVersion, /^2026-07-29/);
 });
@@ -681,7 +682,7 @@ test('route Agenta Von Halsky zapisuje wynik w centralnej kartotece bez publikac
     saveProductFields: async ({ fields, area }) => {
       Object.assign(product, structuredClone(fields));
       savedAreas.push(area);
-      return { confirmed: true, product: structuredClone(product) };
+      return { confirmed: true, publication: { readbackConfirmed: true }, product: structuredClone(product) };
     },
     prepareProductWithAgent: async () => ({
       run: { id: 'run-vh-agent-1' },
@@ -935,6 +936,10 @@ test('ręczna publikacja tworzy wyłącznie zaznaczoną ofertę i zapisuje reque
   const repeated = await route(repeatedRequest, new URL(repeatedRequest.url), 'von-halsky-sync-catalog');
   assert.equal(repeated.status, 200);
   assert.equal(repeated.body.created, 0);
+  assert.equal(repeated.body.updated, 1);
+  assert.equal(repeated.body.productUpdates[0].productId, 'P-7');
+  assert.equal(repeated.body.productUpdates[0].fields.vonHalskyEditorialSyncPending, false);
+  assert.equal(repeated.body.productUpdates[0].fields.vonHalskyEditorialSyncState, 'synced');
   assert.equal(mutationRequests, 2);
 });
 
@@ -993,5 +998,6 @@ test('publikacja wskazanego produktu zapisuje trwałe potwierdzenie i dokładny 
   assert.equal(saved.vonHalskyEditorialSyncState, 'synced');
   assert.equal(saved.contentEditorial.channelStates.vonHalsky.publicationStatus, 'confirmed');
   assert.equal(saved.contentEditorial.channelStates.vonHalsky.publicationReceipt, 'vh-receipt-17');
+  assert.equal(result.body.productUpdates[0].fields.vonHalskyEditorialSyncPending, false);
   assert.deepEqual(progress.map((item) => item.phase), ['sending_to_von_halsky', 'confirmed_by_von_halsky']);
 });

@@ -7,6 +7,7 @@ import {
   allegroPreparationAttemptDisposition,
   allegroPreparationRetryState,
   createAllegroPreparationQueue,
+  productPreparationQualityGap,
   selectAllegroPreparationCandidates,
 } from '../src/backend/lib/domain/allegro-preparation-queue.mjs';
 import { createAllegroPreparationWorker } from '../src/backend/lib/domain/allegro-preparation-worker.mjs';
@@ -246,13 +247,43 @@ test('ciągła kolejka najpierw wybiera braki, a potem domyka pełny przegląd w
     now: new Date('2026-07-27T08:00:00.000Z'),
     preparationCurrent: (product) => product.allegroAgentPreparationStatus === 'ready',
   });
-  assert.deepEqual(selected.map((item) => item.id), ['attention', 'new', 'old', 'fresh']);
+  assert.deepEqual(selected.map((item) => item.id), ['attention', 'old', 'fresh', 'new']);
   assert.deepEqual(selected.map((item) => item.reason), [
     'wymaga_uzupelnienia',
     'pelny_przeglad_edytora_i_von_halsky',
     'pelny_przeglad_edytora_i_von_halsky',
     'pelny_przeglad_edytora_i_von_halsky',
   ]);
+});
+
+test('Agent zaczyna od kartoteki z największą potwierdzoną luką jakości', () => {
+  const weak = {
+    id: 'weak',
+    nazwa: '',
+    opis: '',
+    opisKrotki: '',
+    contentEditorial: { channelStates: {} },
+  };
+  const stronger = {
+    id: 'stronger',
+    nazwa: 'Gra edukacyjna',
+    opisKrotki: 'Krótki opis produktu gotowy dla klienta.',
+    opis: 'Długi opis produktu zawierający wszystkie najważniejsze informacje o grze, jej przeznaczeniu oraz zasadach użytkowania.',
+    zdjecie: '/images/game.jpg',
+    ean: '5906018000030',
+    producent: 'Alexander',
+    kategoria: 'Gry',
+    allegroCategoryId: '123',
+    vonHalskyCategoryId: 'games',
+    vonHalskyShortDescription: 'Krótki opis produktu gotowy dla klienta.',
+    vonHalskyDescription: 'Długi opis produktu zawierający wszystkie najważniejsze informacje o grze, jej przeznaczeniu oraz zasadach użytkowania.',
+    vonHalskyResponsibleProducer: { legalName: 'Alexander', address: 'adres', email: 'test@example.test', phone: '123' },
+    contentEditorial: { channelStates: { store: { status: 'ready' }, allegro: { status: 'ready' }, vonHalsky: { status: 'ready' } } },
+  };
+  assert.ok(productPreparationQualityGap(weak).score > productPreparationQualityGap(stronger).score);
+  const selected = selectAllegroPreparationCandidates([stronger, weak]);
+  assert.equal(selected[0].id, 'weak');
+  assert.ok(selected[0].qualityGap > selected[1].qualityGap);
 });
 
 test('stara decyzja jest automatycznie ponawiana dokładnie po wdrożeniu nowszej wersji naprawy', () => {

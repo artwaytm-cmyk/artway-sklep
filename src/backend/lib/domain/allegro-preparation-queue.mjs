@@ -1,6 +1,9 @@
 import { createPostgresAllegroPreparationQueue } from './allegro-preparation-postgres-queue.mjs';
 import crypto from 'node:crypto';
 import { providerQuotaUnavailable } from './agent-specialists-support.mjs';
+import { productPreparationQualityGap, productSalePriority } from './product-preparation-priority.mjs';
+
+export { productPreparationQualityGap } from './product-preparation-priority.mjs';
 
 const STATE_KEY = 'allegro_preparation_queue';
 const MAX_PENDING = 2000;
@@ -40,6 +43,8 @@ function normalizeTask(value = {}) {
     operation: clean(source.operation || 'allegro', 40),
     requestedBy: clean(source.requestedBy || 'administrator', 200),
     requestedAt: clean(source.requestedAt || new Date().toISOString(), 50),
+    priority: Math.max(0, Math.min(10_000, Number(source.priority) || 0)),
+    priorityReason: clean(source.priorityReason, 160),
     attempt: Math.max(0, Number(source.attempt) || 0),
     skipEditorial: source.skipEditorial === true,
   };
@@ -162,18 +167,6 @@ function parsedDate(value = '') {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function salePriority(product = {}) {
-  const catalog = asObject(product._catalog);
-  const availability = asObject(catalog.availability);
-  const active = product.aktywny !== false
-    && product.ukryty !== true
-    && product.sprzedazAktywna !== false
-    && product.saleAvailable !== false
-    && availability.saleAvailable !== false
-    && catalog.recordStatus !== 'trash';
-  return active ? 20 : 0;
-}
-
 function activeAllegroOffer(product = {}) {
   const catalogChannel = asObject(asObject(product?._catalog).channels).allegro;
   const offerId = clean(
@@ -268,33 +261,34 @@ export function selectAllegroPreparationCandidates(products = [], {
       ? preparationCurrent(product)
       : ['ready', 'published'].includes(status) && !asArray(product?.allegroAgentPreparationMissing).length;
 
+    const qualityGap = productPreparationQualityGap(product);
     let priority = 0, reason = '';
     if (status === 'decision_required') {
       if (implementationChanged) {
-        priority = 550 + salePriority(product);
+        priority = 550 + qualityGap.score + productSalePriority(product);
         reason = 'nowa_wersja_automatycznej_naprawy';
       } else if (sourceChangedAt > preparedAt) {
-        priority = 340 + salePriority(product);
+        priority = 340 + qualityGap.score + productSalePriority(product);
         reason = 'nowe_dane_po_decyzji';
       }
     } else if (['needs_attention', 'attention', 'retrying', 'failed', 'waiting_provider'].includes(status) && retryDue) {
-      priority = 500 + salePriority(product);
+      priority = 500 + qualityGap.score + productSalePriority(product);
       reason = status === 'waiting_provider' ? 'wznowienie_po_dostawcy' : 'wymaga_uzupelnienia';
     } else if (!productFullReviewCurrent(product)) {
-      priority = 360 + salePriority(product);
+      priority = 360 + qualityGap.score + productSalePriority(product);
       reason = 'pelny_przeglad_edytora_i_von_halsky';
     } else if (!status || status === 'new' || status === 'queued' || !preparedAt) {
-      priority = 200 + salePriority(product);
+      priority = 200 + qualityGap.score + productSalePriority(product);
       reason = 'nieprzygotowany';
     } else if (!current && retryDue) {
-      priority = 260 + salePriority(product);
+      priority = 260 + qualityGap.score + productSalePriority(product);
       reason = 'nieaktualne_przygotowanie';
     } else if (current && (
       sourceChangedAt > preparedAt
       || !preparedAt
       || timestamp - preparedAt >= verificationAgeMs
     )) {
-      priority = 100 + salePriority(product);
+      priority = 100 + qualityGap.score + productSalePriority(product);
       reason = sourceChangedAt > preparedAt ? 'zmienione_zrodlo' : 'weryfikacja_okresowa';
     }
     if (!priority) continue;
@@ -302,6 +296,9 @@ export function selectAllegroPreparationCandidates(products = [], {
       id,
       priority,
       reason,
+      qualityGap: qualityGap.score,
+      qualityScore: qualityGap.completeness,
+      qualityMissing: qualityGap.missing,
       preparedAt: preparedAt ? new Date(preparedAt).toISOString() : '',
       nextRetryAt: nextRetryAt ? new Date(nextRetryAt).toISOString() : '',
       retryCount: Math.max(0, Number(product?.allegroAgentPreparationRetryCount) || 0),
@@ -384,7 +381,13 @@ export function createAllegroPreparationQueue({
     return normalizeState(version.value);
   }
 
-  async function enqueue(productIds = [], { operation = 'allegro', requestedBy = 'administrator' } = {}) {
+  async function enqueue(productIds = [], {
+    operation = 'allegro',
+    requestedBy = 'administrator',
+    priorityByProduct = {},
+    priorityReasonByProduct = {},
+    defaultPriority = 1000,
+  } = {}) {
     const requestedIds = asArray(productIds).map((id) => clean(id, 100)).filter(Boolean);
     const ids = [...new Set(requestedIds)].slice(0, 1000);
     if (!ids.length) {
@@ -400,6 +403,8 @@ export function createAllegroPreparationQueue({
       ]);
       const tasks = ids.filter((id) => !occupied.has(id)).map((productId) => normalizeTask({
         id: crypto.randomUUID(), batchId, productId, operation, requestedBy, requestedAt,
+        priority: Number(priorityByProduct?.[productId]) || defaultPriority,
+        priorityReason: priorityReasonByProduct?.[productId] || '',
       }));
       const createdByProduct = new Map(tasks.map((task) => [task.productId, task]));
       const trackedTasks = ids.map((productId) => occupied.get(productId) || createdByProduct.get(productId)).filter(Boolean);

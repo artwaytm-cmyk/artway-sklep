@@ -236,6 +236,20 @@ export function createVonHalskyAgentRoute(context = {}) {
             actor: matchingText(actor?.email || actor?.name || actor?.source || 'von-halsky-agent', 200),
             area: 'von-halsky-agent-preparation',
           });
+          const confirmedAt = new Date().toISOString();
+          const confirmationFields = {
+            vonHalskyAgentConfirmedAt: confirmedAt,
+            vonHalskyAgentSaveState: 'confirmed',
+            vonHalskyAgentReadbackConfirmed: true,
+          };
+          const confirmedSave = await saveProductFields({
+            productId,
+            fields: confirmationFields,
+            mutationId: `von-halsky-agent-confirmed:${productId}:${agent?.run?.id || workId}`,
+            actor: matchingText(actor?.email || actor?.name || actor?.source || 'von-halsky-agent', 200),
+            area: 'von-halsky-agent-confirmation',
+          });
+          Object.keys(confirmationFields).forEach((field) => savedFieldNames.add(field));
           await progress({
             id: workId, runId: agent?.run?.id, productId, productName: matchingText(product.nazwa || product.name, 180),
             channel: 'vonHalsky', action: 'przygotowanie produktu', phase: readiness.publishable ? 'ready' : 'requires_data',
@@ -274,13 +288,12 @@ export function createVonHalskyAgentRoute(context = {}) {
             },
             attributeCoverage: attributeMatch?.coverage ?? null,
             saved: true,
-            readbackConfirmed: finalSave?.publication?.readbackConfirmed === true
-              || finalSave?.confirmed === true
-              || Boolean(finalSave?.product),
-            confirmedAt: finalSave?.confirmedAt || finalPatch.vonHalskyAgentConfirmedAt,
-            revision: finalSave?.publication?.revision || finalSave?.rev || '',
-            savedFields: finalPatch.vonHalskyAgentSavedFields,
+            readbackConfirmed: confirmedSave?.publication?.readbackConfirmed === true,
+            confirmedAt,
+            revision: confirmedSave?.publication?.revision || confirmedSave?.rev || finalSave?.publication?.revision || '',
+            savedFields: [...new Set([...finalPatch.vonHalskyAgentSavedFields, ...Object.keys(confirmationFields)])],
             runId: agent?.run?.id || '',
+            product: confirmedSave?.product || finalSave?.product || null,
           });
         } catch (error) {
           const safe = safeError(error);

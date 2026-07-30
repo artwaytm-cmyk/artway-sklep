@@ -1092,7 +1092,8 @@ function widokAdminInfakt(sekcja="pulpit"){
 }
 
 function asortymentAgentMetaHTML(p={}){
-  const reviewed=p.agentTextReviewedAt||p.contentEditorialPreparedAt||p.contentEditorial?.preparedAt||"",time=Date.parse(reviewed||"");
+  const reviewed=p.agentQualityConfirmedAt||"",time=Date.parse(reviewed||"");
+  if(p.agentQualityReadbackConfirmed!==true||String(p.agentQualityReviewStatus||"")!=="confirmed")return "";
   if(!Number.isFinite(time))return "";
   const states=p.contentEditorial?.channelStates||{},publication=(channel)=>{
     const state=String(states[channel]?.publicationStatus||(channel==="allegro"?p.allegroEditorialSyncState:channel==="vonHalsky"?p.vonHalskyEditorialSyncState:"confirmed")||"").toLowerCase();
@@ -1102,7 +1103,7 @@ function asortymentAgentMetaHTML(p={}){
     return "—";
   };
   const date=new Date(time).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
-  return `<small class="catalog-product-agent-meta" title="Agent wróci do produktu dopiero po zmianie danych wejściowych albo błędzie publikacji.">🤖 Agent: poprawiono ${esc(date)} • sklep ${publication("store")} • Allegro ${publication("allegro")} • Von Halsky ${publication("vonHalsky")}</small>`;
+  return `<small class="catalog-product-agent-meta" title="Oznaczenie pojawia się dopiero po zapisie całego przeglądu i odczycie kontrolnym centralnej kartoteki.">🤖 Pełny przegląd zapisany ${esc(date)} • sklep ${publication("store")} • Allegro ${publication("allegro")} • Von Halsky ${publication("vonHalsky")}</small>`;
 }
 function asortymentKartaProduktuHTML(p={},ukrytaKopia=false){
   const dodany=jestProduktemDodanym(p.id)||["dodany","import"].includes(String(p?._catalog?.source||"")),ukryty=czyProduktAdminWKoszu(p)||p?._catalog?.recordStatus==="trash",edytowany=!!produktyEdytowane[p.id],selected=zaznaczoneProdukty.has(p.id)||zaznaczoneProdukty.has(String(p.id));

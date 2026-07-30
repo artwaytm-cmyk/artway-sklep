@@ -78,6 +78,20 @@ export function createVonHalskyCatalogRoute(context = {}) {
       let sent = 0, created = 0, updatedCount = 0, closed = 0, reopened = 0, skippedNew = 0;
       let lastRequestId = '';
       let activeBatchProducts = [];
+      const productUpdates = new Map();
+      const rememberProductUpdates = (updates = []) => {
+        for (const update of Array.isArray(updates) ? updates : []) {
+          const id = String(update?.productId || '');
+          if (!id) continue;
+          const previous = productUpdates.get(id) || {};
+          productUpdates.set(id, {
+            productId: id,
+            fields: { ...(previous.fields || {}), ...(update.fields || {}) },
+            readbackConfirmed: update.readbackConfirmed === true || previous.readbackConfirmed === true,
+            confirmedAt: update.confirmedAt || previous.confirmedAt || '',
+          });
+        }
+      };
       try {
         const remoteResult = await api.listOffers();
         // Batch creation is asynchronous and a freshly accepted offer may not be
@@ -98,6 +112,27 @@ export function createVonHalskyCatalogRoute(context = {}) {
         for (const item of existing) {
           const product = productByExternalId.get(item.externalId), remote = remoteByExternalId.get(item.externalId);
           activeBatchProducts = product ? [product] : [];
+          if (
+            product
+            && remote?.offerId
+            && String(product.vonHalskyOfferId || '') !== String(remote.offerId)
+            && typeof saveProductFields === 'function'
+          ) {
+            const linkFields = { vonHalskyOfferId: String(remote.offerId) };
+            const linked = await saveProductFields({
+              productId: String(product.id),
+              fields: linkFields,
+              mutationId: `von-halsky-offer-link-existing:${product.id}:${remote.offerId}`,
+              actor: 'von-halsky-api',
+              area: 'von-halsky-offer-link',
+            });
+            rememberProductUpdates([{
+              productId: String(product.id),
+              fields: linkFields,
+              readbackConfirmed: linked?.publication?.readbackConfirmed === true,
+              confirmedAt: new Date().toISOString(),
+            }]);
+          }
           if (!item.available) {
             if (!['CLOSED', 'SOLDOUT'].includes(remote.status)) {
               const result = await api.setOfferOpen(remote.offerId, false);
@@ -121,6 +156,11 @@ export function createVonHalskyCatalogRoute(context = {}) {
             const result = await api.updateOffer(remote.offerId, patch);
             lastRequestId = result.requestId || lastRequestId;
             updatedCount += 1;
+            rememberProductUpdates(await updateProductPublication([product], 'confirmed', {
+              timestamp: new Date().toISOString(),
+              receiptId: result.requestId || lastRequestId,
+              targetRef: remote.offerId,
+            }));
           }
         }
 
@@ -168,17 +208,30 @@ export function createVonHalskyCatalogRoute(context = {}) {
             const externalId = vonHalskyOfferProjection(product, state.settings).externalId;
             const receipt = receipts.find((item) => String(item?.externalId || '') === externalId) || receipts[activeBatchProducts.indexOf(product)] || {};
             if (receipt.offerId && typeof saveProductFields === 'function') {
-              await saveProductFields({
+              const linkFields = {
+                vonHalskyOfferId: String(receipt.offerId),
+                vonHalskyCommandId: String(receipt.commandId || ''),
+              };
+              const linked = await saveProductFields({
                 productId: String(product.id),
-                fields: { vonHalskyOfferId: String(receipt.offerId), vonHalskyCommandId: String(receipt.commandId || '') },
+                fields: linkFields,
                 mutationId: `von-halsky-offer-link:${product.id}:${receipt.offerId}`,
                 actor: 'von-halsky-api',
                 area: 'von-halsky-offer-link',
               });
+              rememberProductUpdates([{
+                productId: String(product.id),
+                fields: linkFields,
+                readbackConfirmed: linked?.publication?.readbackConfirmed === true,
+                confirmedAt: at,
+              }]);
               remoteOffers.push({ offerId: String(receipt.offerId), externalId, status: 'PENDING', updatedAt: at, validationErrors: [], rejectionReasons: [] });
             }
           }
-          await updateProductPublication(activeBatchProducts, 'confirmed', { timestamp: at, receiptId: result.requestId || lastRequestId });
+          rememberProductUpdates(await updateProductPublication(activeBatchProducts, 'confirmed', {
+            timestamp: at,
+            receiptId: result.requestId || lastRequestId,
+          }));
           await Promise.all(activeBatchProducts.map((product) => progress({
             id: `editorial:${product.id}:vonHalsky:${String(product.vonHalskyEditorialSyncRunId || product.vonHalskyEditorialSyncPendingAt || Date.now()).slice(0, 64)}`,
             runId: product.vonHalskyEditorialSyncRunId, productId: String(product.id), productName: String(product.nazwa || product.name || '').slice(0, 180),
@@ -204,6 +257,7 @@ export function createVonHalskyCatalogRoute(context = {}) {
           duplicates: deduplicated.conflicts.length,
           offers: updated.offers,
           sync: updated.sync,
+          productUpdates: [...productUpdates.values()],
         });
       } catch (error) {
         const safe = safeError(error);

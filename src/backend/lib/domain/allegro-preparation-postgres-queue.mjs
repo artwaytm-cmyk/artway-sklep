@@ -31,6 +31,8 @@ export function createPostgresAllegroPreparationQueue({
         operation TEXT NOT NULL DEFAULT 'allegro',
         requested_by TEXT NOT NULL DEFAULT 'administrator',
         requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        priority INTEGER NOT NULL DEFAULT 0,
+        priority_reason TEXT NOT NULL DEFAULT '',
         attempt INTEGER NOT NULL DEFAULT 0,
         skip_editorial BOOLEAN NOT NULL DEFAULT FALSE,
         status TEXT NOT NULL DEFAULT 'pending',
@@ -40,11 +42,17 @@ export function createPostgresAllegroPreparationQueue({
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY(namespace, task_id)
       );
+      ALTER TABLE artway_allegro_preparation_tasks
+        ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE artway_allegro_preparation_tasks
+        ADD COLUMN IF NOT EXISTS priority_reason TEXT NOT NULL DEFAULT '';
       CREATE UNIQUE INDEX IF NOT EXISTS artway_allegro_preparation_active_product_idx
         ON artway_allegro_preparation_tasks(namespace, product_id)
         WHERE status IN ('pending','running');
       CREATE INDEX IF NOT EXISTS artway_allegro_preparation_status_idx
-        ON artway_allegro_preparation_tasks(namespace, status, requested_at, task_id);
+        ON artway_allegro_preparation_tasks(namespace, status, priority DESC, requested_at, task_id);
+      CREATE INDEX IF NOT EXISTS artway_allegro_preparation_priority_idx
+        ON artway_allegro_preparation_tasks(namespace, status, priority DESC, requested_at, task_id);
       CREATE TABLE IF NOT EXISTS artway_allegro_preparation_batches (
         namespace TEXT NOT NULL,
         batch_id TEXT NOT NULL,
@@ -80,6 +88,8 @@ export function createPostgresAllegroPreparationQueue({
     operation: row.operation,
     requestedBy: row.requested_by,
     requestedAt: row.requested_at instanceof Date ? row.requested_at.toISOString() : row.requested_at,
+    priority: row.priority,
+    priorityReason: row.priority_reason,
     attempt: row.attempt,
     skipEditorial: row.skip_editorial,
   });
@@ -195,7 +205,13 @@ export function createPostgresAllegroPreparationQueue({
     });
   };
 
-  const enqueue = async (productIds = [], { operation = 'allegro', requestedBy = 'administrator' } = {}) => {
+  const enqueue = async (productIds = [], {
+    operation = 'allegro',
+    requestedBy = 'administrator',
+    priorityByProduct = {},
+    priorityReasonByProduct = {},
+    defaultPriority = 1000,
+  } = {}) => {
     await migrateLegacy();
     const requestedIds = asArray(productIds).map((id) => clean(id, 100)).filter(Boolean);
     const ids = [...new Set(requestedIds)].slice(0, 1000);
@@ -215,14 +231,20 @@ export function createPostgresAllegroPreparationQueue({
         if (occupied.has(productId)) continue;
         const task = normalizeTask({
           id: crypto.randomUUID(), batchId, productId, operation, requestedBy, requestedAt,
+          priority: Number(priorityByProduct?.[productId]) || defaultPriority,
+          priorityReason: priorityReasonByProduct?.[productId] || '',
         });
         const inserted = await client.query(`
           INSERT INTO artway_allegro_preparation_tasks(
-            namespace,task_id,batch_id,product_id,operation,requested_by,requested_at,status
-          ) VALUES($1,$2,$3,$4,$5,$6,$7,'pending')
+            namespace,task_id,batch_id,product_id,operation,requested_by,requested_at,
+            priority,priority_reason,status
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending')
           ON CONFLICT DO NOTHING
           RETURNING *
-        `, [ns, task.id, batchId, productId, task.operation, task.requestedBy, requestedAt]);
+        `, [
+          ns, task.id, batchId, productId, task.operation, task.requestedBy, requestedAt,
+          task.priority, task.priorityReason,
+        ]);
         if (inserted.rowCount) created.push(taskFromRow(inserted.rows[0]));
         else {
           const concurrent = await client.query(
@@ -270,7 +292,7 @@ export function createPostgresAllegroPreparationQueue({
       const selected = await client.query(`
         SELECT * FROM artway_allegro_preparation_tasks
         WHERE namespace=$1 AND status='pending'
-        ORDER BY requested_at,task_id
+        ORDER BY priority DESC,requested_at,task_id
         FOR UPDATE SKIP LOCKED
         LIMIT 1
       `, [ns]);

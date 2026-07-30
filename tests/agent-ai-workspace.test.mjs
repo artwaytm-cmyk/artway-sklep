@@ -73,11 +73,12 @@ test("raport produktów ma serwerowe filtry, trzy kanały i gotowość do wystaw
 test("katalog pokazuje małą datę ostatniej poprawy Agenta i stan publikacji każdego kanału",async()=>{
   const card=await read("src/frontend/12-warehouse-assortment-card.js"),styles=await read("src/styles/29-commerce-catalog-actions.css");
   assert.match(card,/function asortymentAgentMetaHTML/);
-  assert.match(card,/Agent: poprawiono/);
+  assert.match(card,/Pełny przegląd zapisany/);
+  assert.match(card,/agentQualityReadbackConfirmed/);
   assert.match(card,/sklep \$\{publication\("store"\)\}/);
   assert.match(card,/Allegro \$\{publication\("allegro"\)\}/);
   assert.match(card,/Von Halsky \$\{publication\("vonHalsky"\)\}/);
-  assert.match(card,/Agent wróci do produktu dopiero po zmianie danych wejściowych albo błędzie publikacji/);
+  assert.match(card,/Oznaczenie pojawia się dopiero po zapisie całego przeglądu i odczycie kontrolnym centralnej kartoteki/);
   assert.match(styles,/\.catalog-product-agent-meta/);
 });
 

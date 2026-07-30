@@ -133,6 +133,9 @@ function centralCatalogListProduct(product = {}, catalogMeta = {}, { admin = fal
     'vonHalskyAgentEvidence', 'vonHalskyAgentSavedFields', 'vonHalskyAgentConfirmedAt',
     'vonHalskyAgentPreparationRunId', 'vonHalskyAgentPreparationSource',
     'vonHalskyAgentSaveState', 'vonHalskyAgentReadbackConfirmed',
+    'agentQualityReviewStatus', 'agentQualityConfirmedAt', 'agentQualityReadbackConfirmed',
+    'agentQualityRunId', 'agentQualityInputFingerprint', 'agentQualityChannels',
+    'agentQualitySavedFields',
   );
   const result = {};
   for (const field of fields) if (Object.prototype.hasOwnProperty.call(product, field)) result[field] = product[field];
