@@ -146,7 +146,7 @@ async function vonHalskyLaduj(force=false,{render=true,processes=true}={}){
   vonHalskyStan.loading=false;
   if(render&&String(trasa()).startsWith("/admin/von-halsky/wystawianie")&&document.querySelector(".von-halsky-listing-workspace"))vonHalskyAktualizujWystawianieDOM();
   else if(render&&String(trasa()).startsWith("/admin/von-halsky/ustawienia")&&typeof vonHalskyAktualizujUstawieniaDOM==="function")vonHalskyAktualizujUstawieniaDOM();
-  else if(render&&String(trasa())==="/admin/von-halsky"&&typeof vonHalskyAktualizujPulpitDOM==="function")vonHalskyAktualizujPulpitDOM();
+  else if(render&&String(trasa())==="/admin/von-halsky"&&typeof vonHalskyAktualizujPulpitDOM==="function")vonHalskyAktualizujPulpitDOM({dashboard:false});
   else if(render&&String(trasa()).startsWith("/admin/von-halsky"))renderuj();
 }
 async function vonHalskyUzgodnijKatalog({silent=false,repeat=false,render=true}={}){
@@ -1018,14 +1018,28 @@ async function vonHalskyLadujDashboard(force=false){
   if(String(trasa())==="/admin/von-halsky")vonHalskyAktualizujDashboardDOM();
 }
 function vonHalskyAktualizujDashboardDOM(){
-  if(typeof vonHalskyPodmienWyspe==="function")return vonHalskyPodmienWyspe("[data-vh-dashboard]",vonHalskyDashboardWorkspaceHTML());
-  return false;
+  const current=document.querySelector("[data-vh-dashboard]");
+  if(!current)return false;
+  const template=document.createElement("template");
+  template.innerHTML=vonHalskyDashboardWorkspaceHTML().trim();
+  const next=template.content.firstElementChild;
+  if(!next)return false;
+  const previousHeight=current.getBoundingClientRect().height;
+  if(previousHeight>0)current.style.minHeight=`${Math.ceil(previousHeight)}px`;
+  current.className=next.className;
+  current.setAttribute("aria-busy",next.getAttribute("aria-busy")||"false");
+  current.replaceChildren(...next.childNodes);
+  requestAnimationFrame(()=>{
+    current.style.removeProperty("min-height");
+    if(!current.getAttribute("style"))current.removeAttribute("style");
+  });
+  return true;
 }
-function vonHalskyAktualizujPulpitDOM(){
+function vonHalskyAktualizujPulpitDOM({dashboard=true}={}){
   if(String(trasa())!=="/admin/von-halsky")return false;
   const header=typeof vonHalskyPodmienWyspe==="function"&&vonHalskyPodmienWyspe("[data-vh-channel-header]",vonHalskyNaglowekHTML("pulpit"));
-  const dashboard=vonHalskyAktualizujDashboardDOM();
-  return Boolean(header||dashboard);
+  const dashboardChanged=dashboard&&vonHalskyAktualizujDashboardDOM();
+  return Boolean(header||dashboardChanged);
 }
 function vonHalskyDashboardChartHTML(){
   const rows=vonHalskyDziennyZakres(14),max=Math.max(1,...rows.map(row=>row.total));

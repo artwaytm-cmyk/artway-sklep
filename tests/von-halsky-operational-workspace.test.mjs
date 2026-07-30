@@ -35,7 +35,9 @@ test('pulpit i zamówienia Von Halsky mają jeden responsywny standard operacyjn
   assert.match(operations, /Eksport CSV/);
   assert.match(operations, /vonHalskyAktualizujPulpitDOM/);
   assert.match(operations, /aria-busy/);
-  assert.match(operations, /vonHalskyPodmienWyspe\("\[data-vh-dashboard\]"/);
+  assert.match(operations, /current\.replaceChildren\(\.\.\.next\.childNodes\)/);
+  assert.match(operations, /vonHalskyAktualizujPulpitDOM\(\{dashboard=true\}=\{\}\)/);
+  assert.doesNotMatch(operations, /vonHalskyPodmienWyspe\("\[data-vh-dashboard\]"/);
   assert.doesNotMatch(operations, /\bconfirm\(/);
   assert.doesNotMatch(operations, /\bprompt\(/);
   assert.match(workspace, /typeof vonHalskyOrdersWorkspaceHTML/);
@@ -46,6 +48,13 @@ test('pulpit i zamówienia Von Halsky mają jeden responsywny standard operacyjn
   assert.match(style, /\.von-halsky-dashboard-pro\.is-refreshing::after/);
   assert.match(style, /\.von-halsky-order-tabbar/);
   assert.match(style, /@media\(max-width:700px\)/);
+});
+
+test('statystyki dzienne Von Halsky nie używają kolidującego aliasu SQL day', async () => {
+  const repository = await read('src/backend/lib/domain/von-halsky-state-repository.mjs');
+  assert.match(repository, /AS sales_day/);
+  assert.match(repository, /day: row\.sales_day/);
+  assert.doesNotMatch(repository, /\)\s+day,\s*\n\s*COUNT/);
 });
 
 test('główny pulpit administratora pokazuje trzeci kanał sprzedaży', async () => {

@@ -199,7 +199,7 @@ export function createVonHalskyStateRepository({
         GROUP BY status
       `, [namespace]),
       pool.query(`
-        SELECT to_char(placed_at AT TIME ZONE 'Europe/Warsaw','YYYY-MM-DD') day,
+        SELECT to_char(placed_at AT TIME ZONE 'Europe/Warsaw','YYYY-MM-DD') AS sales_day,
           COUNT(*)::integer count,COALESCE(SUM(total_amount),0)::numeric total
         FROM artway_order_headers
         WHERE namespace=$1 AND channel='von_halsky'
@@ -254,7 +254,7 @@ export function createVonHalskyStateRepository({
         total: Object.values(orderStatuses).reduce((sum, row) => sum + row.count, 0),
         active: activeOrders,
         statuses: orderStatuses,
-        daily: daily.rows.map((row) => ({ day: row.day, count: Number(row.count) || 0, total: Number(row.total) || 0 })),
+        daily: daily.rows.map((row) => ({ day: row.sales_day, count: Number(row.count) || 0, total: Number(row.total) || 0 })),
       },
       rejectionReasons: [...rejectionCounts.entries()]
         .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], 'pl'))
