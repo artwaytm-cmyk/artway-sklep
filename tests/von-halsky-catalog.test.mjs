@@ -66,7 +66,24 @@ test('polecenia publikacji kończą się wyłącznie na podstawie odczytu katalo
   assert.equal(checked[0].status, 'SUCCESS');
   assert.equal(checked[1].status, 'FAILED');
   assert.match(checked[1].error, /CATEGORY_INCORRECT/);
-  assert.equal(checked[2].status, 'NOT_FOUND');
+  assert.equal(checked[2].status, 'PROVIDER_PROCESSING');
+  assert.equal(checked[2].remoteStatus, 'AWAITING_CATALOG');
+  assert.equal(checked[2].missingChecks, 1);
+});
+
+test('brak oferty staje się NOT_FOUND dopiero po 24 godzinach i trzech kontrolach', () => {
+  const checked = reconcileVonHalskyCommands([
+    {
+      commandId: 'C-LATE',
+      externalId: 'EXT-LATE',
+      status: 'PROVIDER_PROCESSING',
+      updatedAt: '2026-07-29T07:00:00.000Z',
+      missingChecks: 2,
+      firstMissingAt: '2026-07-29T08:00:00.000Z',
+    },
+  ], [], '2026-07-30T08:00:00.000Z');
+  assert.equal(checked[0].status, 'NOT_FOUND');
+  assert.equal(checked[0].missingChecks, 3);
 });
 
 test('osobna bramka Von Halsky blokuje logistykę, linki i nieobsługiwany HTML', () => {
@@ -1004,6 +1021,18 @@ test('ręczna publikacja tworzy wyłącznie zaznaczoną ofertę i zapisuje reque
   assert.equal(reconciled.status, 200);
   assert.equal(reconciled.body.truth.published, 1);
   assert.equal(reconciled.body.productUpdates[0].fields.vonHalskyEditorialSyncState, 'synced');
+  const compactRequest = new Request('https://artwaytm.pl/api?action=von-halsky-reconcile-catalog', {
+    method: 'POST',
+    body: JSON.stringify({ compact: true, source: 'background-worker' }),
+  });
+  const compact = await route(compactRequest, new URL(compactRequest.url), 'von-halsky-reconcile-catalog');
+  assert.equal(compact.status, 200);
+  assert.equal(compact.body.truth.published, 1);
+  assert.equal(Array.isArray(compact.body.changedProductIds), true);
+  assert.equal(typeof compact.body.revision, 'string');
+  assert.equal(Object.hasOwn(compact.body, 'offers'), false);
+  assert.equal(Object.hasOwn(compact.body, 'productUpdates'), false);
+  assert.equal(compact.body.sync.lastReconciliationSource, 'background-worker');
   assert.equal(mutationRequests, 2);
 });
 

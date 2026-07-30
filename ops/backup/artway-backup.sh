@@ -126,8 +126,9 @@ for path in \
   /etc/nginx/sites-enabled \
   /etc/ssh/sshd_config \
   /etc/ssh/sshd_config.d \
-  /etc/systemd/system/artway-backend.service \
-  /etc/systemd/system/artway-agent.service \
+	  /etc/systemd/system/artway-backend.service \
+	  /etc/systemd/system/artway-agent.service \
+	  /etc/systemd/system/artway-von-halsky-sync.service \
   /etc/systemd/system/artway-vnc.service \
   /etc/systemd/system/artway-novnc.service \
   /etc/systemd/system/artway-backup.service \

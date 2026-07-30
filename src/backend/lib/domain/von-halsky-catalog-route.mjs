@@ -21,7 +21,13 @@ export function vonHalskyCreateReceipts(payload = {}) {
   }));
 }
 
-export function reconcileVonHalskyCommands(commands = [], remoteOffers = [], timestamp = new Date().toISOString(), graceMs = 10 * 60_000) {
+export function reconcileVonHalskyCommands(
+  commands = [],
+  remoteOffers = [],
+  timestamp = new Date().toISOString(),
+  graceMs = 24 * 60 * 60_000,
+  minimumMissingChecks = 3,
+) {
   const remote = preferredVonHalskyOffers(remoteOffers).byExternalId;
   const now = Date.parse(timestamp) || Date.now();
   return (Array.isArray(commands) ? commands : []).map((command) => {
@@ -41,16 +47,30 @@ export function reconcileVonHalskyCommands(commands = [], remoteOffers = [], tim
       nextStatus = 'PENDING';
     } else {
       const age = now - Date.parse(String(command?.updatedAt || command?.createdAt || ''));
-      if (Number.isFinite(age) && age >= graceMs) {
+      const missingChecks = Math.max(0, Number(command?.missingChecks) || 0) + 1;
+      const terminal = Number.isFinite(age)
+        && age >= graceMs
+        && missingChecks >= Math.max(1, Number(minimumMissingChecks) || 3);
+      if (terminal) {
         nextStatus = 'NOT_FOUND';
-        error = 'Po upływie czasu kontrolnego oferta nie pojawiła się w katalogu API.';
+        error = 'Po co najmniej trzech kontrolach i 24 godzinach oferta nie pojawiła się w katalogu API.';
+      } else {
+        nextStatus = 'PROVIDER_PROCESSING';
+        error = '';
       }
+      command = {
+        ...command,
+        missingChecks,
+        firstMissingAt: command?.firstMissingAt || timestamp,
+      };
     }
     return {
       ...command,
       status: nextStatus,
       error,
-      remoteStatus: status || 'NOT_FOUND',
+      missingChecks: status ? 0 : Math.max(0, Number(command?.missingChecks) || 0),
+      firstMissingAt: status ? '' : String(command?.firstMissingAt || ''),
+      remoteStatus: status || (nextStatus === 'NOT_FOUND' ? 'NOT_FOUND' : 'AWAITING_CATALOG'),
       checkedAt: timestamp,
     };
   });
@@ -97,6 +117,9 @@ export function createVonHalskyCatalogRoute(context = {}) {
 
     if (action === 'von-halsky-reconcile-catalog') {
       if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const body = await req.json().catch(() => ({}));
+      const compact = body?.compact === true;
+      const source = String(body?.source || (compact ? 'background-worker' : 'administrator')).slice(0, 80);
       const config = vonHalskyPublicConfig(env());
       if (!config.configured) return respond({
         ok: false,
@@ -116,6 +139,11 @@ export function createVonHalskyCatalogRoute(context = {}) {
           saveProductFields,
           timestamp,
         });
+        const changedProductIds = [...new Set(
+          (Array.isArray(reconciliation.productUpdates) ? reconciliation.productUpdates : [])
+            .map((item) => String(item?.productId || ''))
+            .filter(Boolean),
+        )].slice(0, 2_000);
         const updated = await mutate((current) => {
           current.offers = remoteOffers;
           current.commands = reconcileVonHalskyCommands(current.commands, remoteOffers, timestamp);
@@ -135,6 +163,10 @@ export function createVonHalskyCatalogRoute(context = {}) {
             pendingCommandCount,
             lastError: '',
             lastRequestId: remoteResult.requestId || '',
+            reconciliationRevision: timestamp,
+            lastReconciliationSource: source,
+            lastChangedProductIds: changedProductIds,
+            reconciliationMode: config.webhookConfigured ? 'webhook_with_polling_fallback' : 'background_polling',
           };
           return current;
         });
@@ -144,14 +176,19 @@ export function createVonHalskyCatalogRoute(context = {}) {
           message: `API: ${reconciliation.truth.total}; w sprzedaży: ${reconciliation.truth.published}; usunięte fałszywe powiązania: ${reconciliation.counts.staleCleared}; rozdzielone duplikaty: ${reconciliation.counts.duplicateMappings}.`,
           requestId: remoteResult.requestId || '',
         });
-        return respond({
+        const payload = {
           ok: true,
-          offers: remoteOffers,
           truth: reconciliation.truth,
           reconciliation: reconciliation.counts,
-          productUpdates: reconciliation.productUpdates,
+          changedProductIds,
+          revision: timestamp,
           sync: updated.sync,
-        });
+        };
+        if (!compact) {
+          payload.offers = remoteOffers;
+          payload.productUpdates = reconciliation.productUpdates;
+        }
+        return respond(payload);
       } catch (error) {
         const safe = safeError(error);
         await recordDiagnostic({

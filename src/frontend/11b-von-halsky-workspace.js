@@ -14,7 +14,7 @@ let vonHalskySzukaj="",vonHalskyEtap="wszystkie",vonHalskyFiltr="wszystkie",vonH
 const vonHalskyZaznaczone=new Set();
 const vonHalskyAgentWToku=new Set();
 let vonHalskyProduktyRenderCache=null,vonHalskyOcenaRenderCache=new WeakMap();
-let vonHalskyWznowProces=null,vonHalskyLiveTimer=null,vonHalskyReconcilePromise=null,vonHalskyProcesSygnatura="",vonHalskyOstatniOdczytKanalu=0,vonHalskyOdswiezenieWToku=false,vonHalskyNastepneUzgodnienieAt=0;
+let vonHalskyWznowProces=null,vonHalskyLiveTimer=null,vonHalskyReconcilePromise=null,vonHalskyProcesSygnatura="",vonHalskyOstatniOdczytKanalu=0,vonHalskyOdswiezenieWToku=false,vonHalskyOstatniaRewizjaKanalu="";
 let vonHalskyFiltrTimer=null;
 let vonHalskyUstawieniaSekcja="identity";
 
@@ -57,8 +57,7 @@ async function vonHalskyLaduj(force=false,{render=true,processes=true}={}){
     ]);
     Object.assign(vonHalskyStan,{loaded:true,config:data.config||{},settings:{...vonHalskyStan.settings,...(data.settings||{})},sync:data.sync||vonHalskyStan.sync,diagnostics:Array.isArray(data.diagnostics)?data.diagnostics:[],offers:Array.isArray(data.offers)?data.offers:[],orders:Array.isArray(data.orders)?data.orders:[],returns:Array.isArray(data.returns)?data.returns:[],claims:Array.isArray(data.claims)?data.claims:[],events:Array.isArray(data.events)?data.events:[],commands:Array.isArray(data.commands)?data.commands:[],truth:data.truth||vonHalskyStan.truth,channelStatus:data.channelStatus||vonHalskyStan.channelStatus,updatedAt:data.updatedAt||null});
     vonHalskyProcesSygnatura=vonHalskySygnaturaProcesu();
-    const verifiedAt=Date.parse(String(data.sync?.lastCatalogVerifiedAt||data.sync?.lastCatalogAt||"")),interval=Math.max(15,Number(data.settings?.syncIntervalMinutes)||15)*60000;
-    if(data.config?.configured===true&&data.sync?.status==="connected"&&(!Number.isFinite(verifiedAt)||Date.now()-verifiedAt>=interval))setTimeout(()=>vonHalskyUzgodnijKatalog({silent:true,render:false}),0);
+    vonHalskyOstatniaRewizjaKanalu=String(data.sync?.reconciliationRevision||data.sync?.lastCatalogVerifiedAt||data.updatedAt||"");
   }catch(error){
     // Nie uruchamiamy automatycznie kolejnego żądania przy każdym renderze.
     // Gdy API jest chwilowo niedostępne, zachowujemy ostatni stan widoku,
@@ -90,7 +89,6 @@ async function vonHalskyUzgodnijKatalog({silent=false,repeat=false,render=true}=
       };
       vonHalskyZastosujAktualizacjeProduktow(data.productUpdates||[]);
       if(!silent)toast(`API potwierdza: ${data.truth?.published||0} w sprzedaży • ${data.truth?.pending||0} w publikacji • ${(data.reconciliation?.staleCleared||0)+(data.reconciliation?.duplicateMappings||0)} błędnych powiązań usunięto ✅`);
-      if(repeat&&(Number(data.truth?.pending||0)>0||Number(data.reconciliation?.awaiting||0)>0))vonHalskyNastepneUzgodnienieAt=Date.now()+60000;
       return data;
     }catch(error){
       if(!silent)toast("Nie uzgodniono katalogu z API: "+(error.message||error));
@@ -407,11 +405,10 @@ function vonHalskyWystawianieHTML(){
   const rows=vonHalskyWiersze();
   return `<div class="allegro-listing-workspace von-halsky-listing-workspace"><section class="panel von-halsky-catalog-panel"><div class="order-section-head"><div><span class="order-pro-label">Jedno centrum ofert</span><h2>Przygotowanie i wystawianie produktów</h2><p class="order-detail-lead">Powiązanie, jakość danych, podgląd i publikacja są wykonywane w jednym miejscu. „W sprzedaży” oznacza wyłącznie status PUBLISHED potwierdzony aktualnym odczytem API.</p></div><button class="btn ghost" ${vonHalskyStan.operation?"disabled":""} onclick="vonHalskyOdswiezPelnyStatus()">${vonHalskyStan.operation==="reconcile"?"Uzgadniam…":"↻ Uzgodnij z API"}</button></div>
     ${vonHalskyKanalPrawdyHTML()}
-    <div class="von-halsky-offer-flow" aria-label="Proces wystawiania"><div><span>1</span><b>Dopasuj</b><small>EAN lub kod + marka</small></div><i>›</i><div><span>2</span><b>Uzupełnij</b><small>Treść, zdjęcia i kategorię</small></div><i>›</i><div><span>3</span><b>Sprawdź</b><small>Podgląd i kontrola jakości</small></div><i>›</i><div><span>4</span><b>Opublikuj</b><small>Wyłącznie zaznaczone</small></div></div>
-    ${vonHalskyPostepPrzygotowaniaHTML()}
     ${vonHalskyEtapySprzedazyHTML()}
     ${vonHalskyFiltryHTML(rows)}
     ${vonHalskyWynikiHTML()}
+    ${vonHalskyPanelProcesuHTML()}
   </section></div>`;
 }
 function vonHalskyZamowieniaHTML(){

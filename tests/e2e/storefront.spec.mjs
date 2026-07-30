@@ -739,7 +739,8 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.locator('[data-vh-channel-truth]')).toContainText('Polecenia oczekujące');
   await expect(page.locator('.von-halsky-offer-flow')).toContainText('Dopasuj');
   await expect(page.locator('.von-halsky-offer-flow')).toContainText('Opublikuj');
-  await expect(page.locator('.von-halsky-stage-filters')).toContainText('W sprzedaży');
+  await expect(page.locator('.von-halsky-channel-truth')).toContainText('W sprzedaży');
+  await expect(page.locator('.von-halsky-stage-filters')).toContainText('Wszystkie kartoteki');
   await expect(page.locator('.von-halsky-stage-filters')).toContainText('Do wystawienia');
   await expect(page.locator('.von-halsky-stage-filters')).toContainText('Do przygotowania');
   await expect(page.locator('.von-halsky-table')).toBeVisible();

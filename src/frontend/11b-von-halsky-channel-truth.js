@@ -8,11 +8,11 @@ function vonHalskyStatystyki(){
 function vonHalskyEtapySprzedazyHTML(){
   const counts={wszystkie:0,sprzedaz:0,publikowanie:0,wystawienie:0,przygotowanie:0,aktualizacja:0,wstrzymane:0};
   for(const product of vonHalskyProdukty()){const quality=vonHalskyOcenaProduktu(product);counts.wszystkie+=1;counts[vonHalskyEtapOferty(product,quality)]+=1;}
-  const items=[["wszystkie","▦","Wszystkie"],["sprzedaz","✓","W sprzedaży"],["publikowanie","…","W publikacji"],["wystawienie","＋","Do wystawienia"],["przygotowanie","⚠","Do przygotowania"],["aktualizacja","↻","Do aktualizacji"],["wstrzymane","⏸","Wstrzymane"]];
-  return `<section class="allegro-listing-metrics von-halsky-stage-filters" data-vh-stage-filters aria-label="Etapy kartotek Artway">${items.map(([value,icon,label])=>`<button class="${vonHalskyEtap===value?"active":""}" type="button" onclick="vonHalskyEtap=${jsArg(value)};vonHalskyZmienFiltr()"><span>${icon}</span><b>${counts[value]||0}</b><small>${esc(label)}</small></button>`).join("")}</section>`;
+  const items=[["wszystkie","▦","Wszystkie kartoteki"],["wystawienie","＋","Do wystawienia"],["przygotowanie","⚠","Do przygotowania"],["aktualizacja","↻","Do aktualizacji"],["wstrzymane","⏸","Wstrzymane"]];
+  return `<section class="von-halsky-stage-panel" data-vh-stage-filters aria-labelledby="vonHalskyStageTitle"><header><div><small>Wewnętrzna kolejka Artway-TM</small><h3 id="vonHalskyStageTitle">Etap przygotowania kartotek</h3></div><span>Stan ofert sprzedawanych pokazuje osobny pasek API powyżej.</span></header><div class="von-halsky-stage-filters" role="toolbar" aria-label="Filtry etapów kartotek Artway">${items.map(([value,icon,label])=>`<button class="${vonHalskyEtap===value?"active":""}" type="button" aria-pressed="${vonHalskyEtap===value?"true":"false"}" onclick="vonHalskyEtap=${jsArg(value)};vonHalskyZmienFiltr()"><span aria-hidden="true">${icon}</span><b>${counts[value]||0}</b><small>${esc(label)}</small></button>`).join("")}</div></section>`;
 }
 function vonHalskyKanalPrawdyHTML(){
-  const truth=vonHalskyStan.truth||{},status=vonHalskyStan.channelStatus||{},stats=vonHalskyStatystyki();
+  const truth=vonHalskyStan.truth||{},status=vonHalskyStan.channelStatus||{};
   const verifiedAt=status.verifiedAt||vonHalskyStan.sync?.lastCatalogVerifiedAt||vonHalskyStan.sync?.lastCatalogAt;
   const pendingCommands=Number(status.operations?.pendingCommands??vonHalskyStan.sync?.pendingCommandCount??0)||0;
   const consistent=status.consistent!==false;
@@ -25,6 +25,5 @@ function vonHalskyKanalPrawdyHTML(){
       <article class="danger"><small>Odrzucone</small><b>${Number(truth.rejected)||0}</b><span>REJECTED / ERROR</span></article>
       <article><small>Polecenia oczekujące</small><b>${pendingCommands}</b><span>osobno od liczby ofert</span></article>
     </div>
-    <div class="von-halsky-channel-local"><b>Kolejka Artway:</b><span>${stats.doWystawienia} do wystawienia</span><span>${stats.doPrzygotowania} do przygotowania</span><span>${stats.doAktualizacji} do aktualizacji</span><small>Te liczby opisują kartoteki sklepu i nie są liczbą ofert sprzedawanych w Von Halsky.</small></div>
   </section>`;
 }

@@ -384,7 +384,13 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
       : integrationWarnings.length
         ? 'degraded'
         : 'ready';
-    const pendingPublication = record.workItems.filter((item) => ['pending', 'attention', 'waiting_provider', 'failed', 'decision_required'].includes(item.status));
+    // „W publikacji” oznacza wyłącznie operację, która rzeczywiście czeka na
+    // dostawcę. Błąd, brak danych i decyzja administratora są osobnymi
+    // stanami wymagającymi działania i nie mogą zawyżać licznika publikacji.
+    const pendingPublication = record.workItems.filter((item) => ['pending', 'waiting_provider'].includes(item.status));
+    const attentionPublication = record.workItems.filter((item) => item.status === 'attention');
+    const decisionPublication = record.workItems.filter((item) => item.status === 'decision_required');
+    const failedPublication = record.workItems.filter((item) => item.status === 'failed');
     const confirmedPublication = record.workItems.filter((item) => item.status === 'confirmed');
     return {
       state,
@@ -403,10 +409,10 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
       publication: {
         counts: {
           pending: pendingPublication.filter((item) => item.status === 'pending').length,
-          attention: pendingPublication.filter((item) => item.status === 'attention').length,
+          attention: attentionPublication.length,
           waitingProvider: pendingPublication.filter((item) => item.status === 'waiting_provider').length,
-          decisionRequired: pendingPublication.filter((item) => item.status === 'decision_required').length,
-          failed: pendingPublication.filter((item) => item.status === 'failed').length,
+          decisionRequired: decisionPublication.length,
+          failed: failedPublication.length,
           confirmed: confirmedPublication.length,
         },
         pending: pendingPublication.slice(0, 80),

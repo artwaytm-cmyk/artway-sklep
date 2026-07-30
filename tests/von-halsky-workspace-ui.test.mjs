@@ -41,6 +41,7 @@ test("tabela Von Halsky przestrzega standardu desktop i mobile",async()=>{
   assert.doesNotMatch(style,/\.von-halsky-table\{min-width:1120px\}/);
   assert.doesNotMatch(style,/\.von-halsky-stage-filters\{display:flex;overflow-x:auto/);
   assert.match(style,/\.von-halsky-stage-filters\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)!important\}/);
+  assert.match(style,/\.von-halsky-stage-filters\{display:grid;grid-template-columns:repeat\(5,minmax\(0,1fr\)\)!important/);
 });
 
 test("przygotowanie Von Halsky pokazuje trwały proces serwerowy niezależny od przeglądarki",async()=>{
@@ -88,8 +89,9 @@ test("wynik przygotowania i publikacji aktualizuje widok bez pełnego renderu st
   assert.match(source,/\[data-vh-results-region\]/);
   assert.doesNotMatch(source,/current\.outerHTML=vonHalskyWystawianieHTML\(\)/);
   assert.match(source,/vonHalskyZastosujAktualizacjeProduktow\(data\.productUpdates\|\|\[\]\)/);
-  assert.match(source,/if\(Array\.isArray\(data\.offers\)\)vonHalskyStan\.offers=data\.offers/);
   assert.match(source,/chmura\("von-halsky-status"/);
+  assert.doesNotMatch(live,/if\(Array\.isArray\(data\.offers\)\)vonHalskyStan\.offers=data\.offers/);
+  assert.match(source,/lastChangedProductIds/);
   assert.match(source,/setTimeout\(tick,vonHalskyNastepnyInterwal\(\)\)/);
   assert.match(source,/document\.hidden/);
   assert.match(source,/product-catalog-query/);
@@ -97,6 +99,8 @@ test("wynik przygotowania i publikacji aktualizuje widok bez pełnego renderu st
   assert.doesNotMatch(source,/},5000\)/);
   assert.match(source,/results:false,stages:false,truth:false/);
   assert.doesNotMatch(source,/sort:"najnowsze",page:1,limit:100/);
+  assert.doesNotMatch(live,/pendingRemote/);
+  assert.doesNotMatch(live,/vonHalskyUzgodnijKatalog\(\{silent:true,render:false\}\)/);
 });
 
 test("sprzedaż Von Halsky opiera się wyłącznie na potwierdzonym PUBLISHED z API",async()=>{
@@ -114,8 +118,10 @@ test("sprzedaż Von Halsky opiera się wyłącznie na potwierdzonym PUBLISHED z 
   assert.match(workspace,/truth:data\.truth\|\|vonHalskyStan\.truth/);
   assert.match(quality,/offerVerified:Boolean\(remote&&ofertaId\)/);
   assert.doesNotMatch(quality,/ofertaId:String\(product\.vonHalskyOfferId/);
-  assert.match(truthUi,/W publikacji/);
-  assert.match(style,/\.von-halsky-stage-filters\{grid-template-columns:repeat\(7,minmax\(0,1fr\)\)!important\}/);
+  assert.match(truthUi,/Po stronie API/);
+  assert.match(truthUi,/Wszystkie kartoteki/);
+  assert.match(truthUi,/aria-pressed=/);
+  assert.match(style,/\.von-halsky-stage-filters\{display:grid;grid-template-columns:repeat\(5,minmax\(0,1fr\)\)!important/);
 });
 
 test("indeks ustawień Von Halsky ma działające przyciski i zielony stan aktywny",async()=>{

@@ -101,6 +101,31 @@ test('rejestr rozróżnia fizyczną czynność, zapis oczekujący i publikację 
   assert.equal(state.publication.recent[0].receiptId, 'offer-17');
 });
 
+test('błędy i decyzje nie są liczone jako oferty będące w publikacji', async () => {
+  const store = memoryStore();
+  const current = new Date('2026-07-30T09:00:00.000Z');
+  const runtime = createAgentRuntime({ ...store, now: () => current });
+  const base = {
+    runId: 'run-vh', channel: 'vonHalsky', action: 'publikacja oferty',
+    productName: 'Gra testowa',
+  };
+  await runtime.report({ event: 'work_progress', work: {
+    ...base, id: 'vh-failed', productId: 'P-FAILED', status: 'failed', phase: 'validation',
+  } });
+  await runtime.report({ event: 'work_progress', work: {
+    ...base, id: 'vh-decision', productId: 'P-DECISION', status: 'decision_required', phase: 'category',
+  } });
+  await runtime.report({ event: 'work_progress', work: {
+    ...base, id: 'vh-pending', productId: 'P-PENDING', status: 'waiting_provider', phase: 'provider',
+  } });
+  const state = await runtime.status({ workerOnline: true, workerLastSeenAt: current.toISOString() });
+  assert.equal(state.publication.pending.length, 1);
+  assert.equal(state.publication.pending[0].productId, 'P-PENDING');
+  assert.equal(state.publication.counts.waitingProvider, 1);
+  assert.equal(state.publication.counts.failed, 1);
+  assert.equal(state.publication.counts.decisionRequired, 1);
+});
+
 test('rejestr zachowuje każdy krótki etap pracy produktu wraz z polami', async () => {
   const store = memoryStore();
   let current = new Date('2026-07-27T08:00:00.000Z');
