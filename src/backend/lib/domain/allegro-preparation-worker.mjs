@@ -3,7 +3,7 @@ import {
   providerQuotaUnavailable,
 } from './agent-specialists-support.mjs';
 import { enrichAllegroProductEvidence } from './allegro-parameter-enrichment.mjs';
-import { editorialProductContentReport, editorialSourceTextIsSafe } from './product-editorial-safety.mjs';
+import { editorialProductContentReport, editorialSourceTextIsSafe, stripEditorialExpandControls } from './product-editorial-safety.mjs';
 import {
   ALLEGRO_PREPARATION_VERSION,
   allegroAutomaticPreparationDisposition,
@@ -335,6 +335,7 @@ export function createAllegroPreparationWorker({
       opisKrotki: product.opisKrotki,
       opis: product.opis,
       allegroTitle: product.allegroTitle || auto.allegroTitle,
+      allegroShortDescription: stripEditorialExpandControls(product.allegroShortDescription || product.opisKrotki || ''),
       allegroDescription: product.allegroDescription,
       allegroDescriptionSections: compliance.draft?.description?.sections || product.allegroDescriptionSections,
       producent: auto.producent || product.producent,

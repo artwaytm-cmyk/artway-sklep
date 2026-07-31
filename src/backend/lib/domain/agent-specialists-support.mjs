@@ -4,7 +4,7 @@ import { allegroContentCompliance, vonHalskyContentCompliance } from './channel-
 import { AGENT_ACTION_POLICY, NEVER_AUTOMATIC } from './agent-action-policy.mjs';
 import { decisionFingerprint, decisionSubjectKey, normalizeDecisionReceipt } from './agent-decision-state.mjs';
 import { professionalDescriptionQuality } from './product-content-layout.mjs';
-import { editorialProductContentReport, editorialSourceNoiseReport } from './product-editorial-safety.mjs';
+import { editorialProductContentReport, editorialSourceNoiseReport, stripEditorialExpandControls } from './product-editorial-safety.mjs';
 import { SPECIALISTS } from './agent-specialist-definitions.mjs';
 import {
   DEFAULT_CONFIG, MAX_DECISIONS, MAX_DECISION_RECEIPTS, MAX_HISTORY, MAX_WRITE_ATTEMPTS,
@@ -335,7 +335,7 @@ function productFacts(product = {}) {
 
 function productPatch(result = {}) {
   const fields = Object.fromEntries((result.fields || []).map((field) => [field.key, field.value]));
-  const generatedDescription = (value, limit) => clean(value, limit)
+  const generatedDescription = (value, limit) => stripEditorialExpandControls(clean(value, limit))
     .replace(/\brozmiar\s*:?\s*uniwersalny\s*[,;:-]?\s*(?:to\s+)?\d{1,6}\s+szt(?:uk(?:a|i|ę|om)?|\.)?(?![a-ząćęłńóśźż])[,.]?/gi, '')
     .replace(/\bEAN\s*:?\s*\d{8,14}\b[,.]?/gi, '')
     .replace(/\b(?:kod\s+producenta|SKU)\s*:?\s*[A-Za-z0-9][A-Za-z0-9._/-]{0,60}\b[,.]?/gi, '')

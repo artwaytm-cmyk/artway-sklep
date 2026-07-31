@@ -34,6 +34,22 @@ const SOFT_SOURCE_PAGE_NOISE = [
 
 const MALFORMED_EDITORIAL_TEXT = /^(?:[:;,.!?'"`~*#_[\]{}()<>/\\|\s-]|null|undefined|n\/a){1,30}$/i;
 
+/**
+ * Usuwa wyłącznie kontrolki rozwijania opisu skopiowane ze strony źródłowej.
+ * Nie parafrazuje treści i nie usuwa faktów produktu, dlatego może być użyta
+ * bezpiecznie również tuż przed atomowym zapisem kartoteki.
+ */
+export function stripEditorialExpandControls(value = '') {
+  return text(value)
+    .replace(/\[\s*\.{3}\s*\]\s*read\s+more(?:\s*\.{3})?/gi, ' ')
+    .replace(/\bread\s+more(?:\s*\.{3})?(?=\s|<|$)/gi, ' ')
+    .replace(/\b(?:czytaj\s+wi[eę]cej|poka[żz]\s+pe[łl]ny\s+opis)(?:\s*\.{3})?/gi, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export function editorialTextLooksValid(value = '', minimum = 1) {
   const source = text(value).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   return source.length >= Math.max(1, Number(minimum) || 1)

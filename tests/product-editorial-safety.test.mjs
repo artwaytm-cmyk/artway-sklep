@@ -4,6 +4,7 @@ import {
   editorialProductContentReport,
   editorialSourceNoiseReport,
   editorialTextLooksValid,
+  stripEditorialExpandControls,
 } from '../src/backend/lib/domain/product-editorial-safety.mjs';
 import { buildProfessionalProductDescription } from '../src/backend/lib/domain/product-content-layout.mjs';
 
@@ -17,6 +18,12 @@ test('fałszywy tytuł i urwany tekst źródła nie przechodzą jako gotowa reda
   assert.equal(report.ready, false);
   assert.ok(report.issues.includes('invalid_title'));
   assert.equal(editorialSourceNoiseReport(report.longDescription).noisy, true);
+});
+
+test('kontrolka rozwijania opisu jest usuwana bez naruszania treści produktu', () => {
+  const cleaned = stripEditorialExpandControls('Gra rozwija koncentrację. [...]Read More... Dla 2–4 graczy.');
+  assert.equal(cleaned, 'Gra rozwija koncentrację. Dla 2–4 graczy.');
+  assert.equal(editorialSourceNoiseReport(cleaned).noisy, false);
 });
 
 test('parametry camelCase są scalane z ich polskimi odpowiednikami', () => {
