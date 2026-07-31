@@ -14,3 +14,4 @@ SET status='superseded',completed_at=NOW(),lease_until=NULL,worker_id='',
 WHERE status='pending'
   AND input_fingerprint=''
   AND requested_by IN ('von-halsky-reconciliation','seo');
+
