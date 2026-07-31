@@ -18,6 +18,7 @@ REASSIGN OWNED BY artway TO artway_owner;
 ALTER DATABASE artway OWNER TO artway_owner;
 ALTER SCHEMA public OWNER TO artway_owner;
 
+GRANT CONNECT,TEMPORARY ON DATABASE artway TO artway_migrator;
 GRANT CONNECT,TEMPORARY ON DATABASE artway TO artway_app;
 GRANT pg_read_all_stats TO artway_app;
 GRANT USAGE ON SCHEMA public TO artway_app;

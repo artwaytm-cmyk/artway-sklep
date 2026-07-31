@@ -100,13 +100,14 @@ test('raport sprzedaży organicznej nie jest publicznym endpointem', async () =>
 });
 
 test('mapa, feed i panel wykorzystują komplet bezpłatnych mechanizmów', async () => {
-  const [sitemap, feed, frontendCore, frontendReport, analytics, timer] = await Promise.all([
+  const [sitemap, feed, frontendCore, frontendReport, analytics, timer, service] = await Promise.all([
     readFile('src/backend/sitemap.mjs', 'utf8'),
     readFile('src/backend/google-products.mjs', 'utf8'),
     readFile('src/frontend/09-seo.js', 'utf8'),
     readFile('src/frontend/09b-seo-effects-panel.js', 'utf8'),
     readFile('src/frontend/09a-seo-analytics.js', 'utf8'),
     readFile('ops/systemd/artway-seo-daily.timer', 'utf8'),
+    readFile('ops/systemd/artway-seo-daily.service', 'utf8'),
   ]);
   const frontend = `${frontendCore}\n${frontendReport}`;
   assert.match(sitemap, /xmlns:image/);
@@ -119,4 +120,5 @@ test('mapa, feed i panel wykorzystują komplet bezpłatnych mechanizmów', async
   assert.match(analytics, /entry_domain/);
   assert.match(frontend, /Z którego adresu wszedł klient/);
   assert.match(timer, /OnCalendar=\*-\*-\* 04:15:00 Europe\/Warsaw/);
+  assert.match(service, /DATABASE_URL=postgresql:\/\/artway_app@localhost\/artway/);
 });

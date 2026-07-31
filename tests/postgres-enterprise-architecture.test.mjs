@@ -44,6 +44,8 @@ test('aplikacja, właściciel i migrator mają oddzielne role oraz timeouty', as
   const roles = await read('ops/postgres/roles.sql');
   const backend = await read('ops/systemd/artway-backend.service');
   const migrator = await read('ops/systemd/artway-postgres-migrate.service');
+  const maintenance = await read('ops/systemd/artway-maintenance.service');
+  const seo = await read('ops/systemd/artway-seo-daily.service');
   assert.match(roles, /CREATE ROLE artway_owner NOLOGIN/);
   assert.match(roles, /CREATE ROLE artway_migrator LOGIN/);
   assert.match(roles, /CREATE ROLE artway_app LOGIN/);
@@ -52,6 +54,9 @@ test('aplikacja, właściciel i migrator mają oddzielne role oraz timeouty', as
   assert.match(backend, /postgresql:\/\/artway_app@localhost\/artway/);
   assert.match(migrator, /User=artway-migrator/);
   assert.match(migrator, /ARTWAY_MIGRATION_OWNER_ROLE=artway_owner/);
+  assert.match(roles, /GRANT CONNECT,TEMPORARY ON DATABASE artway TO artway_migrator/);
+  assert.match(maintenance, /postgresql:\/\/artway_app@localhost\/artway/);
+  assert.match(seo, /postgresql:\/\/artway_app@localhost\/artway/);
 });
 
 test('relacyjne cienie obejmują zamówienia, kanały, Agenta i magazyn', async () => {
@@ -78,6 +83,9 @@ test('lekki sklep, partycje, retencja i pomiar indeksów są wdrażane bez autom
   assert.match(migration, /PARTITION BY RANGE\(created_at\)/);
   assert.match(maintenance, /DETACH PARTITION/);
   assert.match(maintenance, /SET SCHEMA artway_archive/);
+  assert.match(maintenance, /LIMIT \$2/);
+  assert.match(maintenance, /quotedIdentifier/);
+  assert.doesNotMatch(maintenance, /DO \$maintenance\$/);
   assert.match(observation, /artway_index_usage_samples/);
   assert.doesNotMatch(observation, /DROP INDEX/);
 });

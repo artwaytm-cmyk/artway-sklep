@@ -2,14 +2,15 @@
 import pg from 'pg';
 import { executeServerCleanup } from '../src/backend/lib/server-maintenance.mjs';
 import { executeDatabaseMaintenance } from '../src/backend/lib/database-maintenance.mjs';
+import { postgresRuntimeUrl } from './lib/postgres-runtime-url.mjs';
 
-const pool = new pg.Pool(process.env.DATABASE_URL
-  ? { connectionString: process.env.DATABASE_URL }
-  : {
-      host: process.env.PGHOST || '/var/run/postgresql',
-      database: process.env.PGDATABASE || 'artway',
-      user: process.env.PGUSER || 'artway',
-    });
+const pool = new pg.Pool({
+  connectionString: await postgresRuntimeUrl(),
+  max: 1,
+  connectionTimeoutMillis: 10_000,
+  statement_timeout: 10 * 60_000,
+  query_timeout: 11 * 60_000,
+});
 try {
   const [files, database] = await Promise.all([
     executeServerCleanup(),

@@ -12,7 +12,7 @@ EnvironmentFile=/srv/artway/shop/.env.server
 EnvironmentFile=-/srv/artway/ops/secrets/ai.env
 Environment=NODE_ENV=production
 Environment=ARTWAY_STORE_DRIVER=postgres
-Environment=DATABASE_URL=postgresql:///artway?host=/var/run/postgresql
+Environment=DATABASE_URL=postgresql://artway_app@localhost/artway?host=/var/run/postgresql
 Environment=ARTWAY_INTERNAL_ORIGIN=http://127.0.0.1:3000
 ExecStart=/usr/bin/node /srv/artway/shop/scripts/run-seo-daily.mjs
 NoNewPrivileges=true
