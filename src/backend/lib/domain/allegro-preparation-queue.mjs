@@ -3,9 +3,10 @@ import crypto from 'node:crypto';
 import { providerQuotaUnavailable } from './agent-specialists-support.mjs';
 import { productPreparationQualityGap, productSalePriority } from './product-preparation-priority.mjs';
 import { runAllegroPreparationDownstream } from './allegro-preparation-downstream.mjs';
+import { productAgentReviewCurrent } from './product-agent-review-state.mjs';
 
 export { productPreparationQualityGap } from './product-preparation-priority.mjs';
-
+export { productAgentReviewCurrent } from './product-agent-review-state.mjs';
 const STATE_KEY = 'allegro_preparation_queue';
 const MAX_PENDING = 2000;
 const MAX_RESULTS = 1000;
@@ -245,6 +246,7 @@ export function selectAllegroPreparationCandidates(products = [], {
   for (const product of rows) {
     const id = clean(product?.id ?? product?.productId, 100);
     if (!id || asObject(product?._catalog).recordStatus === 'trash') continue;
+    if (productAgentReviewCurrent(product, timestamp) && !explicitAllegroRepairSignal(product)) continue;
     // Aktywne, kanonicznie powiązane oferty są weryfikowane przez okresową
     // synchronizację ofert. Nie wolno przepisywać ich opisów tylko dlatego,
     // że pochodzą sprzed wprowadzenia technicznego pokwitowania Agenta.

@@ -24,6 +24,7 @@ test('raport Agenta zwraca potwierdzone kanały i stan wystawienia z centralnej 
           total: '1114', working: '1', ready: '50', decision: '3', needs_data: '800', not_started: '260',
           store_prepared: '473', store_ready: '470', allegro_prepared: '416', allegro_ready: '310',
           von_prepared: '195', von_ready: '65', ready_to_list: '136', needs_update: '12',
+          full_review_confirmed: '41', full_review_stale: '2',
           revision: '2026-07-29T20:00:00.000Z',
         }] };
       }
@@ -33,6 +34,9 @@ test('raport Agenta zwraca potwierdzone kanały i stan wystawienia z centralnej 
         updated_at: '2026-07-29T20:00:00.000Z', work_status: 'ready', task_status: 'completed',
         task_operation: 'product-full-review', task_result: {}, store_prepared: true, store_ready: true,
         allegro_prepared: true, allegro_ready: true, von_prepared: true, von_ready: true,
+        review_status: 'confirmed', review_confirmed_at: '2026-07-29T19:59:00.000Z',
+        review_verification_due_at: '2026-08-28T19:59:00.000Z',
+        review_reason: 'full_review_saved_and_read_back', review_saved_fields: ['opis', 'allegroDescription'],
         ready_to_list: true, needs_update: false, filtered_total: '1',
         data: {
           zdjecie: 'https://example.test/game.jpg',
@@ -50,9 +54,12 @@ test('raport Agenta zwraca potwierdzone kanały i stan wystawienia z centralnej 
   assert.equal(result.available, true);
   assert.equal(result.summary.store_prepared, 473);
   assert.equal(result.summary.ready_to_list, 136);
+  assert.equal(result.summary.full_review_confirmed, 41);
   assert.equal(result.total, 1);
   assert.equal(result.items[0].allegro.readyToList, true);
   assert.equal(result.items[0].allegro.ready, true);
   assert.equal(result.items[0].vonHalsky.ready, true);
+  assert.equal(result.items[0].fullReview.current, true);
+  assert.equal(result.items[0].fullReview.status, 'confirmed');
   assert.deepEqual(result.items[0].allegro.savedFields, ['allegroTitle', 'allegroDescription']);
 });

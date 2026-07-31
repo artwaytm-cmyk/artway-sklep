@@ -1,6 +1,7 @@
 function asortymentAgentMetaHTML(p={}){
-  const reviewed=p.agentQualityConfirmedAt||"",time=Date.parse(reviewed||"");
-  if(p.agentQualityReadbackConfirmed!==true||String(p.agentQualityReviewStatus||"")!=="confirmed")return "";
+  const review=p._agentReview||{},relational=String(review.status||"")==="confirmed";
+  const reviewed=review.confirmedAt||p.agentQualityConfirmedAt||"",time=Date.parse(reviewed||"");
+  if(!relational&&(p.agentQualityReadbackConfirmed!==true||String(p.agentQualityReviewStatus||"")!=="confirmed"))return "";
   if(!Number.isFinite(time))return "";
   const states=p.contentEditorial?.channelStates||{},publication=(channel)=>{
     const state=String(states[channel]?.publicationStatus||(channel==="allegro"?p.allegroEditorialSyncState:channel==="vonHalsky"?p.vonHalskyEditorialSyncState:"confirmed")||"").toLowerCase();
@@ -9,8 +10,9 @@ function asortymentAgentMetaHTML(p={}){
     if(["decision_required","requires_publication_decision","blocked","requires_mapping_review"].includes(state))return "!";
     return "—";
   };
-  const date=new Date(time).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
-  return `<small class="catalog-product-agent-meta" title="Oznaczenie pojawia się dopiero po zapisie całego przeglądu i odczycie kontrolnym centralnej kartoteki.">🤖 Pełny przegląd zapisany ${esc(date)} • sklep ${publication("store")} • Allegro ${publication("allegro")} • Von Halsky ${publication("vonHalsky")}</small>`;
+  const date=new Date(time).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}),due=Date.parse(review.verificationDueAt||"");
+  const next=Number.isFinite(due)?` • bez ponownej kontroli do ${new Date(due).toLocaleDateString("pl-PL")}`:"";
+  return `<small class="catalog-product-agent-meta" title="Oznaczenie pojawia się dopiero po zapisie całego przeglądu i odczycie kontrolnym centralnej kartoteki.">🤖 Pełny przegląd zapisany ${esc(date)}${esc(next)} • sklep ${publication("store")} • Allegro ${publication("allegro")} • Von Halsky ${publication("vonHalsky")}</small>`;
 }
 function asortymentKartaProduktuHTML(p={},ukrytaKopia=false){
   const dodany=jestProduktemDodanym(p.id)||["dodany","import"].includes(String(p?._catalog?.source||"")),ukryty=czyProduktAdminWKoszu(p)||p?._catalog?.recordStatus==="trash",edytowany=!!produktyEdytowane[p.id],selected=zaznaczoneProdukty.has(p.id)||zaznaczoneProdukty.has(String(p.id));

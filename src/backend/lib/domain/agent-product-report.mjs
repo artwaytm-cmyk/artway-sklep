@@ -41,6 +41,12 @@ const REPORT_CTE = `
       COALESCE(t.task_operation,'') task_operation,
       t.task_updated_at,
       COALESCE(t.task_result,'{}'::jsonb) task_result,
+      COALESCE(review.review_status,'') review_status,
+      review.confirmed_at review_confirmed_at,
+      review.verification_due_at review_verification_due_at,
+      COALESCE(review.reason,'') review_reason,
+      COALESCE(review.saved_fields,'[]'::jsonb) review_saved_fields,
+      review.updated_at review_updated_at,
       COALESCE(p.data->>'contentEditorialPreparedAt','')<>'' store_prepared,
       (
         COALESCE(p.data->>'contentEditorialPreparedAt','')<>''
@@ -60,6 +66,8 @@ const REPORT_CTE = `
       lower(COALESCE(p.data->>'allegroEditorialSyncPending','false'))='true' needs_update
     FROM artway_product_records p
     LEFT JOIN latest_task t ON t.product_id=p.product_id
+    LEFT JOIN artway_product_agent_state review
+      ON review.namespace=p.namespace AND review.product_id=p.product_id
     WHERE p.namespace=$1 AND p.record_status='active'
   ),
   classified AS (
@@ -68,7 +76,11 @@ const REPORT_CTE = `
         WHEN task_status IN ('pending','running') OR COALESCE(data->>'agentOnboardingStatus','')='processing' THEN 'working'
         WHEN task_status IN ('decision_required','failed')
           OR COALESCE(data->>'allegroAgentPreparationStatus','') IN ('decision_required','failed')
-          OR COALESCE(data->>'vonHalskyAgentStatus','')='error' THEN 'decision'
+          OR COALESCE(data->>'vonHalskyAgentStatus','')='error'
+          OR review_status='attention' THEN 'decision'
+        WHEN review_status='stale' THEN 'needs_data'
+        WHEN $2='all' AND review_status='confirmed'
+          AND review_verification_due_at>NOW() THEN 'ready'
         WHEN $2='store' AND store_ready THEN 'ready'
         WHEN $2='allegro' AND allegro_ready THEN 'ready'
         WHEN $2='von_halsky' AND von_ready THEN 'ready'
@@ -140,6 +152,15 @@ function row(record = {}) {
       status: text(data.vonHalskyAgentStatus, 50),
       savedFields: array(data.vonHalskyAgentSavedFields),
     },
+    fullReview: {
+      status: text(record.review_status, 40) || 'not_started',
+      confirmedAt: record.review_confirmed_at || null,
+      verificationDueAt: record.review_verification_due_at || null,
+      reason: text(record.review_reason, 160),
+      savedFields: array(record.review_saved_fields),
+      current: text(record.review_status, 40) === 'confirmed'
+        && Date.parse(record.review_verification_due_at || '') > Date.now(),
+    },
     updatedAt: record.updated_at || null,
   };
 }
@@ -178,7 +199,9 @@ export function createAgentProductReport({ pool, namespace = 'artway-sklep' } = 
           COUNT(*) FILTER(WHERE von_ready)::bigint von_ready,
           COUNT(*) FILTER(WHERE ready_to_list)::bigint ready_to_list,
           COUNT(*) FILTER(WHERE has_allegro AND needs_update)::bigint needs_update,
-          MAX(GREATEST(updated_at,COALESCE(task_updated_at,'epoch'::timestamptz))) revision
+          COUNT(*) FILTER(WHERE review_status='confirmed' AND review_verification_due_at>NOW())::bigint full_review_confirmed,
+          COUNT(*) FILTER(WHERE review_status='stale')::bigint full_review_stale,
+          MAX(GREATEST(updated_at,COALESCE(task_updated_at,'epoch'::timestamptz),COALESCE(review_updated_at,'epoch'::timestamptz))) revision
         FROM classified`, summaryValues),
       pool.query(`${REPORT_CTE}
         SELECT *,COUNT(*) OVER() filtered_total
@@ -186,7 +209,7 @@ export function createAgentProductReport({ pool, namespace = 'artway-sklep' } = 
         WHERE ${filters}
         ORDER BY
           CASE work_status WHEN 'working' THEN 0 WHEN 'decision' THEN 1 WHEN 'needs_data' THEN 2 WHEN 'ready' THEN 3 ELSE 4 END,
-          GREATEST(updated_at,COALESCE(task_updated_at,'epoch'::timestamptz)) DESC,
+          GREATEST(updated_at,COALESCE(task_updated_at,'epoch'::timestamptz),COALESCE(review_updated_at,'epoch'::timestamptz)) DESC,
           product_id
         LIMIT $5 OFFSET $6`, values),
     ]);

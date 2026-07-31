@@ -7,6 +7,7 @@ import {
   allegroPreparationAttemptDisposition,
   allegroPreparationRetryState,
   createAllegroPreparationQueue,
+  productAgentReviewCurrent,
   productPreparationQualityGap,
   selectAllegroPreparationCandidates,
 } from '../src/backend/lib/domain/allegro-preparation-queue.mjs';
@@ -335,6 +336,27 @@ test('rzeczywisty sygnał naprawy może ponownie otworzyć aktywną ofertę', ()
   const selected = selectAllegroPreparationCandidates([active]);
   assert.equal(selected.length, 1);
   assert.equal(selected[0].id, 'active');
+});
+
+test('potwierdzona pełna kontrola nie wraca natychmiast do kolejki po zmianie ceny lub stanu', () => {
+  const product = {
+    id: 'reviewed',
+    cena: 49.9,
+    stan: 8,
+    _agentReview: {
+      status: 'confirmed',
+      confirmedAt: '2026-07-30T08:00:00.000Z',
+      verificationDueAt: '2026-08-29T08:00:00.000Z',
+    },
+  };
+  assert.equal(productAgentReviewCurrent(product, new Date('2026-07-31T08:00:00.000Z')), true);
+  assert.deepEqual(selectAllegroPreparationCandidates([product], {
+    now: new Date('2026-07-31T08:00:00.000Z'),
+  }), []);
+  assert.equal(selectAllegroPreparationCandidates([{ ...product, allegroComplianceError: 'błąd kanału' }], {
+    now: new Date('2026-07-31T08:00:00.000Z'),
+  }).length, 1);
+  assert.equal(productAgentReviewCurrent(product, new Date('2026-08-30T08:00:00.000Z')), false);
 });
 
 test('zadanie już obecne w kolejce nie przepisuje aktywnej oferty po wdrożeniu blokady', async () => {

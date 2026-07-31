@@ -11,6 +11,7 @@ import { assertPostgresRelations } from '../core/postgres-schema-contract.mjs';
 import { produktBezDanychPrywatnych } from '../infakt-purchase.mjs';
 import { mergeCatalogProducts } from './catalog-quality.mjs';
 import { canonicalManufacturerName } from './product-field-validation.mjs';
+import { agentReviewJsonSql } from './product-agent-review-state.mjs';
 
 const asArray = (value) => Array.isArray(value) ? value : [];
 const asObject = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -275,6 +276,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
         'artway_product_catalog_meta',
         'artway_product_mutations',
         'artway_product_sequences',
+        'artway_product_agent_state',
       ], 'centralnego katalogu produktów').then(() => true);
     }
     return schemaPromise;
@@ -322,7 +324,9 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     if (!available) return { available: false, items: [], total: 0, page: 1, limit: 50, summary: {}, facets: { categories: [], producers: [] } };
     await ensureSchema(); const options = centralCatalogQueryOptions(raw), values = [ns], clauses = ['namespace=$1', "record_status<>'removed'"];
     const table = options.admin ? 'artway_product_records' : 'artway_storefront_products';
-    const listColumn = options.admin ? 'admin_list_data' : 'list_data';
+    const listColumn = options.admin
+      ? `(admin_list_data || ${agentReviewJsonSql(`${table}.namespace`, `${table}.product_id`)})`
+      : 'list_data';
     const add = (sql, value) => { values.push(value); clauses.push(sql.replace('?', `$${values.length}`)); };
     if (!options.admin) clauses.push("record_status='active'", 'sale_available=true');
     if (options.query) add("search_vector @@ to_tsquery('simple', ?)", searchTsQuery(options.query));
@@ -413,7 +417,11 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     if (!available) return null;
     await ensureSchema();
     const result = admin
-      ? await pool.query("SELECT data product FROM artway_product_records WHERE namespace=$1 AND product_id=$2 AND record_status<>'removed'", [ns, text(id, 120)])
+      ? await pool.query(`
+          SELECT (records.data || ${agentReviewJsonSql('records.namespace', 'records.product_id')}) product
+          FROM artway_product_records records
+          WHERE records.namespace=$1 AND records.product_id=$2 AND records.record_status<>'removed'
+        `, [ns, text(id, 120)])
       : await pool.query("SELECT public_data product FROM artway_storefront_products WHERE namespace=$1 AND product_id=$2 AND record_status='active' AND sale_available=true", [ns, text(id, 120)]);
     return result.rows[0]?.product || null;
   };
@@ -430,13 +438,14 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     const safeLimit = Math.max(1, Math.min(2000, Number(limit) || 500));
     const values = [ns, text(afterId, 120), safeLimit];
     const result = await pool.query(`
-      SELECT product_id,data
-      FROM artway_product_records
-      WHERE namespace=$1
-        AND record_status<>'removed'
-        AND product_id>$2
-        ${includeTrash ? '' : "AND record_status='active'"}
-      ORDER BY product_id
+      SELECT records.product_id,
+        (records.data || ${agentReviewJsonSql('records.namespace', 'records.product_id')}) data
+      FROM artway_product_records records
+      WHERE records.namespace=$1
+        AND records.record_status<>'removed'
+        AND records.product_id>$2
+        ${includeTrash ? '' : "AND records.record_status='active'"}
+      ORDER BY records.product_id
       LIMIT $3
     `, values);
     const items = result.rows.map((row) => ({ ...asObject(row.data), id: asObject(row.data).id ?? row.product_id }));

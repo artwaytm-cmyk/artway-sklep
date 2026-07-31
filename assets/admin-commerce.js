@@ -2733,6 +2733,7 @@ function agentAIProductReportHTML(){
   const cards=[
     ["working","⚙",summary.working||0,"Agent pracuje"],
     ["decision","!",summary.decision||0,"Decyzje i błędy"],
+    ["ready","✓",summary.full_review_confirmed||0,"Pełna kontrola zakończona"],
     ["ready_to_list","↗",summary.ready_to_list||0,"Gotowe do wystawienia"],
     ["needs_update","↻",summary.needs_update||0,"Oferty do aktualizacji"]
   ];
@@ -2756,10 +2757,10 @@ function agentAIProductReportHTML(){
       <div class="agent-report-result-meta"><div><b>${esc(data.total||0)} wyników</b><small>${esc(agentAIProductReportChannel(filters.channel))} • aktualizacja ${data.revision?esc(agentAIRuntimeCzas(data.revision)):"brak zmian"}</small></div><button class="btn ghost" onclick="agentAIProductReportPobierz(false)">↻ Odśwież teraz</button></div>
       <div class="agent-report-table">
         <div class="agent-report-table-head"><span>Produkt</span><span>Sklep</span><span>Allegro</span><span>Von Halsky</span><span>Wynik i działanie</span></div>
-        ${items.map(item=>{const status=agentAIProductReportStatus(item.status),missing=item.task?.missing||[];return `<article class="status-${esc(item.status)}">
+        ${items.map(item=>{const status=agentAIProductReportStatus(item.status),missing=item.task?.missing||[],review=item.fullReview||{},reviewDue=review.verificationDueAt?new Date(review.verificationDueAt).toLocaleDateString("pl-PL"):"";return `<article class="status-${esc(item.status)}">
           <div class="agent-report-product">${item.image?`<img src="${esc(item.image)}" alt="" loading="lazy">`:`<span>📦</span>`}<div><b>${esc(item.name||`Produkt ${item.productId}`)}</b><small>ID ${esc(item.productId)} • EAN ${esc(item.ean||"—")}</small><em>${esc(item.producer||"producent nieustalony")}</em></div></div>
           ${agentAIProductReportChannelCell(item.store)}${agentAIProductReportChannelCell(item.allegro)}${agentAIProductReportChannelCell(item.vonHalsky)}
-          <div class="agent-report-result"><span class="lvl ${status[1]}">${esc(status[0])}</span>${item.allegro?.readyToList?`<b>Gotowy do wystawienia na Allegro</b>`:item.allegro?.needsUpdate?`<b>Oferta wymaga aktualizacji</b>`:""}${missing.length?`<small>Braki: ${esc(missing.slice(0,4).join(", "))}</small>`:`<small>Ostatni zapis ${esc(agentAIRuntimeCzas(item.updatedAt))}</small>`}<div><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(item.productId)}">Edytuj</a>${item.allegro?.readyToList?`<a class="btn" href="#/admin/allegro/oferty">Wystaw</a>`:""}</div></div>
+          <div class="agent-report-result"><span class="lvl ${status[1]}">${esc(status[0])}</span>${review.current?`<b>✓ Pełna kontrola zapisana</b><small>Nie wymaga natychmiastowej weryfikacji${reviewDue?` • następna po ${esc(reviewDue)}`:""}</small>`:item.allegro?.readyToList?`<b>Gotowy do wystawienia na Allegro</b>`:item.allegro?.needsUpdate?`<b>Oferta wymaga aktualizacji</b>`:""}${missing.length&&!review.current?`<small>Braki: ${esc(missing.slice(0,4).join(", "))}</small>`:!review.current?`<small>Ostatni zapis ${esc(agentAIRuntimeCzas(item.updatedAt))}</small>`:""}<div><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(item.productId)}">Edytuj</a>${item.allegro?.readyToList?`<a class="btn" href="#/admin/allegro/oferty">Wystaw</a>`:""}</div></div>
         </article>`;}).join("")||`<div class="agent-ops-empty"><span>✓</span><b>Brak produktów dla wybranych filtrów</b><small>Widok odświeży się automatycznie, gdy wpłynie nowe zdarzenie.</small></div>`}
       </div>
       ${pages>1?`<nav class="agent-report-pagination"><button class="btn ghost" onclick="agentAIProductReportFiltr('page',${page-1})" ${page<=1?"disabled":""}>← Poprzednia</button><span>Strona <b>${page}</b> z <b>${pages}</b></span><button class="btn ghost" onclick="agentAIProductReportFiltr('page',${page+1})" ${page>=pages?"disabled":""}>Następna →</button></nav>`:""}
