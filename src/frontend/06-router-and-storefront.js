@@ -93,16 +93,21 @@ function zaladujSklepModul(modul,version){
   sklepObietniceModulow.set(modul,promise);return promise;
 }
 function sklepZaplanujAnalityke(route=trasa()){
-  if(String(route||"").startsWith("/admin")||String(route||"")==="/diagnostyka")return;
-  if(typeof seoSledzTrase==="function"){seoSledzTrase(route);return;}
+  if(typeof seoAktualizujMetaDlaTrasy==="function"&&typeof seoSledzTrase==="function")return;
   if(sklepAnalitykaZaplanowana)return;
   sklepAnalitykaZaplanowana=true;
   const version=document.querySelector('meta[name="artway-version"]')?.content||"dev";
   const run=()=>zaladujSklepModul("analytics",version).then(()=>{
     sklepAnalitykaZaplanowana=false;
+    if(typeof seoAktualizujMetaDlaTrasy==="function")seoAktualizujMetaDlaTrasy(trasa());
     if(typeof seoSledzTrase==="function")seoSledzTrase(trasa());
   }).catch(error=>{sklepAnalitykaZaplanowana=false;loguj("ostrzezenie",`Nie udało się wczytać anonimowej analityki SEO: ${error.message}`);});
   if(typeof requestIdleCallback==="function")requestIdleCallback(run,{timeout:1500});else setTimeout(run,250);
+}
+function sklepSeoAktualizuj(route=trasa()){
+  if(typeof seoAktualizujMetaDlaTrasy==="function")seoAktualizujMetaDlaTrasy(route);
+  if(typeof seoSledzTrase==="function")seoSledzTrase(route);
+  sklepZaplanujAnalityke(route);
 }
 function adminModulyTrasyGotowe(route=""){
   const moduly=adminModulyDlaTrasy(route);
@@ -334,7 +339,7 @@ function renderuj(){
     if(przejsciePanelu){
       adminZapiszPodstroneWCache(root,poprzedniaTrasa);
       if(adminPrzywrocPodstroneZCache(root,t)){
-        document.body.classList.add("admin-mode");seoAktualizujMetaDlaTrasy(t);ostatniaRenderowanaTrasa=t;return;
+        document.body.classList.add("admin-mode");sklepSeoAktualizuj(t);ostatniaRenderowanaTrasa=t;return;
       }
     }
     const panelAdmin=t.startsWith("/admin")&&poprzedniaTrasa.startsWith("/admin")&&root.querySelector(":scope > .admin-page");
@@ -472,8 +477,7 @@ function renderuj(){
     }
     else w.innerHTML = `<div class="page"><div class="panel"><h1>404 — nie ma takiej strony 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
     if(t==="/"||t==="") { rysujChipy(); rysuj(); }
-    seoAktualizujMetaDlaTrasy(t);
-    sklepZaplanujAnalityke(t);
+    sklepSeoAktualizuj(t);
     if((t==="/admin/system"||t==="/admin/aktualizacja"||t==="/admin/publikacja")&&!systemWersjaStan.sprawdzono&&!systemWersjaStan.ladowanie)setTimeout(()=>systemSprawdzWersje(true),0);
     if((t==="/admin/system/diagnostyka"||t==="/diagnostyka")&&!systemDiagStan.ladowanie&&(!systemDiagStan.sprawdzono||Date.now()-Date.parse(systemDiagStan.sprawdzonoAt||0)>5*60*1000))setTimeout(()=>systemOdswiezDiagnostyke(true),0);
     if(t==="/admin/system/logi"&&!systemCentralDiag.loading&&(!systemCentralDiag.loaded||Date.now()-Date.parse(systemCentralDiag.fetchedAt||0)>60*1000))setTimeout(()=>systemOdswiezCentralneBledy(false),0);

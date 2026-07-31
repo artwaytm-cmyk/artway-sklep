@@ -143,6 +143,7 @@ test('pierwsze wejście klienta nie pobiera ciężkiego panelu administratora', 
   assert.ok(publicJs.raw <= B.browser.storefrontScript.maxRawBytes && publicJs.gzip <= B.browser.storefrontScript.maxGzipBytes, 'początkowy JavaScript przekroczył budżet transmisji; podziel kod trasy sklepu');
   assert.ok(deferredAnalytics.raw <= B.browser.storefrontDeferred.maxRawBytes && deferredAnalytics.gzip <= B.browser.storefrontDeferred.maxGzipBytes, 'odroczona analityka SEO przekroczyła budżet osobnego modułu');
   assert.ok(!publicBundle.sources.includes('src/frontend/09a-seo-analytics.js'), 'analityka SEO nie może blokować pierwszego renderu sklepu');
+  assert.ok(!publicBundle.sources.includes('src/frontend/09-seo-public.js'), 'aktualizacja metadanych po nawigacji nie może blokować pierwszego renderu SSR');
   assert.ok(publicCss.raw <= B.browser.storefrontStyles.maxRawBytes && publicCss.gzip <= B.browser.storefrontStyles.maxGzipBytes, 'początkowy CSS przekroczył budżet transmisji');
 });
 
