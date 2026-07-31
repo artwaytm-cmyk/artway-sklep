@@ -63,8 +63,8 @@ body.has-dialog{overflow:hidden}
 .chk-row{display:flex;align-items:center;gap:.55rem;font-size:.88rem;font-weight:600;margin:.55rem 0;cursor:pointer}
 .chk-row input{width:17px;height:17px;accent-color:var(--brand)}
 .summary{background:var(--bg);border-radius:12px;padding:.9rem;font-size:.88rem;margin:1rem 0}
-.summary div{display:flex;justify-content:space-between;padding:.15rem 0}
-.summary .sum-total{border-top:1px solid var(--line);margin-top:.4rem;padding-top:.5rem;font-weight:800}
+.summary>div{display:flex;justify-content:space-between;padding:.15rem 0}
+.summary>.sum-total{border-top:1px solid var(--line);margin-top:.4rem;padding-top:.5rem;font-weight:800}
 .pay-note{font-size:.8rem;color:var(--muted2);margin-top:.7rem;text-align:center}
 .success{text-align:center;padding:1.5rem 0}
 .success .big{font-size:3.5rem}

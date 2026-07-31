@@ -75,3 +75,16 @@ test('nazwy produktów w responsywnym katalogu pozostają we własnej kolumnie',
   assert.match(css, /@container\(max-width:820px\)/);
   assert.match(css, /catalog-product-buttons>\.btn\{width:auto;white-space:nowrap\}/);
 });
+
+test('podsumowanie koszyka nie przejmuje zagnieżdżonych układów panelu', async () => {
+  const [cartCss, agentCss, agentScript] = await Promise.all([
+    read('src/styles/08-cart-and-modals.css'),
+    read('src/styles/28-agent-ai-workspace.css'),
+    read('src/frontend/11-agent-ai-workspace.js'),
+  ]);
+  assert.match(cartCss, /\.summary>div\{display:flex/);
+  assert.doesNotMatch(cartCss, /\.summary div\{display:flex/);
+  assert.match(agentScript, /agent-operations-shell is-\$\{mode\}/);
+  assert.match(agentCss, /agent-operations-shell\.is-summary \.agent-operations-list\{grid-template-columns:minmax\(0,1fr\);grid-auto-flow:row\}/);
+  assert.match(agentCss, /agent-operations-list :is\(b,p,small,strong,em\)\{overflow-wrap:break-word;word-break:normal\}/);
+});

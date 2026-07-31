@@ -1,16 +1,17 @@
 import pg from 'pg';
 import { createCentralProductCatalog, centralAllegroPreparationFingerprint } from '../src/backend/lib/domain/central-product-catalog.mjs';
 import { editorialProductContentReport } from '../src/backend/lib/domain/product-editorial-safety.mjs';
+import { postgresRuntimeUrl } from './lib/postgres-runtime-url.mjs';
 
 const apply = process.argv.includes('--apply');
 const namespace = process.env.ARTWAY_NAMESPACE || 'artway-sklep';
-const pool = new pg.Pool(process.env.DATABASE_URL
-  ? { connectionString: process.env.DATABASE_URL }
-  : {
-      database: process.env.PGDATABASE || 'artway',
-      user: process.env.PGUSER || 'artway',
-      host: process.env.PGHOST || '/var/run/postgresql',
-    });
+const pool = new pg.Pool({
+  connectionString: await postgresRuntimeUrl(),
+  max: 1,
+  connectionTimeoutMillis: 10_000,
+  statement_timeout: 60_000,
+  query_timeout: 65_000,
+});
 const catalog = createCentralProductCatalog({ pool, namespace });
 const { rows } = await pool.query(`
   SELECT product_id,data

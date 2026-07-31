@@ -34,6 +34,21 @@ async function mockAdminSession(page) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, runtime: { state: 'ready', running: false, queue: { counts: {} }, eventQueue: { active: 0, queued: 0, running: 0, recent: [] }, history: [] } }) });
       return;
     }
+    if (action === 'agent-operations-summary') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        ok: true,
+        score: 91,
+        generatedAt: new Date().toISOString(),
+        priorities: [
+          { area: 'system', severity: 'critical', count: 2, title: 'Dziennik błędów wymaga aktualnej analizy', action: 'Otwórz centralny rejestr i usuń przyczynę błędów.', owner: 'Agent diagnostyczny', requiresApproval: false },
+          { area: 'produkty', severity: 'warning', count: 11, title: 'Uzupełnij dane wystawiania produktów', action: 'Dopasuj brakujące parametry bez naruszania danych źródłowych.', owner: 'Agent produktów', requiresApproval: true },
+          { area: 'produkty', severity: 'info', count: 7, title: 'Linki producentów wymagają kontroli', action: 'Sprawdź źródła i zapisz potwierdzone wyniki w kartotekach.', owner: 'Agent źródeł', requiresApproval: false },
+        ],
+        integrations: { allegro: true, inpost: true, infakt: true, email: true },
+        summary: { activeOrders: 2, activeAllegro: 1, shipmentsWithoutTracking: 0, communicationWaiting: 0 },
+      }) });
+      return;
+    }
     if (action === 'agent-product-report') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
         ok: true,
@@ -363,6 +378,37 @@ test('raport Agenta pokazuje trwałe zapisy trzech kanałów i działa bez prze�
   assertRuntime();
 });
 
+test('priorytety Agenta pozostają czytelne i nie układają tekstu pionowo', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await page.setViewportSize({ width: 1071, height: 762 });
+  await loginAdmin(page);
+  await page.goto('/#/admin/agent-ai');
+  const cards = page.locator('.agent-home-operations .agent-operations-list>article');
+  await expect(cards).toHaveCount(3);
+  const geometry = await cards.evaluateAll((items) => items.map((item) => {
+    const content = item.children[1];
+    const style = getComputedStyle(content);
+    const textStyle = getComputedStyle(content.querySelector('p'));
+    return {
+      cardWidth: item.getBoundingClientRect().width,
+      contentWidth: content.getBoundingClientRect().width,
+      display: style.display,
+      wordBreak: textStyle.wordBreak,
+      overflowWrap: textStyle.overflowWrap,
+    };
+  }));
+  for (const item of geometry) {
+    expect(item.cardWidth).toBeGreaterThan(280);
+    expect(item.contentWidth).toBeGreaterThan(140);
+    expect(item.display).toBe('block');
+    expect(item.wordBreak).toBe('normal');
+    expect(item.overflowWrap).toBe('break-word');
+  }
+  const dimensions = await page.evaluate(() => ({ viewport: innerWidth, content: document.documentElement.scrollWidth }));
+  expect(dimensions.content).toBeLessThanOrEqual(dimensions.viewport + 1);
+  assertRuntime();
+});
+
 test('administrator tworzy PZ i WZ jednym kliknięciem bez dublowania żądania', async ({ page }) => {
   const assertRuntime = observeRuntime(page);
   const documents = [];
@@ -533,9 +579,25 @@ test('główne działy administratora mają jeden profesjonalny szablon i nie tw
     await page.goto(`/#${route}`);
     const workspace = page.locator('.admin-workspace-content[data-admin-layout="unified-v2"]');
     await expect(workspace, `Nie załadowano obszaru roboczego na ${route}`).toBeVisible();
-    await expect(workspace.locator('.admin-unified-hero').first(), `Brak wspólnego nagłówka na ${route}`).toBeVisible();
-    const dimensions = await workspace.evaluate((element) => ({ width: element.clientWidth, content: element.scrollWidth }));
-    expect(dimensions.content, `Poziome przepełnienie na ${route}`).toBeLessThanOrEqual(dimensions.width + 1);
+    const layout = await workspace.evaluate((element) => {
+      const hero = element.querySelector('.admin-unified-hero');
+      const heroRect = hero?.getBoundingClientRect();
+      const suspicious = [...element.querySelectorAll('h1,h2,h3,h4,p,b,strong,small,label,button,.btn')]
+        .map((node) => ({ node, text: String(node.textContent || '').replace(/\s+/g, ' ').trim(), rect: node.getBoundingClientRect() }))
+        .filter(({ node, text, rect }) => text.length >= 12 && rect.width > 0 && rect.height > 0
+          && getComputedStyle(node).visibility !== 'hidden' && rect.width < 48 && rect.height > rect.width * 2.5)
+        .slice(0, 8)
+        .map(({ node, text, rect }) => ({ tag: node.tagName, className: node.className, text: text.slice(0, 80), width: Math.round(rect.width), height: Math.round(rect.height) }));
+      return {
+        width: element.clientWidth,
+        content: element.scrollWidth,
+        heroVisible: Boolean(heroRect && heroRect.width > 0 && heroRect.height > 0),
+        suspicious,
+      };
+    });
+    expect(layout.heroVisible, `Brak wspólnego nagłówka na ${route}`).toBe(true);
+    expect(layout.content, `Poziome przepełnienie na ${route}`).toBeLessThanOrEqual(layout.width + 1);
+    expect(layout.suspicious, `Tekst ułożony pionowo na ${route}`).toEqual([]);
   }
   assertRuntime();
 });

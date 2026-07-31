@@ -113,7 +113,7 @@
   .admin-tresc .panel>.log-table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
   .warehouse-table{min-width:980px}
   .tracking-table{min-width:720px}
-  .page,.panel,.admin-tresc{min-width:0;overflow-wrap:anywhere}
+  .page,.panel,.admin-tresc{min-width:0;overflow-wrap:break-word;word-break:normal}
   .section-head>a,.foot-in a{min-height:44px;display:flex;align-items:center}
   .drawer{height:100dvh}.drawer-foot{padding-bottom:max(1.1rem,env(safe-area-inset-bottom))}
   .modal{padding:.5rem}.modal-box{padding:1rem;border-radius:16px;max-height:calc(100dvh - 1rem)}

@@ -3,7 +3,8 @@ html:has(body.admin-mode),body.admin-mode{max-width:100%;overflow-x:clip}
 body.admin-mode #widok,body.admin-mode .admin-page,body.admin-mode .admin-tresc,body.admin-mode .admin-workspace-content{width:100%;max-width:100%;min-width:0;overflow-x:clip}
 body.admin-mode .admin-tresc :is(main,aside,section,article,header,footer,nav,form,fieldset,div){max-width:100%;min-width:0}
 body.admin-mode .admin-tresc :is(input,select,textarea,button,.btn,img,svg,canvas,video){max-width:100%;min-width:0}
-body.admin-mode .admin-tresc :is(p,li,b,strong,small,em,a,label,legend,code,pre){overflow-wrap:anywhere;word-break:normal}
+body.admin-mode .admin-tresc :is(p,li,b,strong,small,em,a,label,legend){overflow-wrap:break-word;word-break:normal}
+body.admin-mode .admin-tresc :is(code,pre){overflow-wrap:anywhere;word-break:normal}
 body.admin-mode .admin-tresc pre{white-space:pre-wrap}
 body.admin-mode .admin-tresc :is(button,.btn,a[role="button"],summary){max-width:100%;min-width:0;line-height:1.15;white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis}
 body.admin-mode .admin-tresc .btn{min-height:40px}
@@ -16,7 +17,7 @@ body.admin-mode .admin-tresc :is(.order-stat-card,.stock-summary-card,.admin-nav
 body.admin-mode .admin-tresc .panel{max-width:100%;overflow:visible}
 body.admin-mode .admin-tresc :is(.table-scroll,.warehouse-worktable-wrap,.catalog-quality-table-wrap,.product-link-import-table-wrap,.warehouse-document-lines,.allegro-listing-table-wrap){max-width:100%;overflow:visible!important}
 body.admin-mode .admin-tresc table{width:100%!important;max-width:100%;min-width:0!important;table-layout:fixed}
-body.admin-mode .admin-tresc :is(th,td){min-width:0!important;max-width:none!important;overflow-wrap:anywhere;white-space:normal}
+body.admin-mode .admin-tresc :is(th,td){min-width:0!important;max-width:none!important;overflow-wrap:break-word;word-break:normal;white-space:normal}
 body.admin-mode .admin-tresc td :is(input,select,textarea,.btn,details){max-width:100%;min-width:0!important}
 body.admin-mode .admin-tresc td :is(.diag-actions,.warehouse-stock-links,.supplier-inline-actions){min-width:0;flex-wrap:wrap}
 

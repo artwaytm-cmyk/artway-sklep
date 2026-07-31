@@ -128,3 +128,10 @@ test('PITR archiwizuje WAL i ma automatyczne pełne, różnicowe i przyrostowe k
   assert.match(install, /--type=full backup/);
   assert.match(install, /artway-pgbackrest-incr\.timer/);
 });
+
+test('audyt trwałości Agenta używa produkcyjnej roli aplikacji zamiast roli NOLOGIN', async () => {
+  const audit = await read('scripts/audit-agent-product-persistence.mjs');
+  assert.match(audit, /import \{ postgresRuntimeUrl \}/);
+  assert.match(audit, /connectionString: await postgresRuntimeUrl\(\)/);
+  assert.doesNotMatch(audit, /PGUSER\s*\|\|\s*['"]artway['"]/);
+});
