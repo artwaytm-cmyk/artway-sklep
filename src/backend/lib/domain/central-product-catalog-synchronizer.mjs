@@ -72,12 +72,10 @@ export function createCentralProductCatalogSynchronizer({
         return { ...meta, synchronized: false, current: true };
       }
       const snapshot = await revisionSnapshot(state);
-      const canonicalProducts = meta.count > 0
-        ? [...(await catalog.listDataMap({ includeTrash: true })).values()]
-        : [];
-      const imported = canonicalProducts.length ? [] : await importedProducts();
+      const preferCanonicalCatalog = meta.count > 0;
+      const imported = preferCanonicalCatalog ? [] : await importedProducts();
       return catalog.synchronize(snapshot.settings.data || {}, {
-        canonicalProducts,
+        preferCanonicalCatalog,
         importedProducts: imported,
         offers: offerItems(snapshot.offers),
         mappings: mappingItems(snapshot.mappings),

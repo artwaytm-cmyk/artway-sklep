@@ -203,7 +203,10 @@ async function writeSettingsDomain(client, namespace, key, value, config, versio
   if (version && version.exists !== false && !Number.isSafeInteger(expectedVersion)) return { modified: false };
   const existing = await client.query('SELECT version FROM artway_domain_snapshots WHERE namespace=$1 AND domain=$2', [namespace, domainForSetting(key)]);
   if (version?.exists === false && existing.rowCount) return { modified: false };
-  return replaceDomain(client, namespace, domainForSetting(key), value, config, { expectedVersion: Number.isSafeInteger(expectedVersion) ? expectedVersion : null });
+  return replaceDomain(client, namespace, domainForSetting(key), value, config, {
+    expectedVersion: Number.isSafeInteger(expectedVersion) ? expectedVersion : null,
+    skipIfEqual: true,
+  });
 }
 export function normalizedRevisionToken(domains = [], rows = []) {
   const versions = new Map((rows || []).map((row) => [String(row.domain || ''), Math.max(0, Number(row.version) || 0)]));
@@ -425,6 +428,10 @@ export function createNormalizedDomainRepository({ pool, namespace, legacy }) {
     try {
       await client.query('BEGIN');
       const result = await writeSettingsDomain(client, namespace, settingsDomainFromKey(key), value, config, version);
+      if (result?.unchanged) {
+        await client.query('ROLLBACK');
+        return { ...result, modified: true };
+      }
       if (!result?.modified) { await client.query('ROLLBACK'); return result; }
       const settingsRev = await bumpSettingsRevision(client, namespace);
       await client.query('COMMIT');
@@ -501,7 +508,14 @@ export function createNormalizedDomainRepository({ pool, namespace, legacy }) {
       if (version && version.exists !== false && expectedVersion === null) { await client.query('ROLLBACK'); return { modified: false }; }
       const exists = await client.query('SELECT version FROM artway_domain_snapshots WHERE namespace=$1 AND domain=$2', [namespace, domainForDirectKey(key)]);
       if (version?.exists === false && exists.rowCount) { await client.query('ROLLBACK'); return { modified: false }; }
-      const result = await replaceDomain(client, namespace, domainForDirectKey(key), value, config, { expectedVersion });
+      const result = await replaceDomain(client, namespace, domainForDirectKey(key), value, config, {
+        expectedVersion,
+        skipIfEqual: true,
+      });
+      if (result?.unchanged) {
+        await client.query('ROLLBACK');
+        return { ...result, modified: true };
+      }
       if (!result.modified) { await client.query('ROLLBACK'); return result; }
       await client.query('COMMIT'); return result;
     } catch (error) { await client.query('ROLLBACK'); throw error; }

@@ -7,12 +7,28 @@ const pools = new Map();
 
 export function postgresPoolFor(connectionString) {
   if (!pools.has(connectionString)) {
-    pools.set(connectionString, new Pool({
+    const pool = new Pool({
       connectionString,
       max: Math.max(2, Math.min(30, Number(process.env.ARTWAY_DB_POOL_MAX || 10) || 10)),
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 10_000,
+    });
+    const reportConnectionError = (scope, error) => console.error(JSON.stringify({
+      at: new Date().toISOString(),
+      component: 'artway-postgres-pool',
+      event: 'connection_error',
+      scope,
+      code: String(error?.code || '').slice(0, 40),
+      message: String(error?.message || error || 'Błąd PostgreSQL').slice(0, 500),
     }));
+    // pg usuwa uszkodzone bezczynne połączenia z puli, ale bez odbiornika
+    // zdarzenie error kończyłoby cały proces Node. Stały odbiornik na kliencie
+    // chroni także połączenie aktualnie wypożyczone przez dłuższą operację.
+    pool.on('error', (error) => reportConnectionError('idle-pool-client', error));
+    pool.on('connect', (client) => {
+      client.on('error', (error) => reportConnectionError('connected-client', error));
+    });
+    pools.set(connectionString, pool);
   }
   return pools.get(connectionString);
 }

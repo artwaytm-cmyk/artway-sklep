@@ -88,6 +88,13 @@ test('repozytorium udostępnia przyrostowy odczyt ustawień zamiast obowiązkowe
   assert.match(source, /domain-records-incremental-v1/);
 });
 
+test('identyczny zapis domeny nie podbija rewizji i jest traktowany jako poprawny brak zmiany', async () => {
+  const source = await readFile(new URL('../src/backend/lib/core/normalized-domain-repository.mjs', import.meta.url), 'utf8');
+  assert.match(source, /skipIfEqual: true/);
+  assert.match(source, /result\?\.unchanged/);
+  assert.match(source, /return \{ \.\.\.result, modified: true \}/);
+});
+
 test('największe domeny operacyjne mają własne tabele zamiast wspólnej tabeli JSONB', () => {
   const expected = {
     'kv:orders': 'artway_store_orders',
