@@ -2,9 +2,9 @@ const MONEY_MAX = 1_000_000;
 const BILLING_MODES = new Set(['none', 'single', 'monthly']);
 const DELIVERY_TYPES = new Set(['locker', 'courier']);
 const SENDING_METHODS = new Set(['parcel_locker', 'any_point', 'pok', 'pop', 'courier_pok', 'branch', 'dispatch_order']);
-const LOCKER_SENDING_METHODS = new Set(['parcel_locker', 'any_point', 'pok', 'pop', 'branch']);
-const COURIER_SENDING_METHODS = new Set(['', 'any_point', 'pok', 'pop', 'courier_pok', 'branch']);
-const DROPOFF_POINT_REQUIRED_METHODS = new Set(['parcel_locker', 'pok', 'pop', 'courier_pok']);
+const LOCKER_SENDING_METHODS = new Set(['parcel_locker', 'any_point', 'pok', 'pop', 'branch', 'dispatch_order']);
+const COURIER_SENDING_METHODS = new Set(['', 'parcel_locker', 'any_point', 'pok', 'pop', 'courier_pok', 'branch', 'dispatch_order']);
+const DROPOFF_POINT_REQUIRED_METHODS = new Set(['parcel_locker', 'pok', 'courier_pok']);
 const LOCKER_EXTRAS = new Set(['labelless']);
 const COURIER_EXTRAS = new Set(['sms', 'email', 'saturday', 'dor1720', 'rod', 'labelless']);
 
@@ -246,7 +246,7 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
     insurance: { enabled: raw.insurance?.enabled === true, amount: money(raw.insurance?.amount) },
     weekend: deliveryType === 'locker' && raw.weekend === true,
     additionalServices: extras,
-    pickupRequested: raw.pickupRequested === true || requestedSendingMethod === 'dispatch_order',
+    pickupRequested: raw.pickupRequested === true || sendingMethod === 'dispatch_order',
     billing: {
       mode: billingMode,
       commissionGross,
@@ -263,7 +263,7 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
 export function validateInpostServiceDraft(draft = {}) {
   const errors = [];
   for (const [prefix, person] of [['sender', draft.sender], ['receiver', draft.receiver]]) {
-    if (!person?.companyName && !person?.firstName) errors.push({ field: `${prefix}.firstName`, message: `Podaj imię albo firmę ${prefix === 'sender' ? 'nadawcy' : 'odbiorcy'}.` });
+    if ((prefix === 'sender' || draft.deliveryType === 'courier') && !person?.companyName && !person?.firstName) errors.push({ field: `${prefix}.firstName`, message: `Podaj imię albo firmę ${prefix === 'sender' ? 'nadawcy' : 'odbiorcy'}.` });
     if (!emailOk(person?.email)) errors.push({ field: `${prefix}.email`, message: `Podaj poprawny e-mail ${prefix === 'sender' ? 'nadawcy' : 'odbiorcy'}.` });
     if (!/^\d{9}$/.test(person?.phone || '')) errors.push({ field: `${prefix}.phone`, message: `Podaj 9-cyfrowy telefon ${prefix === 'sender' ? 'nadawcy' : 'odbiorcy'}.` });
   }

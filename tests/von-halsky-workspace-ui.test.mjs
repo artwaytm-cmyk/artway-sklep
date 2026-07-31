@@ -31,7 +31,7 @@ test("tabela Von Halsky przestrzega standardu desktop i mobile",async()=>{
     read("src/styles/37-von-halsky-workspace.css"),
   ]);
   assert.match(source,/class="admin-standard-table admin-responsive-table von-halsky-table"/);
-  for(const label of ["Produkt","Identyfikacja","Gotowość","Cena i kanał","Akcje"]){
+  for(const label of ["Produkt","Identyfikacja","Gotowość","Cena","Kanał sprzedaży","Akcje"]){
     assert.match(source,new RegExp(`data-label="${label}"`),`brak etykiety mobilnej: ${label}`);
   }
   assert.match(source,/class="allegro-listing-results-head"/);

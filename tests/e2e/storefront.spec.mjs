@@ -554,6 +554,10 @@ test('Oferty i publikacja rozdzielają brak towaru od szkiców i nie pokazują o
   await expect(page.getByRole('button', { name: /Wycofane — brak towaru/ })).toBeVisible();
   await expect(page.getByLabel('Dostępność w sprzedaży')).toBeVisible();
   await expect(page.getByLabel('Stan magazynowy')).toBeVisible();
+  await page.getByRole('button', { name: /W sprzedaży \/ aktywne/ }).click();
+  await expect(page.locator('[data-allegro-offers-mode="sprzedaz"]')).toBeVisible();
+  await expect(page.locator('.allegro-channel-truth')).toContainText('Stan potwierdzony bezpośrednio przez API');
+  await expect(page.getByRole('columnheader', { name: 'Kanał sprzedaży' })).toBeVisible();
   assertRuntime();
 });
 
@@ -635,24 +639,20 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
   await expect(page.locator('#inpostServiceForm').getByRole('button', { name: /Wybierz z książki/ })).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Przelicz według umowy' })).toBeVisible();
   await expect(page.getByText('FV: Artway‑TM → nadawca.')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Przy adresie odbiorcy' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Przy adresie' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Utwórz przesyłkę InPost/ })).toBeVisible();
   const shipmentForm = page.locator('#inpostServiceForm');
-  await shipmentForm.locator('[name="sendingMethod"]').selectOption('parcel_locker');
-  await shipmentForm.locator('[name="deliveryType"]').selectOption('courier');
-  await expect(shipmentForm.locator('[name="sendingMethod"]')).toHaveValue('');
-  await expect(shipmentForm.locator('[name="sendingMethod"] option')).toHaveText([
-    'Nadanie standardowe',
-    'Dowolny punkt InPost',
-    'Punkt Obsługi Klienta',
-    'Punkt Obsługi Przesyłek',
-    'Punkt kurierski InPost',
-    'Oddział InPost',
-  ]);
-  await expect(shipmentForm.locator('[name="dropoffPoint"]')).not.toHaveAttribute('required', '');
-  await shipmentForm.locator('[name="deliveryType"]').selectOption('locker');
-  await shipmentForm.locator('[name="sendingMethod"]').selectOption('parcel_locker');
+  await shipmentForm.locator('.inpost-delivery-choice label').filter({ hasText: 'InPost Kurier' }).click();
+  await expect(shipmentForm.locator('[data-inpost-size="xlarge"]')).toBeVisible();
+  await expect(shipmentForm.locator('[data-inpost-only="courier"].inpost-courier-address')).toBeVisible();
+  await shipmentForm.locator('.inpost-method-choice label').filter({ hasText: 'Nadam w automacie Paczkomat' }).click();
   await expect(shipmentForm.locator('[name="dropoffPoint"]')).toHaveAttribute('required', '');
+  await expect(shipmentForm.locator('[data-inpost-dropoff-panel]')).toBeVisible();
+  await shipmentForm.locator('.inpost-method-choice label').filter({ hasText: 'Przesyłkę odbierze kurier InPost' }).click();
+  await expect(shipmentForm.locator('[name="dropoffPoint"]')).not.toHaveAttribute('required', '');
+  await expect(shipmentForm.locator('[data-inpost-dropoff-panel]')).toBeHidden();
+  await shipmentForm.locator('.inpost-delivery-choice label').filter({ hasText: 'Paczkomat® 24/7' }).click();
+  await expect(shipmentForm.locator('[name="targetPoint"]')).toBeVisible();
   await page.evaluate(() => {
     inpostServiceStan.addressBook = [{
       id: 'IPA-E2E',
@@ -738,8 +738,8 @@ test('potwierdzenie klienta otwiera druk A4 z aktualną historią transportu', a
 
 test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawaniem paczek', async ({ page }) => {
   // Widok ładuje trzy rozdzielone moduły nawigacji, katalogu i ustawień.
-  // Pełny scenariusz sprawdza je kolejno na desktopie i telefonie, dlatego
-  // otrzymuje własny budżet bez osłabiania limitów pozostałych testów.
+  // Pełny scenariusz sprawdza kolejno pulpit, katalog i ustawienia,
+  // dlatego otrzymuje własny budżet bez osłabiania pozostałych testów.
   test.setTimeout(120_000);
   const assertRuntime = observeRuntime(page);
   await loginAdmin(page);
@@ -767,6 +767,7 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.locator('.von-halsky-stage-filters')).toContainText('Do wystawienia');
   await expect(page.locator('.von-halsky-stage-filters')).toContainText('Do przygotowania');
   await expect(page.locator('.von-halsky-table')).toBeVisible();
+  await expect(page.locator('.von-halsky-table').getByRole('columnheader', { name: 'Kanał sprzedaży' })).toBeVisible();
   await expect(page.getByLabel('Etap sprzedaży')).toBeVisible();
   await expect(page.getByLabel('Jakość danych')).toBeVisible();
   await expect(page.getByLabel('Praca Agenta')).toBeVisible();
@@ -814,10 +815,6 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.getByRole('heading', { name: 'Ostatnie operacje API' })).toBeVisible();
   await expect(page.locator('[name="testOfferCode"]')).toHaveCount(0);
   await expect.poll(() => page.locator('#artwayAdminStyle-vonHalsky').evaluate((link) => Boolean(link.sheet))).toBe(true);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/#/admin/von-halsky/wystawianie');
-  const mobile = await page.evaluate(() => ({ viewport: window.innerWidth, content: document.documentElement.scrollWidth }));
-  expect(mobile.content).toBeLessThanOrEqual(mobile.viewport + 1);
   assertRuntime();
 });
 

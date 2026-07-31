@@ -75,21 +75,21 @@ test('nadanie usługowe waliduje klienta i obsługuje Paczkomat, pobranie, ochro
   assert.deepEqual(payload.insurance, { amount: 200, currency: 'PLN' });
 });
 
-test('zmiana na kuriera usuwa odziedziczoną metodę Paczkomatu i nie wysyła błędnych custom_attributes', () => {
+test('kurier obsługuje te same trzy sposoby nadania i wymaga automatu tylko dla parcel_locker', () => {
   const value = draft({
     deliveryType: 'courier',
     targetPoint: '',
-    dropoffPoint: '',
+    dropoffPoint: 'BOJ01N',
     sendingMethod: 'parcel_locker',
     weekend: true,
     additionalServices: ['sms'],
   });
-  assert.equal(value.sendingMethod, '');
+  assert.equal(value.sendingMethod, 'parcel_locker');
   assert.equal(value.weekend, false);
   assert.equal(validateInpostServiceDraft(value).ok, true);
   const payload = inpostServiceShipxPayload(value);
   assert.equal(payload.service, 'inpost_courier_standard');
-  assert.equal(payload.custom_attributes, undefined);
+  assert.deepEqual(payload.custom_attributes, { sending_method: 'parcel_locker', dropoff_point: 'BOJ01N' });
   assert.deepEqual(payload.additional_services, ['sms']);
 });
 
@@ -285,7 +285,7 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /Drukuj \/ zapisz PDF/);
   assert.match(shipping, /Historia transportu/);
   assert.match(shipping, /inpostServiceZastosujZgodnoscTypu/);
-  assert.match(shipping, /Punkt nadania \*/);
+  assert.match(shipping, /Automat nadawczy \*/);
   assert.match(shipping, /Kontrola ShipX:<\/b>.*niepotwierdzona/s);
   assert.equal((shipping.match(/function inpostServiceUstawTyp\(/g) || []).length, 1);
   assert.match(core, /#\/admin\/infakt\/wysylki/);
@@ -427,7 +427,7 @@ test('endpoint wyceny naprawdę wysyła szkic do ShipX, a książka adresowa zap
   assert.equal(imported.body.total, 2);
 });
 
-test('endpoint tworzenia przesyłki kurierskiej nie przekazuje odziedziczonej metody Paczkomatu', async () => {
+test('endpoint tworzenia przesyłki kurierskiej przekazuje wybrany odbiór przez kuriera', async () => {
   const storage = new Map(), calls = [];
   const route = createInpostServiceShipmentRoute({
     respond: (body, status = 200) => ({ body, status }),
@@ -462,7 +462,7 @@ test('endpoint tworzenia przesyłki kurierskiej nie przekazuje odziedziczonej me
       sender,
       receiver,
       deliveryType: 'courier',
-      sendingMethod: 'parcel_locker',
+      sendingMethod: 'dispatch_order',
       targetPoint: '',
       dropoffPoint: '',
       parcel: { template: 'small', weight: 1 },
@@ -476,5 +476,5 @@ test('endpoint tworzenia przesyłki kurierskiej nie przekazuje odziedziczonej me
   const createCall = calls.find((entry) => /\/shipments$/.test(entry.path));
   assert.ok(createCall);
   assert.equal(createCall.options.bodyObj.service, 'inpost_courier_standard');
-  assert.equal(createCall.options.bodyObj.custom_attributes, undefined);
+  assert.deepEqual(createCall.options.bodyObj.custom_attributes, { sending_method: 'dispatch_order' });
 });

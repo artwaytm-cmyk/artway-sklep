@@ -575,46 +575,48 @@ async function inpostServiceLaduj(force=false,cicho=true){
 }
 const inpostServiceMetodyNadania={
   locker:[
-    ["any_point","Dowolny punkt InPost"],
-    ["parcel_locker","Konkretny Paczkomat"],
-    ["pok","Punkt Obsługi Klienta"],
-    ["pop","Punkt Obsługi Przesyłek"],
-    ["branch","Oddział InPost"]
+    ["parcel_locker","Nadam w automacie Paczkomat"],
+    ["dispatch_order","Przesyłkę odbierze kurier InPost"],
+    ["pop","Nadam w PaczkoPunkcie"]
   ],
   courier:[
-    ["","Nadanie standardowe"],
-    ["any_point","Dowolny punkt InPost"],
-    ["pok","Punkt Obsługi Klienta"],
-    ["pop","Punkt Obsługi Przesyłek"],
-    ["courier_pok","Punkt kurierski InPost"],
-    ["branch","Oddział InPost"]
+    ["parcel_locker","Nadam w automacie Paczkomat"],
+    ["dispatch_order","Przesyłkę odbierze kurier InPost"],
+    ["pop","Nadam w PaczkoPunkcie"]
   ]
 };
-const inpostServiceMetodyWymagajacePunktu=new Set(["parcel_locker","pok","pop","courier_pok"]);
+const inpostServiceMetodyWymagajacePunktu=new Set(["parcel_locker","pok","courier_pok"]);
 function inpostServiceMetodyNadaniaOpcjeHTML(type="locker",selected=""){
   return (inpostServiceMetodyNadania[type]||inpostServiceMetodyNadania.locker).map(([value,label])=>`<option value="${esc(value)}" ${String(value)===String(selected)?"selected":""}>${esc(label)}</option>`).join("");
 }
 function inpostServiceZastosujZgodnoscTypu(form){
   const type=String(form?.deliveryType?.value||"locker");
   form?.querySelectorAll("[data-inpost-only]").forEach(el=>el.hidden=!String(el.dataset.inpostOnly||"").split(",").includes(type));
-  const select=form?.sendingMethod,allowed=inpostServiceMetodyNadania[type]||[],current=String(select?.value||"");
-  if(select){
-    const next=allowed.some(([value])=>value===current)?current:(type==="locker"?"any_point":"");
-    select.innerHTML=inpostServiceMetodyNadaniaOpcjeHTML(type,next);
-    select.value=next;
-  }
-  const method=String(select?.value||""),requiresPoint=inpostServiceMetodyWymagajacePunktu.has(method),dropoff=form?.dropoffPoint;
+  const allowed=inpostServiceMetodyNadania[type]||[],allowedValues=new Set(allowed.map(([value])=>value)),methodInputs=[...(form?.querySelectorAll?.('[name="sendingMethod"]')||[])];
+  methodInputs.forEach(input=>{const enabled=allowedValues.has(input.value);input.disabled=!enabled;if(input.closest("[data-inpost-method-card]"))input.closest("[data-inpost-method-card]").hidden=!enabled;});
+  let method=String(form?.elements?.sendingMethod?.value||"");
+  if(!allowedValues.has(method)){const fallback=methodInputs.find(input=>input.value==="dispatch_order"&&!input.disabled)||methodInputs.find(input=>!input.disabled);if(fallback)fallback.checked=true;method=String(fallback?.value||"");}
+  const requiresPoint=inpostServiceMetodyWymagajacePunktu.has(method),dropoff=form?.elements?.dropoffPoint;
   if(dropoff){
     dropoff.required=requiresPoint;
     dropoff.setAttribute("aria-required",requiresPoint?"true":"false");
     if(!requiresPoint)dropoff.value="";
-    dropoff.placeholder=requiresPoint?"Wybierz lub wpisz kod punktu":"Nie jest wymagany";
+    dropoff.placeholder=requiresPoint?"Wybierz automat nadawczy":"";
   }
+  const dropoffPanel=form?.querySelector("[data-inpost-dropoff-panel]");if(dropoffPanel)dropoffPanel.hidden=!requiresPoint;
   const label=form?.querySelector("[data-inpost-dropoff-label]"),hint=form?.querySelector("[data-inpost-dropoff-hint]");
-  if(label)label.textContent=requiresPoint?"Punkt nadania *":"Punkt nadania";
-  if(hint)hint.textContent=requiresPoint?"Ten sposób nadania wymaga wskazania konkretnego punktu.":"Dla wybranej metody punkt nadania nie jest wymagany.";
+  if(label)label.textContent=requiresPoint?"Automat nadawczy *":"";
+  if(hint)hint.textContent=requiresPoint?"ShipX wymaga kodu automatu dla tego sposobu nadania.":"";
   form?.querySelectorAll('[data-receiver-address]').forEach(input=>input.required=type==="courier");
+  const target=form?.elements?.targetPoint;if(target)target.required=type==="locker";
+  const xlarge=form?.querySelector('[data-inpost-size="xlarge"]');if(xlarge)xlarge.hidden=type!=="courier";
+  if(type!=="courier"&&form?.elements?.template?.value==="xlarge"){const small=form.querySelector('[name="template"][value="small"]');if(small){small.checked=true;inpostServiceUstawGabaryt(form,"small",false);}}
   return {type,method,requiresPoint};
+}
+function inpostServiceUstawGabaryt(form,size="",recalculate=true){
+  const dimensions={small:[64,38,8],medium:[64,38,19],large:[64,38,41],xlarge:[80,50,50]}[String(size||form?.elements?.template?.value||"small")]||[64,38,8];
+  ["length","width","height"].forEach((name,index)=>{if(form?.elements?.[name])form.elements[name].value=dimensions[index];});
+  if(recalculate)inpostServiceZaplanujWycene(form);
 }
 function inpostServicePrzelicz(form){
   const fee=Math.max(0,Number(String(form?.commissionGross?.value||0).replace(",","."))||0),out=form?.querySelector("[data-inpost-commission-total]");
@@ -632,7 +634,8 @@ function inpostServiceStronaOsoby(form,prefix){
 }
 function inpostServicePayload(form){
   const data=new FormData(form),additionalServices=[...form.querySelectorAll('[name="additionalServices"]:checked')].map(input=>input.value);
-  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:String(data.get("comments")||"").trim(),sender:inpostServiceStronaOsoby(form,"sender"),receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod:data.get("sendingMethod"),targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:data.get("codEnabled")==="on",amount:data.get("codAmount")},insurance:{enabled:data.get("insuranceEnabled")==="on",amount:data.get("insuranceAmount")},weekend:data.get("weekend")==="on",additionalServices,pickupRequested:data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
+  const codAmount=Math.max(0,Number(String(data.get("codAmount")||"0").replace(",","."))||0),insuranceAmount=Math.max(0,Number(String(data.get("insuranceAmount")||"0").replace(",","."))||0),sendingMethod=String(data.get("sendingMethod")||"");
+  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:String(data.get("comments")||"").trim(),sender:inpostServiceStronaOsoby(form,"sender"),receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod,targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:codAmount>0||data.get("codEnabled")==="on",amount:codAmount},insurance:{enabled:insuranceAmount>0||data.get("insuranceEnabled")==="on",amount:insuranceAmount},weekend:["on","true","1"].includes(String(data.get("weekend")||"")),additionalServices,pickupRequested:sendingMethod==="dispatch_order"||data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
 }
 function inpostServiceSzczegolyBledu(fields,prefix=""){
   const out=[];
@@ -752,8 +755,8 @@ async function inpostServiceFaktura(id){
 async function inpostServiceFakturaMiesieczna(month,clientKey){
   try{const d=await chmura("inpost-service-bill",{method:"POST",body:{month,clientKey},timeout:60000});toast(d.invoice?.duplicatePrevented?"Miesięczny dokument już istnieje":`Przekazano ${d.count||0} nadań do jednej FV inFakt ✅`);await inpostServiceLaduj(true,true);renderuj();}catch(e){toast("Faktura miesięczna: "+(e.message||e));}
 }
-function inpostServiceOtworzMape(){
-  window.__geoTarget="inpost-service";otworzGeowidget();
+function inpostServiceOtworzMape(purpose="target"){
+  window.__inpostPointPurpose=purpose==="dropoff"?"dropoff":"target";window.__geoTarget="inpost-service";otworzGeowidget();
 }
 async function inpostServiceSzukajPunktow(){
   const query=String(document.getElementById("inpostServicePointSearch")?.value||"").trim(),box=document.getElementById("inpostServicePointResults");
@@ -761,8 +764,10 @@ async function inpostServiceSzukajPunktow(){
   if(box)box.innerHTML="<small>Szukam punktów InPost…</small>";
   try{const params={limit:10,...(/^\d{2}-?\d{3}$/.test(query)?{post_code:query}:{q:query})},d=await chmura("inpost-points",{params,timeout:15000});if(box)box.innerHTML=(d.points||[]).map(point=>`<button type="button" class="inpost-point-result" onclick="inpostServiceWybierzPunkt(${jsArg(point.name)},${jsArg(opisPunktuInpost(point))})"><b>${esc(point.name)}</b><span>${esc(opisPunktuInpost(point))}</span></button>`).join("")||"<small>Nie znaleziono punktów.</small>";}catch(e){if(box)box.innerHTML=`<small class="error">${esc(e.message||e)}</small>`;}
 }
-function inpostServiceWybierzPunkt(code,address=""){
-  const input=document.getElementById("inpostServiceTargetPoint"),label=document.getElementById("inpostServiceTargetPointLabel");if(input)input.value=String(code||"").toUpperCase();if(label)label.textContent=address||code;toast("Wybrano "+code);
+function inpostServiceWybierzPunkt(code,address="",purpose=window.__inpostPointPurpose||"target"){
+  const dropoff=purpose==="dropoff",input=document.getElementById(dropoff?"inpostServiceDropoffPoint":"inpostServiceTargetPoint"),label=document.getElementById(dropoff?"inpostServiceDropoffPointLabel":"inpostServiceTargetPointLabel");
+  if(input){input.value=String(code||"").toUpperCase();input.dispatchEvent(new Event("input",{bubbles:true}));}
+  if(label)label.textContent=address||code;window.__inpostPointPurpose="";toast(`${dropoff?"Automat nadawczy":"Punkt odbioru"}: ${code}`);
 }
 function inpostServiceLista(){
   const q=normalizujSzukanyTekst(inpostServiceSzukaj),terms=q.split(" ").filter(Boolean);
@@ -996,24 +1001,24 @@ function inpostServicePunktOpis(point={}){
   const distance=Number(point.distance);
   return [opisPunktuInpost(point),Number.isFinite(distance)?`${distance<1000?Math.round(distance)+" m":(distance/1000).toFixed(1).replace(".",",")+" km"}`:"",point.location247?"czynny 24/7":point.openingHours].filter(Boolean).join(" • ");
 }
-async function inpostServicePobierzPunkty(params={},caption=""){
-  const box=document.getElementById("inpostServicePointResults");if(box)box.innerHTML="<small>Szukam najbliższych punktów InPost…</small>";
+async function inpostServicePobierzPunkty(params={},caption="",purpose="target"){
+  const dropoff=purpose==="dropoff",box=document.getElementById(dropoff?"inpostServiceDropoffResults":"inpostServicePointResults");if(box)box.innerHTML="<small>Szukam najbliższych punktów InPost…</small>";
   try{
     const d=await chmura("inpost-points",{params:{limit:15,...params},timeout:15000}),points=d.points||[];
-    if(box)box.innerHTML=`${caption?`<div class="inpost-point-caption">${esc(caption)}</div>`:""}${points.map(point=>`<button type="button" class="inpost-point-result" onclick="inpostServiceWybierzPunkt(${jsArg(point.name)},${jsArg(opisPunktuInpost(point))})"><b>${esc(point.name)}</b><span>${esc(inpostServicePunktOpis(point))}</span></button>`).join("")||"<small>Nie znaleziono punktów dla tego adresu.</small>"}`;
+    if(box)box.innerHTML=`${caption?`<div class="inpost-point-caption">${esc(caption)}</div>`:""}${points.map(point=>`<button type="button" class="inpost-point-result" onclick="inpostServiceWybierzPunkt(${jsArg(point.name)},${jsArg(opisPunktuInpost(point))},${jsArg(purpose)})"><b>${esc(point.name)}</b><span>${esc(inpostServicePunktOpis(point))}</span></button>`).join("")||"<small>Nie znaleziono punktów dla tego adresu.</small>"}`;
   }catch(e){if(box)box.innerHTML=`<small class="error">${esc(e.message||e)}</small>`;}
 }
-async function inpostServiceSzukajPunktow(){
-  const query=String(document.getElementById("inpostServicePointSearch")?.value||"").trim();
+async function inpostServiceSzukajPunktow(purpose="target"){
+  const dropoff=purpose==="dropoff",query=String(document.getElementById(dropoff?"inpostServiceDropoffSearch":"inpostServicePointSearch")?.value||"").trim();
   if(!query)return toast("Wpisz miasto, kod pocztowy albo kod punktu");
-  return inpostServicePobierzPunkty(/^\d{2}-?\d{3}$/.test(query)?{post_code:query}:{q:query},`Wyniki dla: ${query}`);
+  return inpostServicePobierzPunkty(/^\d{2}-?\d{3}$/.test(query)?{post_code:query}:{q:query},`Wyniki dla: ${query}`,purpose);
 }
-async function inpostServiceSzukajPunktowPrzyAdresie(prefix="receiver"){
+async function inpostServiceSzukajPunktowPrzyAdresie(prefix="receiver",purpose="target"){
   const form=document.getElementById("inpostServiceForm");if(!form)return;
   const postCode=String(form.elements[`${prefix}PostCode`]?.value||"").trim(),city=String(form.elements[`${prefix}City`]?.value||"").trim(),street=String(form.elements[`${prefix}Street`]?.value||"").trim();
   if(!postCode&&!city)return toast("Najpierw wpisz kod pocztowy albo miejscowość odbiorcy");
-  const query=[street,postCode,city].filter(Boolean).join(", "),input=document.getElementById("inpostServicePointSearch");if(input)input.value=query;
-  return inpostServicePobierzPunkty(postCode?{post_code:postCode,city}:{city},`Najbliższe punkty względem adresu: ${query}`);
+  const query=[street,postCode,city].filter(Boolean).join(", "),input=document.getElementById(purpose==="dropoff"?"inpostServiceDropoffSearch":"inpostServicePointSearch");if(input)input.value=query;
+  return inpostServicePobierzPunkty(postCode?{post_code:postCode,city}:{city},`Najbliższe punkty względem adresu: ${query}`,purpose);
 }
 function inpostServiceOdswiezSelektory(form,selectedId=""){
   ["sender","receiver"].forEach(prefix=>{
@@ -1103,10 +1108,10 @@ function inpostServiceLokalnaWycena(form){
     rate=(list.courierStandard||[]).find(item=>weight<=Number(item.maxKg))||null;rateKey=rate?`courierStandard.${rate.maxKg}`:"";
   }
   const selected=[],extras=list.extras||{};
-  if(form?.codEnabled?.checked)selected.push(["Pobranie","codGross"]);
-  if(form?.insuranceEnabled?.checked)selected.push(["Dodatkowa ochrona","insuranceGross"]);
-  if(form?.weekend?.checked)selected.push(["Paczka w Weekend","weekendGross"]);
-  if(form?.pickupRequested?.checked||form?.sendingMethod?.value==="dispatch_order")selected.push(["Odbiór przez kuriera","pickupGross"]);
+  if(Number(form?.codAmount?.value)>0)selected.push(["Pobranie","codGross"]);
+  if(Number(form?.insuranceAmount?.value)>0)selected.push(["Dodatkowa ochrona","insuranceGross"]);
+  if(String(form?.elements?.weekend?.value||"")==="true")selected.push(["Paczka w Weekend","weekendGross"]);
+  if(form?.elements?.sendingMethod?.value==="dispatch_order")selected.push(["Odbiór przez kuriera","pickupGross"]);
   if(form?.nonStandard?.checked)selected.push(["Element niestandardowy","nonStandardGross"]);
   form?.querySelectorAll('[name="additionalServices"]:checked').forEach(input=>{const labels={sms:["Powiadomienie SMS","smsGross"],email:["Powiadomienie e-mail","emailGross"],saturday:["Doręczenie w sobotę","saturdayGross"],dor1720:["Doręczenie 17:00–20:00","dor1720Gross"],rod:["Zwrot dokumentów","rodGross"]};if(labels[input.value])selected.push(labels[input.value]);});
   const unpricedOptions=selected.filter(([,key])=>extras[key]==null||extras[key]==="").map(([label])=>label),extrasGross=selected.reduce((sum,[,key])=>sum+(extras[key]==null||extras[key]===""?0:Number(extras[key])||0),0);
@@ -1213,28 +1218,62 @@ function inpostServiceFormHTML(){
     <div class="order-section-head"><div><span class="order-pro-label">Nadanie klienta</span><h2>Utwórz przesyłkę InPost</h2></div><div class="diag-actions"><span class="lvl ${available?.locker?"lvl-ok":"lvl-ostrzezenie"}">Paczkomat ${available?.locker?"aktywny":"sprawdź"}</span><span class="lvl ${available?.courier?"lvl-ok":"lvl-ostrzezenie"}">Kurier ${available?.courier?"aktywny":"sprawdź"}</span></div></div>
     <form id="inpostServiceForm" onsubmit="inpostServiceUtworz(event)" oninput="inpostServiceZaplanujWycene(this)" onchange="inpostServiceZaplanujWycene(this)">
       <input type="hidden" name="requestId" value="${esc(inpostServiceStan.requestId||inpostServiceNowyRequestId())}">
-      <nav class="inpost-process-steps" aria-label="Etapy nadania"><a href="#inpost-party-sender"><b>1</b><span>Nadawca</span></a><a href="#inpost-party-receiver"><b>2</b><span>Odbiorca</span></a><a href="#inpost-shipment-options"><b>3</b><span>Usługa i paczka</span></a><a href="#inpost-settlement"><b>4</b><span>Koszt i faktura</span></a></nav>
-      <div class="inpost-form-top"><label>Referencja<input name="reference" required value="USL-${Date.now().toString(36).toUpperCase()}"></label><div class="inpost-address-summary"><b>📒 Książka adresowa</b><span>${inpostServiceStan.addressBook?.length||0} adresów</span></div></div>
-      <div class="inpost-parties-grid"><div id="inpost-party-sender">${inpostServiceOsobaFields("sender","Nadawca",sender)}</div><div id="inpost-party-receiver">${inpostServiceOsobaFields("receiver","Odbiorca",{})}</div></div>
-      <div class="inpost-options-layout" id="inpost-shipment-options">
-        <fieldset><legend>🚚 Usługa i nadanie</legend><div class="inpost-form-grid">
-          <label>Rodzaj dostawy<select name="deliveryType" onchange="inpostServiceUstawTyp(this.form)"><option value="locker">Paczkomat / PaczkoPunkt</option><option value="courier">Kurier InPost</option></select></label>
-          <label>Sposób nadania<select name="sendingMethod" onchange="inpostServiceUstawTyp(this.form)">${inpostServiceMetodyNadaniaOpcjeHTML("locker","any_point")}</select></label>
-          <div class="wide" data-inpost-only="locker"><label>Paczkomat / punkt odbiorcy *<div class="inpost-inline"><input id="inpostServiceTargetPoint" name="targetPoint" placeholder="np. BOJ01N"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape()">Mapa</button></div><small id="inpostServiceTargetPointLabel">Wybierz punkt na mapie albo wyszukaj poniżej.</small></label><div class="inpost-point-search"><input id="inpostServicePointSearch" placeholder="Miasto, kod pocztowy, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow()">Szukaj</button><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie('receiver')">Przy adresie odbiorcy</button></div><div id="inpostServicePointResults"></div></div>
-          <label><span data-inpost-dropoff-label>Punkt nadania</span><input name="dropoffPoint" placeholder="Nie jest wymagany"><small data-inpost-dropoff-hint>Dla wybranej metody punkt nadania nie jest wymagany.</small></label>
-          <label class="check" data-inpost-only="courier"><input type="checkbox" name="pickupRequested"> Zleć odbiór przez kuriera</label>
-        </div></fieldset>
-        <fieldset><legend>📦 Paczka i opcje</legend><div class="inpost-form-grid">
-          <label>Gabaryt<select name="template"><option value="small">A / small</option><option value="medium">B / medium</option><option value="large">C / large</option><option value="">Wymiary własne</option></select></label>
-          <label>Waga (kg)<input name="weight" type="number" min=".01" max="30" step=".01" value="1"><small>Kurier Standard: stawki do 30 kg</small></label>
-          <label>Długość (cm)<input name="length" type="number" min="1" step=".1" value="30"></label><label>Szerokość (cm)<input name="width" type="number" min="1" step=".1" value="20"></label><label>Wysokość (cm)<input name="height" type="number" min="1" step=".1" value="15"></label>
-          <label class="check"><input type="checkbox" name="nonStandard"> Niestandardowa</label>
-          <label class="check wide"><input type="checkbox" name="codEnabled"> Pobranie <input name="codAmount" type="number" min="0" step=".01" placeholder="kwota PLN"></label>
-          <label class="check wide"><input type="checkbox" name="insuranceEnabled"> Dodatkowa ochrona <input name="insuranceAmount" type="number" min="0" step=".01" placeholder="wartość PLN"></label>
-          <label class="check" data-inpost-only="locker"><input type="checkbox" name="weekend"> Paczka w Weekend</label><label class="check" data-inpost-only="locker"><input type="checkbox" name="additionalServices" value="labelless"> Bez etykiety</label>
-          <label class="check" data-inpost-only="courier"><input type="checkbox" name="additionalServices" value="sms"> SMS</label><label class="check" data-inpost-only="courier"><input type="checkbox" name="additionalServices" value="email"> E-mail</label><label class="check" data-inpost-only="courier"><input type="checkbox" name="additionalServices" value="saturday"> Sobota</label><label class="check" data-inpost-only="courier"><input type="checkbox" name="additionalServices" value="dor1720"> 17:00–20:00</label><label class="check" data-inpost-only="courier"><input type="checkbox" name="additionalServices" value="rod"> Zwrot dokumentów</label>
-          <label class="wide">Uwagi<input name="comments" maxlength="100"></label>
-        </div></fieldset>
+      <nav class="inpost-process-steps" aria-label="Etapy nadania"><a href="#inpost-delivery"><b>1</b><span>Doręczenie</span></a><a href="#inpost-party-receiver"><b>2</b><span>Odbiorca</span></a><a href="#inpost-shipment-options"><b>3</b><span>Paczka i nadanie</span></a><a href="#inpost-settlement"><b>4</b><span>Koszt i faktura</span></a></nav>
+      <div class="inpost-shipment-builder">
+        <fieldset id="inpost-delivery"><legend>Sposób doręczenia</legend>
+          <div class="inpost-delivery-choice">
+            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="locker" checked onchange="inpostServiceUstawTyp(this.form)"><span><b>Paczkomat® 24/7</b><small>Doręczenie do automatu lub PaczkoPunktu</small></span></label>
+            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="courier" onchange="inpostServiceUstawTyp(this.form)"><span><b>InPost Kurier</b><small>Doręczenie bezpośrednio pod adres</small></span></label>
+          </div>
+          <div class="inpost-reference-row"><label>Numer referencyjny<input name="reference" required value="USL-${Date.now().toString(36).toUpperCase()}" placeholder="Nazwij swoją przesyłkę"></label><span><b>📒 ${inpostServiceStan.addressBook?.length||0}</b><small>adresów w książce</small></span></div>
+        </fieldset>
+
+        <fieldset id="inpost-party-sender" class="inpost-sender-context"><legend>Nadawca</legend>
+          <input type="hidden" name="senderContactId" value="${esc(sender.id||"")}">
+          <input type="checkbox" name="senderRoleSender" checked hidden>
+          <div class="inpost-contact-selector"><div class="inpost-selected-contact" data-inpost-selected-contact="sender">${inpostServiceWybranyKontaktHTML(sender,"sender")}</div><div class="inpost-contact-selector-actions"><button class="btn" type="button" onclick="inpostServiceOtworzKsiazke('sender',this)">📒 Wybierz z książki</button><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres('sender',this)">＋ Nowy adres</button></div></div>
+          <details><summary>Sprawdź lub popraw dane nadawcy</summary><div class="inpost-form-grid">
+            <label>Firma<input name="senderCompany" value="${esc(sender.companyName||"")}"></label><label>NIP<input name="senderTaxCode" inputmode="numeric" maxlength="10" value="${esc(sender.taxCode||"")}"></label><label>Imię<input name="senderFirstName" value="${esc(sender.firstName||"")}"></label><label>Nazwisko<input name="senderLastName" value="${esc(sender.lastName||"")}"></label><label>E-mail *<input name="senderEmail" type="email" required value="${esc(sender.email||"")}"></label><label>Telefon *<input name="senderPhone" inputmode="tel" required value="${esc(sender.phone||"")}"></label>
+            <label class="wide">Ulica *<input name="senderStreet" required value="${esc(sender.address?.street||"")}"></label><label>Nr budynku *<input name="senderBuilding" required value="${esc(sender.address?.buildingNumber||sender.address?.building_number||"")}"></label><label>Nr lokalu<input name="senderFlat" value="${esc(sender.address?.flatNumber||sender.address?.flat_number||"")}"></label><label>Kod pocztowy *<input name="senderPostCode" required pattern="\\d{2}-?\\d{3}" value="${esc(sender.address?.postCode||sender.address?.post_code||"")}"></label><label>Miasto *<input name="senderCity" required value="${esc(sender.address?.city||"")}"></label>
+            <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt('sender',this)">💾 Zapisz w książce</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt('sender',this)">Usuń zapis</button></div><label class="check wide"><input type="checkbox" name="saveSender" checked> Zapamiętaj lub zaktualizuj nadawcę</label>
+          </div></details>
+        </fieldset>
+
+        <fieldset id="inpost-party-receiver"><legend>Dane odbiorcy</legend>
+          <input type="hidden" name="receiverContactId">
+          <input type="checkbox" name="receiverRoleReceiver" checked hidden>
+          <div class="inpost-contact-selector"><div class="inpost-selected-contact" data-inpost-selected-contact="receiver">${inpostServiceWybranyKontaktHTML({},"receiver")}</div><div class="inpost-contact-selector-actions"><button class="btn" type="button" onclick="inpostServiceOtworzKsiazke('receiver',this)">📒 Wybierz z książki</button><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres('receiver',this)">＋ Nowy adres</button></div></div>
+          <div class="inpost-form-grid">
+            <label>E-mail *<input name="receiverEmail" type="email" required placeholder="Adres e-mail odbiorcy"></label><label>Telefon *<input name="receiverPhone" inputmode="tel" required placeholder="9 cyfr"></label>
+            <div class="wide" data-inpost-only="locker"><label>Punkt odbioru *<div class="inpost-inline"><input id="inpostServiceTargetPoint" name="targetPoint" required placeholder="Nazwa lub lokalizacja punktu"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape('target')">Mapa</button></div></label><div class="inpost-point-search"><input id="inpostServicePointSearch" placeholder="Miasto, kod, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow('target')">Szukaj</button><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie('receiver','target')">Przy adresie</button></div><div id="inpostServicePointResults"></div></div>
+            <div class="wide inpost-courier-address" data-inpost-only="courier"><div class="inpost-form-grid"><label>Imię i nazwisko<input name="receiverFirstName" placeholder="Imię"><input name="receiverLastName" placeholder="Nazwisko"></label><label>Nazwa firmy<input name="receiverCompany"></label><label>NIP<input name="receiverTaxCode" inputmode="numeric" maxlength="10"></label><label>Kod pocztowy *<input name="receiverPostCode" data-receiver-address pattern="\\d{2}-?\\d{3}"></label><label>Miasto *<input name="receiverCity" data-receiver-address></label><label class="wide">Ulica *<input name="receiverStreet" data-receiver-address></label><label>Nr budynku *<input name="receiverBuilding" data-receiver-address></label><label>Nr lokalu<input name="receiverFlat"></label></div></div>
+            <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt('receiver',this)">💾 Dodaj odbiorcę do książki</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt('receiver',this)">Usuń zapis</button></div><label class="check wide"><input type="checkbox" name="saveReceiver" checked> Zapamiętaj lub zaktualizuj odbiorcę</label>
+          </div>
+        </fieldset>
+
+        <fieldset id="inpost-shipment-options"><legend>Rozmiar paczki</legend>
+          <div class="inpost-size-choice">
+            ${[["small","A","maks. 8 × 38 × 64 cm"],["medium","B","maks. 19 × 38 × 64 cm"],["large","C","maks. 41 × 38 × 64 cm"],["xlarge","D","maks. 80 × 50 × 50 cm"]].map(([value,label,description],index)=>`<label class="inpost-choice-card" ${value==="xlarge"?'data-inpost-size="xlarge" data-inpost-only="courier"':""}><input type="radio" name="template" value="${value}" ${index===0?"checked":""} onchange="inpostServiceUstawGabaryt(this.form,'${value}')"><span><b>${label}</b><small>${description}</small></span></label>`).join("")}
+          </div>
+          <input type="hidden" name="length" value="64"><input type="hidden" name="width" value="38"><input type="hidden" name="height" value="8">
+          <div class="inpost-form-grid inpost-parcel-details"><label>Waga (kg)<input name="weight" type="number" min=".01" max="30" step=".01" value="1"></label><label class="check" data-inpost-only="courier"><input type="checkbox" name="nonStandard"> Element niestandardowy</label><label class="wide">Uwagi<input name="comments" maxlength="100"></label></div>
+        </fieldset>
+
+        <fieldset><legend>Dodatkowe usługi</legend>
+          <div class="inpost-extra-services">
+            <label>Wartość pobrania<input name="codAmount" type="number" min="0" step=".01" placeholder="Wpisz kwotę, aby nadać za pobraniem"></label>
+            <div><span>Dodatkowa ochrona</span><div class="inpost-protection-choice">${[[0,"Brak"],[5000,"Do 5 000 zł"],[10000,"Do 10 000 zł"],[20000,"Do 20 000 zł"]].map(([value,label],index)=>`<label class="inpost-choice-card compact"><input type="radio" name="insuranceAmount" value="${value}" ${index===0?"checked":""}><span><b>${label}</b></span></label>`).join("")}</div></div>
+            <div data-inpost-only="locker"><span>Paczka w Weekend</span><div class="inpost-weekend-choice"><label class="inpost-choice-card compact"><input type="radio" name="weekend" value="false" checked><span><b>Nie</b></span></label><label class="inpost-choice-card compact"><input type="radio" name="weekend" value="true"><span><b>Tak</b></span></label></div></div>
+            <div class="inpost-courier-extras" data-inpost-only="courier"><label class="check"><input type="checkbox" name="additionalServices" value="sms"> SMS</label><label class="check"><input type="checkbox" name="additionalServices" value="email"> E-mail</label><label class="check"><input type="checkbox" name="additionalServices" value="saturday"> Sobota</label><label class="check"><input type="checkbox" name="additionalServices" value="dor1720"> 17:00–20:00</label><label class="check"><input type="checkbox" name="additionalServices" value="rod"> Zwrot dokumentów</label></div>
+          </div>
+        </fieldset>
+
+        <fieldset><legend>Sposób nadania</legend>
+          <div class="inpost-method-choice">${inpostServiceMetodyNadania.locker.map(([value,label],index)=>`<label class="inpost-method-card" data-inpost-method-card><input type="radio" name="sendingMethod" value="${value}" ${value==="dispatch_order"?"checked":""} onchange="inpostServiceUstawTyp(this.form)"><span><b>${esc(label)}</b><small>${value==="parcel_locker"?"Wybierz automat nadawczy":value==="dispatch_order"?"Odbiór z adresu nadawcy":"Nadaj w obsługiwanym punkcie"}</small></span></label>`).join("")}</div>
+          <div class="inpost-dropoff-panel" data-inpost-dropoff-panel hidden><label><span data-inpost-dropoff-label>Automat nadawczy *</span><div class="inpost-inline"><input id="inpostServiceDropoffPoint" name="dropoffPoint" placeholder="Wybierz automat nadawczy"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape('dropoff')">Mapa</button></div><small data-inpost-dropoff-hint></small></label><div class="inpost-point-search"><input id="inpostServiceDropoffSearch" placeholder="Miasto, kod, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow('dropoff')">Szukaj</button></div><div id="inpostServiceDropoffResults"></div></div>
+        </fieldset>
+
+        <div class="inpost-options-layout">
         <fieldset class="inpost-billing-card" id="inpost-settlement"><legend>💰 Koszt i faktura Artway‑TM</legend>
           <div class="inpost-pricing-layout"><div data-inpost-pricing></div><div class="inpost-pricing-controls"><label>Pełny koszt ręczny — tylko awaryjnie<input name="carrierCostOverride" type="number" min="0" step=".01" placeholder="zastępuje cennik umowny"></label><button class="btn ghost" type="button" onclick="inpostServiceWycena(this.form,true)">↻ Przelicz według umowy</button><button class="btn ghost" type="button" onclick="document.querySelector('.inpost-service-settings')?.setAttribute('open','');document.querySelector('.inpost-service-settings')?.scrollIntoView({behavior:'smooth'})">Otwórz cennik</button></div></div>
           <div class="inpost-settlement-grid">
@@ -1245,6 +1284,7 @@ function inpostServiceFormHTML(){
           <div class="inpost-form-grid"><label>Miesiąc rozliczenia<input name="billingMonth" type="month" value="${esc(month)}"></label><label>Prowizja Artway‑TM brutto<input name="commissionGross" type="number" min="0" step=".01" value="${esc(fee)}"></label></div>
           <div class="backend-note"><b>FV: Artway‑TM → nadawca.</b> Odbiorca pozostaje wyłącznie stroną doręczenia.</div>
         </fieldset>
+      </div>
       </div>
       <div class="inpost-form-errors" data-inpost-form-errors hidden></div>
       <div class="inpost-create-footer"><button class="btn" type="submit">🟡 Utwórz przesyłkę InPost</button></div>

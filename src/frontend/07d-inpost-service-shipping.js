@@ -37,46 +37,48 @@ async function inpostServiceLaduj(force=false,cicho=true){
 }
 const inpostServiceMetodyNadania={
   locker:[
-    ["any_point","Dowolny punkt InPost"],
-    ["parcel_locker","Konkretny Paczkomat"],
-    ["pok","Punkt Obsługi Klienta"],
-    ["pop","Punkt Obsługi Przesyłek"],
-    ["branch","Oddział InPost"]
+    ["parcel_locker","Nadam w automacie Paczkomat"],
+    ["dispatch_order","Przesyłkę odbierze kurier InPost"],
+    ["pop","Nadam w PaczkoPunkcie"]
   ],
   courier:[
-    ["","Nadanie standardowe"],
-    ["any_point","Dowolny punkt InPost"],
-    ["pok","Punkt Obsługi Klienta"],
-    ["pop","Punkt Obsługi Przesyłek"],
-    ["courier_pok","Punkt kurierski InPost"],
-    ["branch","Oddział InPost"]
+    ["parcel_locker","Nadam w automacie Paczkomat"],
+    ["dispatch_order","Przesyłkę odbierze kurier InPost"],
+    ["pop","Nadam w PaczkoPunkcie"]
   ]
 };
-const inpostServiceMetodyWymagajacePunktu=new Set(["parcel_locker","pok","pop","courier_pok"]);
+const inpostServiceMetodyWymagajacePunktu=new Set(["parcel_locker","pok","courier_pok"]);
 function inpostServiceMetodyNadaniaOpcjeHTML(type="locker",selected=""){
   return (inpostServiceMetodyNadania[type]||inpostServiceMetodyNadania.locker).map(([value,label])=>`<option value="${esc(value)}" ${String(value)===String(selected)?"selected":""}>${esc(label)}</option>`).join("");
 }
 function inpostServiceZastosujZgodnoscTypu(form){
   const type=String(form?.deliveryType?.value||"locker");
   form?.querySelectorAll("[data-inpost-only]").forEach(el=>el.hidden=!String(el.dataset.inpostOnly||"").split(",").includes(type));
-  const select=form?.sendingMethod,allowed=inpostServiceMetodyNadania[type]||[],current=String(select?.value||"");
-  if(select){
-    const next=allowed.some(([value])=>value===current)?current:(type==="locker"?"any_point":"");
-    select.innerHTML=inpostServiceMetodyNadaniaOpcjeHTML(type,next);
-    select.value=next;
-  }
-  const method=String(select?.value||""),requiresPoint=inpostServiceMetodyWymagajacePunktu.has(method),dropoff=form?.dropoffPoint;
+  const allowed=inpostServiceMetodyNadania[type]||[],allowedValues=new Set(allowed.map(([value])=>value)),methodInputs=[...(form?.querySelectorAll?.('[name="sendingMethod"]')||[])];
+  methodInputs.forEach(input=>{const enabled=allowedValues.has(input.value);input.disabled=!enabled;if(input.closest("[data-inpost-method-card]"))input.closest("[data-inpost-method-card]").hidden=!enabled;});
+  let method=String(form?.elements?.sendingMethod?.value||"");
+  if(!allowedValues.has(method)){const fallback=methodInputs.find(input=>input.value==="dispatch_order"&&!input.disabled)||methodInputs.find(input=>!input.disabled);if(fallback)fallback.checked=true;method=String(fallback?.value||"");}
+  const requiresPoint=inpostServiceMetodyWymagajacePunktu.has(method),dropoff=form?.elements?.dropoffPoint;
   if(dropoff){
     dropoff.required=requiresPoint;
     dropoff.setAttribute("aria-required",requiresPoint?"true":"false");
     if(!requiresPoint)dropoff.value="";
-    dropoff.placeholder=requiresPoint?"Wybierz lub wpisz kod punktu":"Nie jest wymagany";
+    dropoff.placeholder=requiresPoint?"Wybierz automat nadawczy":"";
   }
+  const dropoffPanel=form?.querySelector("[data-inpost-dropoff-panel]");if(dropoffPanel)dropoffPanel.hidden=!requiresPoint;
   const label=form?.querySelector("[data-inpost-dropoff-label]"),hint=form?.querySelector("[data-inpost-dropoff-hint]");
-  if(label)label.textContent=requiresPoint?"Punkt nadania *":"Punkt nadania";
-  if(hint)hint.textContent=requiresPoint?"Ten sposób nadania wymaga wskazania konkretnego punktu.":"Dla wybranej metody punkt nadania nie jest wymagany.";
+  if(label)label.textContent=requiresPoint?"Automat nadawczy *":"";
+  if(hint)hint.textContent=requiresPoint?"ShipX wymaga kodu automatu dla tego sposobu nadania.":"";
   form?.querySelectorAll('[data-receiver-address]').forEach(input=>input.required=type==="courier");
+  const target=form?.elements?.targetPoint;if(target)target.required=type==="locker";
+  const xlarge=form?.querySelector('[data-inpost-size="xlarge"]');if(xlarge)xlarge.hidden=type!=="courier";
+  if(type!=="courier"&&form?.elements?.template?.value==="xlarge"){const small=form.querySelector('[name="template"][value="small"]');if(small){small.checked=true;inpostServiceUstawGabaryt(form,"small",false);}}
   return {type,method,requiresPoint};
+}
+function inpostServiceUstawGabaryt(form,size="",recalculate=true){
+  const dimensions={small:[64,38,8],medium:[64,38,19],large:[64,38,41],xlarge:[80,50,50]}[String(size||form?.elements?.template?.value||"small")]||[64,38,8];
+  ["length","width","height"].forEach((name,index)=>{if(form?.elements?.[name])form.elements[name].value=dimensions[index];});
+  if(recalculate)inpostServiceZaplanujWycene(form);
 }
 function inpostServicePrzelicz(form){
   const fee=Math.max(0,Number(String(form?.commissionGross?.value||0).replace(",","."))||0),out=form?.querySelector("[data-inpost-commission-total]");
@@ -94,7 +96,8 @@ function inpostServiceStronaOsoby(form,prefix){
 }
 function inpostServicePayload(form){
   const data=new FormData(form),additionalServices=[...form.querySelectorAll('[name="additionalServices"]:checked')].map(input=>input.value);
-  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:String(data.get("comments")||"").trim(),sender:inpostServiceStronaOsoby(form,"sender"),receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod:data.get("sendingMethod"),targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:data.get("codEnabled")==="on",amount:data.get("codAmount")},insurance:{enabled:data.get("insuranceEnabled")==="on",amount:data.get("insuranceAmount")},weekend:data.get("weekend")==="on",additionalServices,pickupRequested:data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
+  const codAmount=Math.max(0,Number(String(data.get("codAmount")||"0").replace(",","."))||0),insuranceAmount=Math.max(0,Number(String(data.get("insuranceAmount")||"0").replace(",","."))||0),sendingMethod=String(data.get("sendingMethod")||"");
+  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:String(data.get("comments")||"").trim(),sender:inpostServiceStronaOsoby(form,"sender"),receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod,targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:codAmount>0||data.get("codEnabled")==="on",amount:codAmount},insurance:{enabled:insuranceAmount>0||data.get("insuranceEnabled")==="on",amount:insuranceAmount},weekend:["on","true","1"].includes(String(data.get("weekend")||"")),additionalServices,pickupRequested:sendingMethod==="dispatch_order"||data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
 }
 function inpostServiceSzczegolyBledu(fields,prefix=""){
   const out=[];
@@ -214,8 +217,8 @@ async function inpostServiceFaktura(id){
 async function inpostServiceFakturaMiesieczna(month,clientKey){
   try{const d=await chmura("inpost-service-bill",{method:"POST",body:{month,clientKey},timeout:60000});toast(d.invoice?.duplicatePrevented?"Miesięczny dokument już istnieje":`Przekazano ${d.count||0} nadań do jednej FV inFakt ✅`);await inpostServiceLaduj(true,true);renderuj();}catch(e){toast("Faktura miesięczna: "+(e.message||e));}
 }
-function inpostServiceOtworzMape(){
-  window.__geoTarget="inpost-service";otworzGeowidget();
+function inpostServiceOtworzMape(purpose="target"){
+  window.__inpostPointPurpose=purpose==="dropoff"?"dropoff":"target";window.__geoTarget="inpost-service";otworzGeowidget();
 }
 async function inpostServiceSzukajPunktow(){
   const query=String(document.getElementById("inpostServicePointSearch")?.value||"").trim(),box=document.getElementById("inpostServicePointResults");
@@ -223,8 +226,10 @@ async function inpostServiceSzukajPunktow(){
   if(box)box.innerHTML="<small>Szukam punktów InPost…</small>";
   try{const params={limit:10,...(/^\d{2}-?\d{3}$/.test(query)?{post_code:query}:{q:query})},d=await chmura("inpost-points",{params,timeout:15000});if(box)box.innerHTML=(d.points||[]).map(point=>`<button type="button" class="inpost-point-result" onclick="inpostServiceWybierzPunkt(${jsArg(point.name)},${jsArg(opisPunktuInpost(point))})"><b>${esc(point.name)}</b><span>${esc(opisPunktuInpost(point))}</span></button>`).join("")||"<small>Nie znaleziono punktów.</small>";}catch(e){if(box)box.innerHTML=`<small class="error">${esc(e.message||e)}</small>`;}
 }
-function inpostServiceWybierzPunkt(code,address=""){
-  const input=document.getElementById("inpostServiceTargetPoint"),label=document.getElementById("inpostServiceTargetPointLabel");if(input)input.value=String(code||"").toUpperCase();if(label)label.textContent=address||code;toast("Wybrano "+code);
+function inpostServiceWybierzPunkt(code,address="",purpose=window.__inpostPointPurpose||"target"){
+  const dropoff=purpose==="dropoff",input=document.getElementById(dropoff?"inpostServiceDropoffPoint":"inpostServiceTargetPoint"),label=document.getElementById(dropoff?"inpostServiceDropoffPointLabel":"inpostServiceTargetPointLabel");
+  if(input){input.value=String(code||"").toUpperCase();input.dispatchEvent(new Event("input",{bubbles:true}));}
+  if(label)label.textContent=address||code;window.__inpostPointPurpose="";toast(`${dropoff?"Automat nadawczy":"Punkt odbioru"}: ${code}`);
 }
 function inpostServiceLista(){
   const q=normalizujSzukanyTekst(inpostServiceSzukaj),terms=q.split(" ").filter(Boolean);
