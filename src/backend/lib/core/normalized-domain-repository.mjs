@@ -186,10 +186,13 @@ function settingsDomainConfig(key) {
   return normalized ? SETTINGS_DOMAIN_CONFIGS[normalized] : undefined;
 }
 
-function readSettingsDomain(client, namespace, key, fallback, versioned = false) {
+function readSettingsDomain(client, namespace, key, fallback, versioned = false, legacy = null) {
   const normalized = settingsDomainFromKey(key);
   const config = normalized ? SETTINGS_DOMAIN_CONFIGS[normalized] : null;
-  if (!config) return versioned ? legacy.readVersioned(key, fallback) : legacy.read(key, fallback);
+  if (!config) {
+    if (!legacy) throw new Error(`Brak repozytorium zgodności dla domeny ustawień: ${key}`);
+    return versioned ? legacy.readVersioned(key, fallback) : legacy.read(key, fallback);
+  }
   return (async () => {
     const domain = await readDomain(client, namespace, domainForSetting(normalized), config);
     if (!domain) return versioned ? { value: fallback, etag: '0', exists: false } : fallback;
@@ -418,7 +421,7 @@ export function createNormalizedDomainRepository({ pool, namespace, legacy }) {
     const config = settingsDomainConfig(key);
     if (!config) return versioned ? legacy.readVersioned(key, fallback) : legacy.read(key, fallback);
     const client = await pool.connect();
-    try { return await readSettingsDomain(client, namespace, key, fallback, versioned); }
+    try { return await readSettingsDomain(client, namespace, key, fallback, versioned, legacy); }
     finally { client.release(); }
   };
   const writeSettingsDomainValue = async (key, value, version = null) => {

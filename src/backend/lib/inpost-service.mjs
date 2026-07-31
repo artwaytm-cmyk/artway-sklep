@@ -2,10 +2,11 @@ import { tekst } from './core/http.mjs';
 import { inpostErrorDetails, inpostErrorText } from './domain/inpost-error.mjs';
 import { inpostWebhookSecret, inpostWebhookAutoryzowany, pierwszePole, inpostZdarzeniaZWebhooka, numerZReferencji, etapZInpostStatus, znajdzZamowienieInpost } from './inpost-webhook-support.mjs';
 
-export function createInpostService({ read, write, onOrderStatusTransition }) {
+export function createInpostService({ read, write, onOrderStatusTransition, getOrderReconciliation = null }) {
   const czytaj = read;
   const zapisz = write;
   const obsluzEmailePrzejsciaStatusu = onOrderStatusTransition;
+  const kwotaSerwer = (value) => Math.max(0, Math.round((Number(String(value ?? '').replace(',', '.')) || 0) * 100) / 100);
   // ─── INPOST ShipX (przesyłki, etykiety, tracking) + Geowidget ───
   const INPOST_ENVY = new Set(['production', 'sandbox']);
   const INPOST_SENDING_METHODS = new Set(['parcel_locker', 'pok', 'pop', 'courier_pok', 'branch', 'dispatch_order']);
@@ -516,9 +517,14 @@ export function createInpostService({ read, write, onOrderStatusTransition }) {
     else if (dane.tracking && ['nowe', 'potwierdzone', 'w realizacji'].includes(nowy.status)) nowy.status = 'gotowe do wysyłki';
     items[idx] = nowy;
     await zapisz('orders', { items, updated_at: new Date().toISOString() });
-    const inventory = await storeOrderSupplierReconciliation.finalizeInventoryForOrder(nowy);
+    const reconciliation = typeof getOrderReconciliation === 'function' ? getOrderReconciliation() : null;
+    const inventory = typeof reconciliation?.finalizeInventoryForOrder === 'function'
+      ? await reconciliation.finalizeInventoryForOrder(nowy)
+      : { inventoryMode: '' };
     if (inventory.inventoryMode) nowy.inventoryMode = inventory.inventoryMode;
-    const supplierDrafts = await storeOrderSupplierReconciliation.reconcileDraftsSafely({ summary: true });
+    const supplierDrafts = typeof reconciliation?.reconcileDraftsSafely === 'function'
+      ? await reconciliation.reconcileDraftsSafely({ summary: true })
+      : { skipped: true, reason: 'reconciliation_unavailable' };
     let email = null;
     try { email = await obsluzEmailePrzejsciaStatusu(stary, nowy); } catch (e) { email = { sent: false, error: e.message }; }
     await zapiszLogInpostWebhook({ matched: true, nr: nowy.nr, id: dane.id, tracking: dane.tracking, status: dane.status, reference: dane.reference });

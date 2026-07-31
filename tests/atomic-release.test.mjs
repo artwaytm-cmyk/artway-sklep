@@ -75,7 +75,7 @@ test('produkcja i CI korzystają z atomowej bramki publikacji', async () => {
   assert.match(nginx, /root \/srv\/artway\/releases\/current;/);
   assert.match(workflow, /npm run verify/);
   assert.match(workflow, /npm run audit:architecture/);
-  assert.match(workflow, /npm audit --audit-level=high/);
+  assert.match(workflow, /npm audit --audit-level=moderate/);
   assert.equal(packageJson.scripts['deploy:atomic'], 'node scripts/deploy-atomic-release.mjs');
   assert.match(deployScript, /systemctl', action, backendService/);
   assert.match(deployScript, /controlProductionBackend\('stop'\)/);

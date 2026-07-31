@@ -40,8 +40,11 @@ jobs:
       - name: Budżety architektury
         run: npm run audit:architecture
 
+      - name: Pomiar pokrycia testami
+        run: npm run test:coverage
+
       - name: Podatności zależności
-        run: npm audit --audit-level=high
+        run: npm audit --audit-level=moderate
 
   browser:
     name: Prawdziwa przeglądarka Chromium

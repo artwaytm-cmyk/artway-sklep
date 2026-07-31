@@ -12,6 +12,8 @@ export default async () => {
     { loc: `${origin}/`, lastmod: catalog.updatedAt },
     { loc: `${origin}/promocje`, lastmod: catalog.updatedAt },
     { loc: `${origin}/nowosci`, lastmod: catalog.updatedAt },
+    { loc: `${origin}/o-nas`, lastmod: catalog.updatedAt },
+    { loc: `${origin}/faq`, lastmod: catalog.updatedAt },
     ...['kontakt', 'regulamin', 'prywatnosc', 'dostawa', 'zwroty'].map((route) => ({ loc: `${origin}/${route}/`, lastmod: catalog.updatedAt })),
     ...[...new Set(products.map((p) => String(p.kategoria || '').trim()).filter(Boolean))].map((category) => ({ loc: `${origin}/kategoria/${seoSlug(category)}`, lastmod: catalog.updatedAt })),
     ...products.map((p) => ({ loc: `${origin}/produkt/${encodeURIComponent(p.id)}`, lastmod: p.seoReviewedAt || p.updatedAt || catalog.updatedAt || '', image: imageOf(p), caption: p.nazwa || '' })),

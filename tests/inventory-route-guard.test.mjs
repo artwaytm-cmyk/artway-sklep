@@ -49,7 +49,7 @@ test('zatwierdzenie PZ/WZ automatycznie uzgadnia Plan zatowarowania dokładnie r
     },
     refreshOrderReadiness: async ({ document }) => {
       readinessRefreshes += 1;
-      assert.equal(document.number, 'PZ/2026/07/0001');
+      assert.match(document.number, /^PZ\/\d{4}\/\d{2}\/0001$/);
       return { orders: [{ id: 'allegro-order', warehouseStage: 'kompletacja' }] };
     },
     respond: (payload, status = 200) => ({ payload, status }),

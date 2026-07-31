@@ -1,3 +1,17 @@
+function flattenCategories(items = [], parents = []) {
+  return (Array.isArray(items) ? items : []).flatMap((item) => {
+    const name = String(item?.name || '').trim();
+    const current = {
+      id: String(item?.id || ''),
+      name,
+      leaf: item?.leaf === true,
+      doesNotRequireGpsrInfo: item?.doesNotRequireGpsrInfo === true,
+      path: [...parents, name].filter(Boolean).join(' › '),
+    };
+    return [current, ...flattenCategories(item?.children, [...parents, name])];
+  }).filter((item) => item.id);
+}
+
 export function createVonHalskyAgentRoute(context = {}) {
   const {
     respond, readVersioned, STORE_KEY, initialState, cleanState, api, mutate,

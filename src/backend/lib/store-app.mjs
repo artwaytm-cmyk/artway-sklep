@@ -273,7 +273,7 @@ const {
   zapiszLogInpostWebhook,
   zastosujWebhookInpost,
   zapiszPrzesylkeNaZamowieniu,
-} = createInpostService({ read: czytaj, write: zapisz, onOrderStatusTransition: obsluzEmailePrzejsciaStatusu });
+} = createInpostService({ read: czytaj, write: zapisz, onOrderStatusTransition: obsluzEmailePrzejsciaStatusu, getOrderReconciliation: () => storeOrderSupplierReconciliation });
 const inpostRoute = createInpostRoute({
   respond: odpowiedz,
   isAdmin: czyAdmin,

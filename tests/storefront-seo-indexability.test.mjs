@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { buildStorefrontSeoCatalogSnapshot } from '../src/backend/lib/domain/storefront-seo-catalog.mjs';
 import { renderPublicCompliancePage, PUBLIC_COMPLIANCE_PAGES } from '../scripts/public-compliance-pages.mjs';
+import { renderStorefrontSeoPage, seoRouteMatches } from '../src/backend/lib/domain/storefront-seo-renderer.mjs';
 
 test('sitemap i serwerowy rendering SEO korzystają z jednej centralnej kartoteki produktów', async () => {
   const [sitemap, renderer] = await Promise.all([
@@ -54,4 +55,30 @@ test('dane produktów dla Google zawierają rzeczywistą dostawę i politykę zw
   assert.match(renderer, /merchantReturnDays: 14/);
   assert.match(renderer, /ReturnFeesCustomerResponsibility/);
   assert.match(renderer, /ratingCount < 1/);
+});
+
+test('O nas i FAQ mają serwerową treść, własne metadata, canonical i dane uporządkowane', async () => {
+  for (const path of ['/o-nas', '/faq']) assert.equal(seoRouteMatches(path), true);
+  const about = await (await renderStorefrontSeoPage(new Request('https://artwaytm.pl/o-nas'))).text();
+  assert.match(about, /<title>O nas – poznaj sklep Artway-TM<\/title>/);
+  assert.match(about, /rel="canonical" href="https:\/\/artwaytm\.pl\/o-nas"/);
+  assert.match(about, /data-server-rendered="true"/);
+  assert.match(about, /"@type":"AboutPage"/);
+  assert.doesNotMatch(about, /Największy wybór gier/);
+
+  const faq = await (await renderStorefrontSeoPage(new Request('https://artwaytm.pl/faq'))).text();
+  assert.match(faq, /<title>FAQ – dostawa, płatności i zwroty \| Artway-TM<\/title>/);
+  assert.match(faq, /rel="canonical" href="https:\/\/artwaytm\.pl\/faq"/);
+  assert.match(faq, /"@type":"FAQPage"/);
+  assert.match(faq, /Jak zwrócić produkt\?/);
+});
+
+test('sitemap oraz konfiguracja Nginx udostępniają O nas i FAQ jako indeksowalne adresy', async () => {
+  const [sitemap, nginx] = await Promise.all([
+    readFile('src/backend/sitemap.mjs', 'utf8'),
+    readFile('ops/nginx/artway-seo-pages.conf', 'utf8'),
+  ]);
+  assert.match(sitemap, /\$\{origin\}\/o-nas/);
+  assert.match(sitemap, /\$\{origin\}\/faq/);
+  assert.match(nginx, /o-nas\|faq/);
 });

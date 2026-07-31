@@ -167,7 +167,6 @@ function ustawieniaOfertyGlownej(){
     opis:"Porównaj produkty, dodaj wybrane do ulubionych albo od razu przejdź do koszyka.",
     zakres:"wszystkie",
     kategoria:"",
-    produkty:[],
     sortowanie:"default",
     naStronie:24,
     wyborDzialu:"pod-produktami",

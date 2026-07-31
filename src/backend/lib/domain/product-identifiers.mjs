@@ -1,9 +1,13 @@
 const GTIN_LENGTHS = new Set([8, 12, 13, 14]);
 
+/** @typedef {Record<string, unknown>} ProductRecord */
+
+/** @param {unknown} value */
 function digits(value = '') {
   return String(value ?? '').replace(/\D+/g, '');
 }
 /** Sprawdza cyfrę kontrolną GTIN-8/12/13/14 zgodnie z GS1. */
+/** @param {unknown} value */
 export function isValidGtin(value = '') {
   const code = digits(value);
   if (!GTIN_LENGTHS.has(code.length)) return false;
@@ -20,17 +24,20 @@ export function isValidGtin(value = '') {
  * Dzięki temu EAN-13 i ten sam kod zapisany z zerem wiodącym są równoważne,
  * ale dowolne SKU nie są agresywnie pozbawiane zer.
  */
+/** @param {unknown} value */
 export function canonicalGtin(value = '') {
   const code = digits(value);
   return isValidGtin(code) ? code.padStart(14, '0') : '';
 }
 
+/** @param {unknown} left @param {unknown} right */
 export function gtinEquivalent(left = '', right = '') {
   const a = canonicalGtin(left);
   const b = canonicalGtin(right);
   return !!a && !!b && a === b;
 }
 
+/** @param {unknown} value @param {number} [max] */
 function identifierText(value = '', max = 160) {
   return String(value ?? '').replace(/\u0000/g, '').trim().slice(0, max);
 }
@@ -39,6 +46,7 @@ function identifierText(value = '', max = 160) {
  * Jeden biznesowy kod kartoteki. Starsze integracje nazywały go zamiennie
  * SKU, EXTERNAL_ID, MPN albo kodem producenta. Zera wiodące są istotne.
  */
+/** @param {ProductRecord} [product] @param {unknown} [preferred] */
 export function canonicalProductCode(product = {}, preferred = '') {
   return identifierText(
     preferred
@@ -60,6 +68,11 @@ export function canonicalProductCode(product = {}, preferred = '') {
  * Utrzymuje zgodność wsteczną bez mnożenia pól w interfejsie. Administrator
  * edytuje jedno pole, natomiast Allegro, OVF i stare eksporty nadal otrzymują
  * alias, którego oczekują.
+ */
+/**
+ * @param {ProductRecord} [product]
+ * @param {{code?: unknown, overwrite?: boolean}} [options]
+ * @returns {ProductRecord}
  */
 export function synchronizeProductIdentifierAliases(product = {}, {
   code = '',

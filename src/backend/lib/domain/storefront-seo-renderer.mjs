@@ -165,6 +165,39 @@ function collectionPage({ name, description, canonical, products }) {
   return { title, description, canonical, image: productImages(products[0] || {})[0] || '', type: 'website', schema, content };
 }
 
+const FAQ_ITEMS = Object.freeze([
+  ['Jak znaleźć odpowiedni produkt?', 'Użyj wyszukiwarki, katalogów albo sortowania. Produkty możesz także zapisać na liście ulubionych.'],
+  ['Czy muszę zakładać konto?', 'Nie. Zamówienie możesz złożyć bez rejestracji. Konto ułatwia dostęp do historii zakupów i ulubionych produktów.'],
+  ['Jakie są metody dostawy?', 'Zamówienia dostarcza InPost: do Paczkomatu lub PaczkoPunktu albo Kurierem InPost pod wskazany adres.'],
+  ['Kiedy dostawa jest bezpłatna?', 'Warunek darmowej dostawy jest zawsze pokazany w koszyku przed złożeniem zamówienia.'],
+  ['Jak mogę zapłacić?', 'Aktualnie dostępne metody płatności i ich ewentualne koszty są widoczne w koszyku przed potwierdzeniem zamówienia.'],
+  ['Jak użyć kodu rabatowego?', 'Wpisz kod w koszyku i wybierz „Zastosuj”. Rabat od razu pojawi się w podsumowaniu.'],
+  ['Jak zwrócić produkt?', 'Konsument może odstąpić od umowy w ciągu 14 dni od odbioru. Szczegóły i wzór oświadczenia znajdują się na stronie Zwroty i reklamacje.'],
+  ['Jak zgłosić reklamację?', 'Wyślij opis problemu i numer zamówienia na sklep.artway@gmail.com. Zdjęcia są pomocne, ale nieobowiązkowe.'],
+  ['Gdzie sprawdzić status zamówienia?', 'Status zamówienia przypisanego do konta znajdziesz w sekcji Moje zamówienia. Możesz też skontaktować się z obsługą i podać numer zamówienia.'],
+]);
+
+function staticContentPage(pathname) {
+  if (pathname === '/o-nas') {
+    const canonical = `${ORIGIN}/o-nas`;
+    const description = 'Poznaj Artway-TM — polski sklep internetowy z grami, zabawkami kreatywnymi, balonami i artykułami imprezowymi.';
+    const schema = { '@context': 'https://schema.org', '@graph': [
+      { '@type': 'AboutPage', name: 'O Artway-TM', description, url: canonical, isPartOf: { '@type': 'WebSite', name: 'Artway-TM', url: `${ORIGIN}/` } },
+      { '@type': 'Organization', name: 'Artway-TM', url: `${ORIGIN}/`, email: 'sklep.artway@gmail.com', telephone: '+48530038914' },
+    ] };
+    const content = `<div class="seo-ssr-page"><nav class="seo-ssr-breadcrumb" aria-label="Okruszki"><a href="/">Sklep</a> / <span>O nas</span></nav><article class="seo-ssr-description"><h1>O Artway-TM</h1><p>Artway-TM to polski sklep internetowy z grami, zabawkami kreatywnymi, balonami i artykułami imprezowymi. Dbamy o czytelną prezentację produktów, bezpieczne zakupy i sprawną obsługę zamówień.</p><h2>Wygodne zakupy w jednym miejscu</h2><p>Wyszukiwarka, rozbudowane katalogi i filtry pomagają szybko znaleźć odpowiedni produkt. Przed złożeniem zamówienia pokazujemy cenę, dostępne płatności, sposób dostawy oraz całkowitą kwotę.</p><h2>Obsługa klienta</h2><p>Pomagamy w pytaniach dotyczących produktów, dostawy, płatności, zwrotów i reklamacji. Skontaktuj się z nami przez <a href="/kontakt/">stronę kontaktową</a> lub napisz na <a href="mailto:sklep.artway@gmail.com">sklep.artway@gmail.com</a>.</p></article></div>`;
+    return { title: 'O nas – poznaj sklep Artway-TM', description, canonical, image: '', type: 'website', schema, content };
+  }
+  if (pathname === '/faq') {
+    const canonical = `${ORIGIN}/faq`;
+    const description = 'Odpowiedzi na najczęstsze pytania o zakupy, płatności, dostawę InPost, zwroty i reklamacje w sklepie Artway-TM.';
+    const schema = { '@context': 'https://schema.org', '@type': 'FAQPage', name: 'Najczęstsze pytania – Artway-TM', url: canonical, mainEntity: FAQ_ITEMS.map(([name, text]) => ({ '@type': 'Question', name, acceptedAnswer: { '@type': 'Answer', text } })) };
+    const content = `<div class="seo-ssr-page"><nav class="seo-ssr-breadcrumb" aria-label="Okruszki"><a href="/">Sklep</a> / <span>FAQ</span></nav><article class="seo-ssr-description"><h1>Najczęstsze pytania</h1><p>${escapeHtml(description)}</p>${FAQ_ITEMS.map(([question, answer]) => `<section><h2>${escapeHtml(question)}</h2><p>${escapeHtml(answer)}</p></section>`).join('')}<p>Nie znalazłeś odpowiedzi? <a href="/kontakt/">Skontaktuj się z obsługą Artway-TM</a>.</p></article></div>`;
+    return { title: 'FAQ – dostawa, płatności i zwroty | Artway-TM', description, canonical, image: '', type: 'website', schema, content };
+  }
+  return null;
+}
+
 function replaceMeta(html, { title, description, canonical, image, type, schema, content, noindex = false }) {
   let output = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(title)}</title>`)
     .replace(/<meta name="description" content="[^"]*">/i, `<meta name="description" content="${escapeHtml(description)}">`)
@@ -187,13 +220,13 @@ function replaceMeta(html, { title, description, canonical, image, type, schema,
 }
 
 export function seoRouteMatches(pathname = '') {
-  return /^\/(?:produkt|kategoria)\/[^/]+\/?$/i.test(pathname) || /^\/(?:promocje|nowosci)\/?$/i.test(pathname);
+  return /^\/(?:produkt|kategoria)\/[^/]+\/?$/i.test(pathname) || /^\/(?:promocje|nowosci|o-nas|faq)\/?$/i.test(pathname);
 }
 
 export async function renderStorefrontSeoPage(request) {
   const url = new URL(request.url), pathname = decodeURIComponent(url.pathname.replace(/\/+$/, '') || '/');
   const { products, indexableProducts, productById, productsByCategory } = await catalogSnapshot();
-  let page = null;
+  let page = staticContentPage(pathname);
   if (pathname.startsWith('/produkt/')) {
     const id = pathname.slice('/produkt/'.length);
     const product = productById.get(id);

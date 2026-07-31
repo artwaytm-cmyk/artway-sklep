@@ -30,6 +30,7 @@ export function infaktCredentialLooksMasked(value = '') {
 export function createInfaktService({ read, write, loadProducts = null, saveProductFields = null }) {
   const czytaj = read;
   const zapisz = write;
+  const grosze = (value) => Math.round((Number(value) || 0) * 100);
   const saveCatalogFields = async (input) => {
     if (typeof saveProductFields !== 'function') {
       throw Object.assign(new Error('Centralna kartoteka produktów nie jest dostępna.'), {
