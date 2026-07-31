@@ -1,7 +1,8 @@
 export function createIndependentVonHalskyQueue(signalVonHalskyPreparation) {
-  return async (task = {}) => {
+  return async (task = {}, result = {}) => {
     const queued = await signalVonHalskyPreparation(task.productId, {
       source: 'allegro-preparation-confirmed',
+      revisionKey: result.mutationId || task.id || '',
     });
     return {
       channel: 'vonHalsky',

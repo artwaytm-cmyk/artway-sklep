@@ -49,6 +49,9 @@ function normalizeTask(value = {}) {
     priorityReason: clean(source.priorityReason, 160),
     attempt: Math.max(0, Number(source.attempt) || 0),
     skipEditorial: source.skipEditorial === true,
+    inputFingerprint: clean(source.inputFingerprint, 160),
+    leaseUntil: clean(source.leaseUntil, 50),
+    workerId: clean(source.workerId, 180),
   };
 }
 
@@ -297,6 +300,8 @@ export function selectAllegroPreparationCandidates(products = [], {
     if (!priority) continue;
     candidates.push({
       id,
+      inputFingerprint: clean(product?._agentReview?.inputFingerprint, 160)
+        || preparationFingerprintForCandidate(product),
       priority,
       reason,
       qualityGap: qualityGap.score,
@@ -312,6 +317,22 @@ export function selectAllegroPreparationCandidates(products = [], {
       || parsedDate(left.preparedAt) - parsedDate(right.preparedAt)
       || left.id.localeCompare(right.id, 'pl', { numeric: true }))
     .slice(0, Math.max(1, Math.min(1000, Number(limit) || 50)));
+}
+
+function preparationFingerprintForCandidate(product = {}) {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    name: product.nazwa || product.name || '',
+    short: product.opisKrotki || product.krotkiOpis || '',
+    long: product.opis || product.description || '',
+    producer: product.producent || product.marka || '',
+    ean: product.ean || product.gtin || '',
+    code: product.kodProducenta || product.mpn || product.externalId || product.sku || '',
+    source: product.sourceUrl || product.producentUrl || '',
+    images: product.zdjecia || product.zdjecie || [],
+    category: product.kategoria || product.category || '',
+    allegroCategory: product.allegroCategoryId || '',
+    vonHalskyCategory: product.vonHalskyCategoryId || '',
+  })).digest('hex');
 }
 
 export function allegroPreparationRetryState(previous = {}, missing = [], {
@@ -389,6 +410,7 @@ export function createAllegroPreparationQueue({
     requestedBy = 'administrator',
     priorityByProduct = {},
     priorityReasonByProduct = {},
+    inputFingerprintByProduct = {},
     defaultPriority = 1000,
   } = {}) {
     const requestedIds = asArray(productIds).map((id) => clean(id, 100)).filter(Boolean);
@@ -408,6 +430,7 @@ export function createAllegroPreparationQueue({
         id: crypto.randomUUID(), batchId, productId, operation, requestedBy, requestedAt,
         priority: Number(priorityByProduct?.[productId]) || defaultPriority,
         priorityReason: priorityReasonByProduct?.[productId] || '',
+        inputFingerprint: inputFingerprintByProduct?.[productId] || '',
       }));
       const createdByProduct = new Map(tasks.map((task) => [task.productId, task]));
       const trackedTasks = ids.map((productId) => occupied.get(productId) || createdByProduct.get(productId)).filter(Boolean);
@@ -520,7 +543,7 @@ export function createAllegroPreparationQueue({
             },
           };
         }
-        if (typeof afterPrepare === 'function' && result?.ready === true) {
+        if (typeof afterPrepare === 'function' && result?.ready === true && result?.reused !== true) {
           const downstream = await runAllegroPreparationDownstream({ afterPrepare, task, result, clean });
           result = {
             ...result,

@@ -56,7 +56,12 @@ export function createAgentRuntimeRoute({
       return respond({ ok: true, updatedAt: updated.updatedAt });
     }
     if (action === 'codex-agent-claim') {
-      return respond({ ok: true, ...(await queue.claim(text(body.workerId || '', 160))) });
+      return respond({
+        ok: true,
+        ...(await queue.claim(text(body.workerId || '', 160), {
+          waitMs: Math.max(0, Math.min(55_000, Number(body.waitMs) || 0)),
+        })),
+      });
     }
     if (action === 'codex-agent-panel-enqueue') {
       const session = sessionOf(req);

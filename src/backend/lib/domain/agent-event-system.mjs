@@ -1,6 +1,8 @@
 import { createAgentEventQueue } from './agent-event-queue.mjs';
+import { productEditorialFingerprint } from './agent-specialists-support.mjs';
 
-const INTERNAL_PRODUCT_AREAS = /^(?:allegro-preparation|von-halsky-agent|von-halsky-source|agent-|openai-|allegro-publication)/i;
+const INTERNAL_PRODUCT_AREAS = /^(?:allegro-preparation|von-halsky-|agent-|openai-|allegro-publication|seo$)/i;
+const REVIEW_FIELD = /^(?:nazwa|name|opis|description|opisKrotki|krotkiOpis|producent|manufacturer|marka|brand|gtin|ean|kodProducenta|numerReferencyjny|mpn|externalId|sku|kategoria|category|sourceUrl|producentUrl|urlProducenta|auxiliarySources|zdjecie|zdjecia|parametry|parameters|parametryProducenta|parametryZrodla|allegroTitle|allegroDescription|allegroDescriptionSections|allegroCategoryId|allegroCategoryName|allegroProductId|allegroParameters|allegroResponsibleProducer|allegroSafetyInformation|vonHalskyTitle|vonHalskyShortDescription|vonHalskyDescription|vonHalskyCategoryId|vonHalskyAttributes|vonHalskyResponsibleProducer)$/i;
 
 export function createAgentEventSystem({
   pool = null,
@@ -9,6 +11,7 @@ export function createAgentEventSystem({
   writeIfVersion,
   runtime,
   coordinate = null,
+  getProduct = null,
   text = (value = '', limit = 500) => String(value ?? '').trim().slice(0, limit),
 } = {}) {
   const queue = createAgentEventQueue({
@@ -20,27 +23,46 @@ export function createAgentEventSystem({
   });
   const emit = (event) => queue.enqueue(event);
 
-  function signalProduct(productId, {
+  async function signalProduct(productId, {
     source = 'product-editor',
     productName = '',
     action = 'pełny przegląd kartoteki produktu',
     changedFields = [],
     priority = 350,
+    product: suppliedProduct = null,
+    revisionKey = '',
   } = {}) {
     const id = text(productId, 120).trim();
     if (!id) return Promise.resolve({ skipped: true, reason: 'missing_product_id' });
+    const relevantFields = Array.isArray(changedFields)
+      ? [...new Set(changedFields.map((field) => text(field, 100)).filter((field) => REVIEW_FIELD.test(field)))]
+      : [];
+    if (Array.isArray(changedFields) && changedFields.length && !relevantFields.length) {
+      return { skipped: true, reason: 'non_editorial_change' };
+    }
+    const currentProduct = suppliedProduct || (typeof getProduct === 'function'
+      ? await getProduct(id).catch(() => null)
+      : null);
+    const fingerprint = text(
+      revisionKey || (currentProduct ? productEditorialFingerprint(currentProduct) : ''),
+      180,
+    );
+    const revision = fingerprint || `explicit:${text(source, 80)}:${text(action, 120)}`;
     return emit({
       type: 'product.review',
       area: 'products',
       entityId: id,
       dedupeKey: `product.review:${id}`,
+      revisionKey: revision,
+      idempotencyKey: `product.review:${id}:${revision}`,
       source,
       priority,
       payload: {
         productId: id,
         productName: text(productName, 240),
         action,
-        changedFields: Array.isArray(changedFields) ? changedFields.slice(0, 200) : [],
+        changedFields: relevantFields.slice(0, 200),
+        inputFingerprint: fingerprint,
       },
     });
   }
@@ -51,7 +73,7 @@ export function createAgentEventSystem({
       const productId = text(input.productId || result?.product?.id, 120).trim();
       const area = text(input.area || 'product-editor', 120).trim();
       let agentEvent = null;
-      if (productId && !INTERNAL_PRODUCT_AREAS.test(area)) {
+      if (productId && result?.modified !== false && !INTERNAL_PRODUCT_AREAS.test(area)) {
         try {
           agentEvent = await signalProduct(productId, {
             source: area,
@@ -59,6 +81,7 @@ export function createAgentEventSystem({
             changedFields: Array.isArray(result?.changedFields)
               ? result.changedFields
               : Object.keys(input.fields || {}),
+            product: result?.product || null,
             priority: /source|import|link/i.test(area) ? 500 : 350,
           });
         } catch (error) {
@@ -67,9 +90,9 @@ export function createAgentEventSystem({
       }
       return {
         ...result,
-        agentEvent: agentEvent
+        agentEvent: agentEvent?.event
           ? {
-              eventId: agentEvent.event?.id || '',
+              eventId: agentEvent.event.id || '',
               queued: agentEvent.duplicate !== true,
               deduplicated: agentEvent.duplicate === true,
             }
@@ -93,7 +116,7 @@ export function createAgentEventSystem({
     })));
   }
 
-  function signalVonHalskyPreparation(productId, { source = 'allegro-preparation' } = {}) {
+  function signalVonHalskyPreparation(productId, { source = 'allegro-preparation', revisionKey = '' } = {}) {
     const id = text(productId, 120).trim();
     if (!id) return Promise.resolve({ skipped: true, reason: 'missing_product_id' });
     return emit({
@@ -101,6 +124,8 @@ export function createAgentEventSystem({
       area: 'products',
       entityId: id,
       dedupeKey: `product.von_halsky.prepare:${id}`,
+      revisionKey: revisionKey || 'current',
+      idempotencyKey: `product.von_halsky.prepare:${id}:${revisionKey || 'current'}`,
       source,
       priority: 520,
       payload: {
@@ -147,6 +172,8 @@ export function createAgentEventSystem({
           1000,
         ));
         error.code = 'von_halsky_product_not_ready';
+        error.decisionRequired = true;
+        error.retryable = false;
         throw error;
       }
       const product = typeof getProduct === 'function' ? await getProduct(productId) : null;
@@ -317,12 +344,15 @@ export function createAgentEventSystem({
     queue.register('communication.allegro.issue.received', communicationHandler);
 
     const startup = setTimeout(() => {
+      const bootRevision = `server-start:${process.pid}:${Date.now()}`;
       queue.resume()
         .then(() => queue.enqueue({
           type: 'product.backlog.bootstrap',
           area: 'products',
           entityId: 'current-catalog',
           dedupeKey: 'product.backlog.bootstrap:current-catalog',
+          revisionKey: bootRevision,
+          idempotencyKey: `product.backlog.bootstrap:current-catalog:${bootRevision}`,
           source: 'server-startup',
           priority: 400,
           payload: {

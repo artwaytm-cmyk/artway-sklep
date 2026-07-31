@@ -73,6 +73,30 @@ test('identyczny aktywny sygnał nie tworzy dwóch prac', async () => {
   assert.equal(status.counts.completed, 1);
 });
 
+test('ta sama wersja danych nie wraca do pracy po jej prawidłowym zakończeniu', async () => {
+  const store = repository();
+  const queue = createAgentEventQueue(store);
+  let calls = 0;
+  queue.register('product.review', async () => {
+    calls += 1;
+    return { message: 'wersja potwierdzona' };
+  });
+  const event = {
+    type: 'product.review',
+    area: 'products',
+    entityId: 'P-REV',
+    dedupeKey: 'product.review:P-REV',
+    revisionKey: 'sha256:wersja-1',
+  };
+  await queue.enqueue(event);
+  await queue.kick();
+  const repeated = await queue.enqueue(event);
+  await queue.kick();
+  assert.equal(repeated.duplicate, true);
+  assert.equal(calls, 1);
+  assert.equal((await queue.status()).counts.completed, 1);
+});
+
 test('chwilowy błąd wykonawcy jest ponawiany w tej samej trwałej kolejce', async () => {
   const store = repository();
   const queue = createAgentEventQueue(store);

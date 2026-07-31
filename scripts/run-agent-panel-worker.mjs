@@ -4,7 +4,7 @@ import { AGENT_PANEL_INSTRUCTIONS } from '../src/backend/lib/domain/agent-panel-
 const origin = String(process.env.ARTWAY_LOCAL_API_ORIGIN || process.env.ARTWAY_API_URL || 'http://127.0.0.1:3000').replace(/\/api\/store.*$/i, '').replace(/\/+$/, '');
 const token = String(process.env.ARTWAY_ADMIN_TOKEN || '').trim();
 const workerId = `artway-panel-${process.pid}-${randomUUID().slice(0, 8)}`;
-const pollMs = Math.max(1_500, Math.min(15_000, Number(process.env.CODEX_AGENT_POLL_MS) || 3_000));
+const waitMs = Math.max(15_000, Math.min(55_000, Number(process.env.CODEX_AGENT_WAIT_MS) || 50_000));
 
 if (!token) throw new Error('Brak ARTWAY_ADMIN_TOKEN dla procesu Agenta panelu.');
 
@@ -168,15 +168,14 @@ async function main() {
     try {
       const claimed = await api('codex-agent-claim', {
         method: 'POST',
-        body: { workerId },
-        timeout: 20_000,
+        body: { workerId, waitMs },
+        timeout: waitMs + 10_000,
       });
       if (claimed.job) await processJob(claimed.job);
       else await runtime('worker_heartbeat');
-      await sleep(pollMs);
     } catch (error) {
       process.stderr.write(`Agent panelu: ${safeError(error)}\n`);
-      await sleep(Math.min(30_000, pollMs * 3));
+      await sleep(5_000);
     }
   }
 }

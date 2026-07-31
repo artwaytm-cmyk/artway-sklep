@@ -26,6 +26,8 @@ test('schemat PostgreSQL powstaje wyłącznie przez numerowane migracje', async 
     '0012_product_agent_state_payload_source.sql',
     '0013_strict_product_review_confirmation.sql',
     '0014_product_review_compliance_guard.sql',
+    '0015_event_driven_agent_runtime.sql',
+    '0016_close_legacy_agent_feedback_tasks.sql',
   ]);
   const runtimeFiles = [
     'src/backend/lib/core/postgres-store-repository.mjs',
@@ -34,6 +36,7 @@ test('schemat PostgreSQL powstaje wyłącznie przez numerowane migracje', async 
     'src/backend/lib/domain/central-product-catalog.mjs',
     'src/backend/lib/domain/allegro-preparation-postgres-queue.mjs',
     'src/backend/lib/domain/agent-event-queue.mjs',
+    'src/backend/lib/domain/codex-agent-postgres-queue.mjs',
   ];
   for (const file of runtimeFiles) {
     assert.doesNotMatch(await read(file), /CREATE TABLE|ALTER TABLE|CREATE INDEX/, file);

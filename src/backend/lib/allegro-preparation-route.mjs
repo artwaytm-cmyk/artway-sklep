@@ -49,6 +49,7 @@ export function createAllegroPreparationRoute(deps = {}) {
           item.id,
           `${item.reason}: luka jakości ${item.qualityGap}`,
         ])),
+        inputFingerprintByProduct: Object.fromEntries(candidates.map((item) => [item.id, item.inputFingerprint || ''])),
         defaultPriority: 100,
       });
       return {

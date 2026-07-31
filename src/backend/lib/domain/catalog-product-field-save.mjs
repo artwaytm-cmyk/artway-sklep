@@ -226,15 +226,33 @@ export function createCatalogProductFieldSaver({
     const removeFields = [...new Set(rawRemove
       .map((field) => String(field || '').trim())
       .filter((field) => allowedProductField(field) && !Object.prototype.hasOwnProperty.call(clean, field)))];
+    const changedPatch = Object.fromEntries(Object.entries(clean)
+      .filter(([field, value]) => !own(currentProduct, field) || !same(currentProduct[field], value)));
+    const effectiveRemove = removeFields.filter((field) => own(currentProduct, field));
+    const changedFields = [...Object.keys(changedPatch), ...effectiveRemove];
+    if (!changedFields.length && currentProduct) {
+      return {
+        productId: id,
+        fields: {},
+        remove: [],
+        changedFields: [],
+        confirmedFields: [],
+        mutationId: String(mutationId || currentProduct.lastAdminMutationId || '').slice(0, 160),
+        confirmedAt: changedAt,
+        modified: false,
+        idempotent: true,
+        product: currentProduct,
+      };
+    }
     const receipt = {
       lastAdminMutationId: String(mutationId || `product-${id}-${Date.now().toString(36)}`).slice(0, 160),
       lastAdminMutationAt: changedAt,
       lastAdminMutationBy: String(actor || 'administrator').slice(0, 200),
       lastAdminMutationArea: String(area || 'product').slice(0, 80),
-      lastAdminMutationFields: Object.keys(clean),
+      lastAdminMutationFields: changedFields,
     };
-    const expected = { ...clean, ...receipt };
-    const saved = await writeOperations([{ id, fields: expected, remove: removeFields }], changedAt);
+    const expected = { ...changedPatch, ...receipt };
+    const saved = await writeOperations([{ id, fields: expected, remove: effectiveRemove }], changedAt);
     if (saved?.skippedProductIds?.includes(id)) {
       const error = new Error('Produkt nie istnieje w centralnym katalogu.');
       error.status = 404;
@@ -256,7 +274,7 @@ export function createCatalogProductFieldSaver({
     const mismatches = Object.entries(expected)
       .filter(([key, value]) => !own(product, key) || !same(product[key], value))
       .map(([key]) => key);
-    mismatches.push(...removeFields.filter((key) => own(product, key)));
+    mismatches.push(...effectiveRemove.filter((key) => own(product, key)));
     if (mismatches.length) {
       const error = new Error(`Serwer nie potwierdził pól: ${mismatches.slice(0, 12).join(', ')}`);
       error.status = 409;
@@ -267,7 +285,8 @@ export function createCatalogProductFieldSaver({
     return {
       productId: id,
       fields: expected,
-      remove: removeFields,
+      remove: effectiveRemove,
+      changedFields,
       confirmedFields: Object.keys(expected),
       mutationId: receipt.lastAdminMutationId,
       confirmedAt: changedAt,

@@ -27,6 +27,29 @@ test('zapis pól produktu kończy się dopiero po zgodnym odczycie centralnej ka
   assert.equal(result.product.allegroDescription, 'Potwierdzony opis');
 });
 
+test('identyczna wartość nie tworzy mutacji ani nowego pokwitowania Agenta', async () => {
+  const stored = { id: '17', nazwa: 'Ta sama nazwa', opis: 'Ten sam opis' };
+  let writes = 0;
+  const save = createCatalogProductFieldSaver({
+    now: () => '2026-07-31T15:00:00.000Z',
+    writeOperations: async () => {
+      writes += 1;
+      return { modified: true, skippedProductIds: [] };
+    },
+    readProduct: async () => stored,
+  });
+  const result = await save({
+    productId: '17',
+    fields: { nazwa: 'Ta sama nazwa', opis: 'Ten sam opis' },
+    mutationId: 'duplicate-agent-write',
+  });
+  assert.equal(writes, 0);
+  assert.equal(result.modified, false);
+  assert.equal(result.idempotent, true);
+  assert.deepEqual(result.changedFields, []);
+  assert.equal(result.product, stored);
+});
+
 test('każda ścieżka zapisu synchronizuje kod produktu, EAN i zweryfikowany profil producenta', async () => {
   let stored = { id: '18', nazwa: 'Gra', producent: 'MilliWOOD', marka: 'MilliWOOD' };
   const save = createCatalogProductFieldSaver({

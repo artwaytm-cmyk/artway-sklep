@@ -21,6 +21,11 @@ export function createPostgresAllegroPreparationQueue({
   let schemaPromise = null;
   let workerPromise = null;
   let editorialProviderUnavailable = false;
+  const workerId = `preparation-${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
+  const leaseMs = 20 * 60_000;
+  let listenerClient = null;
+  let listenerPromise = null;
+  let rerunRequested = false;
 
   const ensureSchema = async () => {
     if (!schemaPromise) {
@@ -50,7 +55,41 @@ export function createPostgresAllegroPreparationQueue({
     priorityReason: row.priority_reason,
     attempt: row.attempt,
     skipEditorial: row.skip_editorial,
+    inputFingerprint: row.input_fingerprint,
+    leaseUntil: row.lease_until instanceof Date ? row.lease_until.toISOString() : row.lease_until,
+    workerId: row.worker_id,
   });
+
+  const ensureListener = async () => {
+    if (listenerClient) return;
+    if (!listenerPromise) {
+      listenerPromise = (async () => {
+        const client = await pool.connect();
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          if (listenerClient === client) listenerClient = null;
+          try { client.release(true); } catch {}
+          listenerPromise = null;
+        };
+        client.on('notification', (message) => {
+          if (message.channel === 'artway_agent_preparation' && String(message.payload || '') === ns) kick();
+        });
+        client.on('error', (error) => {
+          console.error('allegro_preparation_listener', error);
+          release();
+          const timer = setTimeout(() => ensureListener().catch(() => {}), 5_000);
+          timer.unref?.();
+        });
+        await client.query('LISTEN artway_agent_preparation');
+        listenerClient = client;
+      })().finally(() => {
+        if (!listenerClient) listenerPromise = null;
+      });
+    }
+    return listenerPromise;
+  };
 
   const migrateLegacy = async () => {
     await ensureSchema();
@@ -168,6 +207,7 @@ export function createPostgresAllegroPreparationQueue({
     requestedBy = 'administrator',
     priorityByProduct = {},
     priorityReasonByProduct = {},
+    inputFingerprintByProduct = {},
     defaultPriority = 1000,
   } = {}) => {
     await migrateLegacy();
@@ -184,24 +224,43 @@ export function createPostgresAllegroPreparationQueue({
         [ns, ids],
       );
       const occupied = new Map(occupiedRows.rows.map((row) => [String(row.product_id), taskFromRow(row)]));
+      const fingerprints = Object.values(inputFingerprintByProduct || {}).filter(Boolean);
+      const completedByFingerprint = new Map();
+      if (fingerprints.length) {
+        const previous = await client.query(`
+          SELECT DISTINCT ON(product_id) *
+          FROM artway_allegro_preparation_tasks
+          WHERE namespace=$1 AND product_id=ANY($2::text[])
+            AND input_fingerprint<>'' AND input_fingerprint=ANY($3::text[])
+            AND status IN ('completed','decision_required','waiting_provider')
+          ORDER BY product_id,updated_at DESC
+        `, [ns, ids, fingerprints]);
+        for (const row of previous.rows) {
+          const productId = String(row.product_id);
+          if (String(row.input_fingerprint || '') === String(inputFingerprintByProduct?.[productId] || '')) {
+            completedByFingerprint.set(productId, taskFromRow(row));
+          }
+        }
+      }
       const created = [];
       for (const productId of ids) {
-        if (occupied.has(productId)) continue;
+        if (occupied.has(productId) || completedByFingerprint.has(productId)) continue;
         const task = normalizeTask({
           id: crypto.randomUUID(), batchId, productId, operation, requestedBy, requestedAt,
           priority: Number(priorityByProduct?.[productId]) || defaultPriority,
           priorityReason: priorityReasonByProduct?.[productId] || '',
+          inputFingerprint: inputFingerprintByProduct?.[productId] || '',
         });
         const inserted = await client.query(`
           INSERT INTO artway_allegro_preparation_tasks(
             namespace,task_id,batch_id,product_id,operation,requested_by,requested_at,
-            priority,priority_reason,status
-          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending')
+            priority,priority_reason,input_fingerprint,status
+          ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'pending')
           ON CONFLICT DO NOTHING
           RETURNING *
         `, [
           ns, task.id, batchId, productId, task.operation, task.requestedBy, requestedAt,
-          task.priority, task.priorityReason,
+          task.priority, task.priorityReason, task.inputFingerprint,
         ]);
         if (inserted.rowCount) created.push(taskFromRow(inserted.rows[0]));
         else {
@@ -213,7 +272,7 @@ export function createPostgresAllegroPreparationQueue({
         }
       }
       const createdByProduct = new Map(created.map((task) => [task.productId, task]));
-      const tracked = ids.map((id) => occupied.get(id) || createdByProduct.get(id)).filter(Boolean);
+      const tracked = ids.map((id) => occupied.get(id) || createdByProduct.get(id) || completedByFingerprint.get(id)).filter(Boolean);
       await client.query(`
         INSERT INTO artway_allegro_preparation_batches(
           namespace,batch_id,operation,requested_by,requested_at,
@@ -245,6 +304,17 @@ export function createPostgresAllegroPreparationQueue({
         'SELECT namespace FROM artway_allegro_preparation_state WHERE namespace=$1 FOR UPDATE',
         [ns],
       );
+      await client.query(`
+        UPDATE artway_allegro_preparation_tasks
+        SET status=CASE WHEN attempt>=3 THEN 'decision_required' ELSE 'pending' END,
+            started_at=NULL,lease_until=NULL,worker_id='',
+            completed_at=CASE WHEN attempt>=3 THEN NOW() ELSE NULL END,
+            result=CASE WHEN attempt>=3
+              THEN result || jsonb_build_object('reason','worker_lease_expired')
+              ELSE result END,
+            updated_at=NOW()
+        WHERE namespace=$1 AND status='running' AND lease_until<NOW()
+      `, [ns]);
       const selected = await client.query(`
         SELECT * FROM artway_allegro_preparation_tasks
         WHERE namespace=$1 AND status='pending'
@@ -259,10 +329,12 @@ export function createPostgresAllegroPreparationQueue({
       const row = selected.rows[0];
       const updated = await client.query(`
         UPDATE artway_allegro_preparation_tasks
-        SET status='running',attempt=attempt+1,skip_editorial=$3,started_at=NOW(),updated_at=NOW()
+        SET status='running',attempt=attempt+1,skip_editorial=$3,started_at=NOW(),
+            lease_until=NOW()+($4::text || ' milliseconds')::interval,
+            worker_id=$5,updated_at=NOW()
         WHERE namespace=$1 AND task_id=$2
         RETURNING *
-      `, [ns, row.task_id, editorialProviderUnavailable]);
+      `, [ns, row.task_id, editorialProviderUnavailable, leaseMs, workerId]);
       await client.query('COMMIT');
       return taskFromRow(updated.rows[0]);
     } catch (error) {
@@ -294,9 +366,9 @@ export function createPostgresAllegroPreparationQueue({
     };
     await pool.query(`
       UPDATE artway_allegro_preparation_tasks
-      SET status=$3,result=$4::jsonb,completed_at=NOW(),updated_at=NOW()
-      WHERE namespace=$1 AND task_id=$2
-    `, [ns, task.id, item.status, JSON.stringify(item)]);
+      SET status=$3,result=$4::jsonb,completed_at=NOW(),lease_until=NULL,worker_id='',updated_at=NOW()
+      WHERE namespace=$1 AND task_id=$2 AND status='running' AND worker_id=$5
+    `, [ns, task.id, item.status, JSON.stringify(item), task.workerId || workerId]);
   };
 
   const requeue = async (task, result) => {
@@ -317,9 +389,10 @@ export function createPostgresAllegroPreparationQueue({
     };
     await pool.query(`
       UPDATE artway_allegro_preparation_tasks
-      SET status='pending',result=$3::jsonb,started_at=NULL,completed_at=NULL,updated_at=NOW()
-      WHERE namespace=$1 AND task_id=$2
-    `, [ns, task.id, JSON.stringify(item)]);
+      SET status='pending',result=$3::jsonb,started_at=NULL,completed_at=NULL,
+          lease_until=NULL,worker_id='',updated_at=NOW()
+      WHERE namespace=$1 AND task_id=$2 AND status='running' AND worker_id=$4
+    `, [ns, task.id, JSON.stringify(item), task.workerId || workerId]);
   };
 
   const run = async () => {
@@ -361,7 +434,7 @@ export function createPostgresAllegroPreparationQueue({
             },
           };
         }
-        if (typeof afterPrepare === 'function' && result?.ready === true) {
+        if (typeof afterPrepare === 'function' && result?.ready === true && result?.reused !== true) {
           let downstream;
           try {
             downstream = await afterPrepare(task, result);
@@ -422,13 +495,24 @@ export function createPostgresAllegroPreparationQueue({
   };
 
   function kick() {
-    if (workerPromise) return workerPromise;
-    workerPromise = Promise.resolve().then(run).finally(() => { workerPromise = null; });
+    ensureListener().catch((error) => console.error('allegro_preparation_listener_start', error));
+    if (workerPromise) {
+      rerunRequested = true;
+      return workerPromise;
+    }
+    workerPromise = Promise.resolve().then(run).finally(() => {
+      workerPromise = null;
+      if (rerunRequested) {
+        rerunRequested = false;
+        kick();
+      }
+    });
     return workerPromise;
   }
 
   const resume = async () => {
     await migrateLegacy();
+    await ensureListener().catch((error) => console.error('allegro_preparation_listener_start', error));
     editorialProviderUnavailable = false;
     await pool.query(`
       UPDATE artway_allegro_preparation_state
@@ -437,7 +521,9 @@ export function createPostgresAllegroPreparationQueue({
     `, [ns]);
     await pool.query(`
       UPDATE artway_allegro_preparation_tasks
-      SET status='pending',started_at=NULL,updated_at=NOW()
+      SET status=CASE WHEN attempt>=3 THEN 'decision_required' ELSE 'pending' END,
+          started_at=NULL,lease_until=NULL,worker_id='',
+          completed_at=CASE WHEN attempt>=3 THEN NOW() ELSE NULL END,updated_at=NOW()
       WHERE namespace=$1 AND status='running'
     `, [ns]);
     kick();

@@ -98,3 +98,29 @@ test('ręczne przygotowanie partii ma jeden plan Codex i bezpieczny fallback kol
   assert.match(routeSource, /requestedBy: assignment \? 'codex-koordinator'/);
   assert.match(routeSource, /safe_fallback/);
 });
+
+test('wewnętrzny zapis kanału i zmiana operacyjna nie uruchamiają ponownie pełnego przeglądu produktu', async () => {
+  const store = repository();
+  let coordinates = 0;
+  const system = createAgentEventSystem({
+    ...store,
+    coordinate: async () => { coordinates += 1; return { ok: true }; },
+    getProduct: async () => ({ id: 'P-LOOP', nazwa: 'Gra', opis: 'Opis' }),
+  });
+  const internalSave = system.wrapProductSaver(async () => ({
+    modified: true,
+    changedFields: ['vonHalskyRemoteStatus'],
+    product: { id: 'P-LOOP', nazwa: 'Gra', opis: 'Opis', vonHalskyRemoteStatus: 'PUBLISHED' },
+  }));
+  const stockSave = system.wrapProductSaver(async () => ({
+    modified: true,
+    changedFields: ['stan'],
+    product: { id: 'P-LOOP', nazwa: 'Gra', opis: 'Opis', stan: 4 },
+  }));
+
+  assert.equal((await internalSave({ productId: 'P-LOOP', area: 'von-halsky-reconciliation' })).agentEvent, null);
+  assert.equal((await stockSave({ productId: 'P-LOOP', area: 'inventory' })).agentEvent, null);
+  await system.queue.kick();
+  assert.equal(coordinates, 0);
+  assert.equal((await system.queue.status()).active, 0);
+});

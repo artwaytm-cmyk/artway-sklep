@@ -3,9 +3,11 @@ import { assertPostgresRelations } from '../core/postgres-schema-contract.mjs';
 
 const FALLBACK_KEY = 'agent_event_queue';
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'decision_required']);
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'decision_required', 'superseded', 'cancelled']);
 const MAX_RECENT = 300;
 const MAX_ATTEMPTS = 3;
+const LEASE_MS = 15 * 60_000;
+const MAX_CONCURRENCY = 3;
 
 const clean = (value = '', limit = 500) => String(value ?? '')
   .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
@@ -34,10 +36,11 @@ function normalizeEvent(value = {}) {
     area: clean(event.area || 'system', 100),
     entityId: clean(event.entityId, 180),
     dedupeKey: clean(event.dedupeKey || `${event.type}:${event.entityId}`, 300),
+    idempotencyKey: clean(event.idempotencyKey, 500),
     source: clean(event.source || 'server', 120),
     priority: Math.max(0, Math.min(1000, Number(event.priority) || 100)),
     payload: safePayload(event.payload),
-    status: ['queued', 'running', 'completed', 'failed', 'decision_required'].includes(event.status)
+    status: ['queued', 'running', 'completed', 'failed', 'decision_required', 'superseded', 'cancelled'].includes(event.status)
       ? event.status
       : 'queued',
     attempts: Math.max(0, Number(event.attempts) || 0),
@@ -45,6 +48,9 @@ function normalizeEvent(value = {}) {
     startedAt: clean(event.startedAt, 50),
     completedAt: clean(event.completedAt, 50),
     updatedAt: clean(event.updatedAt || event.createdAt || new Date().toISOString(), 50),
+    availableAt: clean(event.availableAt || event.createdAt || new Date().toISOString(), 50),
+    leaseUntil: clean(event.leaseUntil, 50),
+    workerId: clean(event.workerId, 180),
     error: clean(event.error, 2000),
     result: object(event.result),
   };
@@ -88,8 +94,14 @@ export function createAgentEventQueue({
   }
   const ns = clean(namespace, 120) || 'artway-sklep';
   const handlers = new Map();
+  const concurrency = pool ? MAX_CONCURRENCY : 1;
   let schemaPromise = null;
-  let workerPromise = null;
+  const workers = new Set();
+  const workerId = `event-runtime-${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
+  let rerunRequested = false;
+  let listenerPromise = null;
+  let listenerClient = null;
+  let wakeTimer = null;
   let lastPruneAt = 0;
 
   async function ensureSchema() {
@@ -104,6 +116,37 @@ export function createAgentEventQueue({
     await schemaPromise;
   }
 
+  async function ensureListener() {
+    if (!pool || listenerClient) return;
+    if (!listenerPromise) {
+      listenerPromise = (async () => {
+        const client = await pool.connect();
+        let released = false;
+        const release = () => {
+          if (released) return;
+          released = true;
+          if (listenerClient === client) listenerClient = null;
+          try { client.release(true); } catch {}
+          listenerPromise = null;
+        };
+        client.on('notification', (message) => {
+          if (message.channel === 'artway_agent_events' && String(message.payload || '') === ns) kick();
+        });
+        client.on('error', (error) => {
+          console.error('agent_event_listener', error);
+          release();
+          const timer = setTimeout(() => ensureListener().catch(() => {}), 5_000);
+          timer.unref?.();
+        });
+        await client.query('LISTEN artway_agent_events');
+        listenerClient = client;
+      })().finally(() => {
+        if (!listenerClient) listenerPromise = null;
+      });
+    }
+    return listenerPromise;
+  }
+
   async function pruneIfNeeded() {
     if (!pool || now().getTime() - lastPruneAt < 60 * 60_000) return;
     lastPruneAt = now().getTime();
@@ -111,16 +154,16 @@ export function createAgentEventQueue({
     await pool.query(`
       DELETE FROM artway_agent_events
       WHERE namespace=$1
-        AND status IN ('completed','failed','decision_required')
+        AND status IN ('completed','failed','decision_required','superseded','cancelled')
         AND completed_at < NOW() - INTERVAL '30 days'
     `, [ns]);
     await pool.query(`
       DELETE FROM artway_agent_events
       WHERE namespace=$1
-        AND status IN ('completed','failed','decision_required')
+        AND status IN ('completed','failed','decision_required','superseded','cancelled')
         AND event_id NOT IN (
           SELECT event_id FROM artway_agent_events
-          WHERE namespace=$1 AND status IN ('completed','failed','decision_required')
+          WHERE namespace=$1 AND status IN ('completed','failed','decision_required','superseded','cancelled')
           ORDER BY updated_at DESC
           LIMIT 5000
         )
@@ -134,6 +177,7 @@ export function createAgentEventQueue({
       area: row.area,
       entityId: row.entity_id,
       dedupeKey: row.dedupe_key,
+      idempotencyKey: row.idempotency_key,
       source: row.source,
       priority: row.priority,
       payload: row.payload,
@@ -145,6 +189,9 @@ export function createAgentEventQueue({
       startedAt: row.started_at instanceof Date ? row.started_at.toISOString() : row.started_at,
       completedAt: row.completed_at instanceof Date ? row.completed_at.toISOString() : row.completed_at,
       updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
+      availableAt: row.available_at instanceof Date ? row.available_at.toISOString() : row.available_at,
+      leaseUntil: row.lease_until instanceof Date ? row.lease_until.toISOString() : row.lease_until,
+      workerId: row.worker_id,
     });
   }
 
@@ -173,6 +220,7 @@ export function createAgentEventQueue({
     const event = normalizeEvent({
       ...input,
       id: input.id || crypto.randomUUID(),
+      idempotencyKey: input.idempotencyKey || `${input.dedupeKey || `${input.type}:${input.entityId}`}:${input.revisionKey || 'once'}`,
       createdAt: now().toISOString(),
       updatedAt: now().toISOString(),
       status: 'queued',
@@ -190,27 +238,34 @@ export function createAgentEventQueue({
       await pruneIfNeeded().catch((error) => console.error('agent_event_prune', error));
       const inserted = await pool.query(`
         INSERT INTO artway_agent_events(
-          namespace,event_id,event_type,area,entity_id,dedupe_key,source,priority,payload,status,created_at,updated_at
-        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,'queued',NOW(),NOW())
+          namespace,event_id,event_type,area,entity_id,dedupe_key,idempotency_key,
+          source,priority,payload,status,available_at,created_at,updated_at
+        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,'queued',NOW(),NOW(),NOW())
         ON CONFLICT DO NOTHING
         RETURNING *
       `, [
         ns, event.id, event.type, event.area, event.entityId, event.dedupeKey,
-        event.source, event.priority, JSON.stringify(event.payload),
+        event.idempotencyKey, event.source, event.priority, JSON.stringify(event.payload),
       ]);
       if (inserted.rowCount) queued = fromRow(inserted.rows[0]);
       else {
         duplicate = true;
         const existing = await pool.query(`
           SELECT * FROM artway_agent_events
-          WHERE namespace=$1 AND dedupe_key=$2 AND status IN ('queued','running')
-          ORDER BY created_at LIMIT 1
-        `, [ns, event.dedupeKey]);
+          WHERE namespace=$1 AND (
+            idempotency_key=$2 OR (dedupe_key=$3 AND status IN ('queued','running'))
+          )
+          ORDER BY CASE WHEN idempotency_key=$2 THEN 0 ELSE 1 END,created_at LIMIT 1
+        `, [ns, event.idempotencyKey, event.dedupeKey]);
         queued = existing.rowCount ? fromRow(existing.rows[0]) : event;
       }
     } else {
       const outcome = await fallbackChange((items) => {
-        const existing = items.find((item) => item.dedupeKey === event.dedupeKey && ACTIVE_STATUSES.has(item.status));
+        const existing = items.find((item) => (
+          item.idempotencyKey && item.idempotencyKey === event.idempotencyKey
+        ) || (
+          item.dedupeKey === event.dedupeKey && ACTIVE_STATUSES.has(item.status)
+        ));
         if (existing) return { write: false, value: { event: existing, duplicate: true } };
         return { items: [event, ...items], value: { event, duplicate: false } };
       });
@@ -237,9 +292,20 @@ export function createAgentEventQueue({
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        await client.query(`
+          UPDATE artway_agent_events
+          SET status=CASE WHEN attempts >= $2 THEN 'failed' ELSE 'queued' END,
+              available_at=CASE WHEN attempts >= $2 THEN available_at ELSE NOW() END,
+              started_at=NULL,lease_until=NULL,worker_id='',
+              completed_at=CASE WHEN attempts >= $2 THEN NOW() ELSE NULL END,
+              last_error=CASE WHEN attempts >= $2 AND last_error=''
+                THEN 'Wygasła dzierżawa procesu wykonawczego.' ELSE last_error END,
+              updated_at=NOW()
+          WHERE namespace=$1 AND status='running' AND lease_until<NOW()
+        `, [ns, MAX_ATTEMPTS]);
         const selected = await client.query(`
           SELECT * FROM artway_agent_events
-          WHERE namespace=$1 AND status='queued'
+          WHERE namespace=$1 AND status='queued' AND available_at<=NOW()
           ORDER BY priority DESC,created_at,event_id
           FOR UPDATE SKIP LOCKED
           LIMIT 1
@@ -250,10 +316,12 @@ export function createAgentEventQueue({
         }
         const updated = await client.query(`
           UPDATE artway_agent_events
-          SET status='running',attempts=attempts+1,started_at=NOW(),updated_at=NOW()
+          SET status='running',attempts=attempts+1,started_at=NOW(),
+              lease_until=NOW()+($3::text || ' milliseconds')::interval,
+              worker_id=$4,updated_at=NOW()
           WHERE namespace=$1 AND event_id=$2
           RETURNING *
-        `, [ns, selected.rows[0].event_id]);
+        `, [ns, selected.rows[0].event_id, LEASE_MS, workerId]);
         await client.query('COMMIT');
         return fromRow(updated.rows[0]);
       } catch (error) {
@@ -265,6 +333,7 @@ export function createAgentEventQueue({
     }
     let claimed = null;
     await fallbackChange((items) => {
+      claimed = null;
       const index = items
         .map((item, position) => ({ item, position }))
         .filter(({ item }) => item.status === 'queued')
@@ -291,9 +360,10 @@ export function createAgentEventQueue({
     if (pool) {
       await pool.query(`
         UPDATE artway_agent_events
-        SET status=$3,result=$4::jsonb,last_error=$5,completed_at=$6,updated_at=$6
-        WHERE namespace=$1 AND event_id=$2
-      `, [ns, event.id, status, JSON.stringify(object(result)), clean(error, 2000), completedAt]);
+        SET status=$3,result=$4::jsonb,last_error=$5,completed_at=$6,
+            lease_until=NULL,worker_id='',updated_at=$6
+        WHERE namespace=$1 AND event_id=$2 AND status='running' AND worker_id=$7
+      `, [ns, event.id, status, JSON.stringify(object(result)), clean(error, 2000), completedAt, event.workerId || workerId]);
       return;
     }
     await fallbackChange((items) => ({
@@ -318,11 +388,20 @@ export function createAgentEventQueue({
       return;
     }
     if (pool) {
+      const delayMs = Math.min(5 * 60_000, 15_000 * (2 ** Math.max(0, event.attempts - 1)));
       await pool.query(`
         UPDATE artway_agent_events
-        SET status='queued',last_error=$3,started_at=NULL,updated_at=NOW()
-        WHERE namespace=$1 AND event_id=$2
-      `, [ns, event.id, message]);
+        SET status='queued',last_error=$3,started_at=NULL,lease_until=NULL,worker_id='',
+            available_at=NOW()+($4::text || ' milliseconds')::interval,updated_at=NOW()
+        WHERE namespace=$1 AND event_id=$2 AND status='running' AND worker_id=$5
+      `, [ns, event.id, message, delayMs, event.workerId || workerId]);
+      if (!wakeTimer) {
+        wakeTimer = setTimeout(() => {
+          wakeTimer = null;
+          kick();
+        }, delayMs + 25);
+        wakeTimer.unref?.();
+      }
       return;
     }
     await fallbackChange((items) => ({
@@ -384,12 +463,39 @@ export function createAgentEventQueue({
     }
   }
 
+  async function scheduleNextAvailable() {
+    if (!pool || wakeTimer) return;
+    const next = await pool.query(`
+      SELECT MIN(available_at) AS available_at
+      FROM artway_agent_events
+      WHERE namespace=$1 AND status='queued'
+    `, [ns]);
+    const at = next.rows[0]?.available_at ? new Date(next.rows[0].available_at).getTime() : 0;
+    if (!at) return;
+    const delay = Math.max(25, Math.min(5 * 60_000, at - now().getTime() + 25));
+    wakeTimer = setTimeout(() => {
+      wakeTimer = null;
+      kick();
+    }, delay);
+    wakeTimer.unref?.();
+  }
+
   function kick() {
-    if (workerPromise) return workerPromise;
-    workerPromise = Promise.resolve().then(run).finally(() => {
-      workerPromise = null;
-    });
-    return workerPromise;
+    ensureListener().catch((error) => console.error('agent_event_listener_start', error));
+    if (workers.size >= concurrency) rerunRequested = true;
+    while (workers.size < concurrency) {
+      const work = Promise.resolve().then(run).finally(() => {
+        workers.delete(work);
+        if (!workers.size && rerunRequested) {
+          rerunRequested = false;
+          kick();
+        } else if (!workers.size) {
+          scheduleNextAvailable().catch((error) => console.error('agent_event_next_available', error));
+        }
+      });
+      workers.add(work);
+    }
+    return Promise.allSettled([...workers]);
   }
 
   async function resume() {
@@ -397,9 +503,12 @@ export function createAgentEventQueue({
       await ensureSchema();
       await pool.query(`
         UPDATE artway_agent_events
-        SET status='queued',started_at=NULL,updated_at=NOW()
+        SET status=CASE WHEN attempts >= $2 THEN 'failed' ELSE 'queued' END,
+            available_at=NOW(),started_at=NULL,lease_until=NULL,worker_id='',
+            completed_at=CASE WHEN attempts >= $2 THEN NOW() ELSE NULL END,
+            updated_at=NOW()
         WHERE namespace=$1 AND status='running'
-      `, [ns]);
+      `, [ns, MAX_ATTEMPTS]);
     } else {
       await fallbackChange((items) => ({
         items: items.map((item) => item.status === 'running'
@@ -407,21 +516,36 @@ export function createAgentEventQueue({
           : item),
       }));
     }
+    await ensureListener().catch((error) => console.error('agent_event_listener_start', error));
     return kick();
   }
 
   async function status() {
     if (pool) {
       await ensureSchema();
-      const rows = await pool.query(`
-        SELECT * FROM artway_agent_events
-        WHERE namespace=$1
-        ORDER BY
-          CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,
-          priority DESC,updated_at DESC
-        LIMIT $2
-      `, [ns, MAX_RECENT]);
-      return publicState(rows.rows.map(fromRow));
+      const [rows, countRows] = await Promise.all([
+        pool.query(`
+          SELECT * FROM artway_agent_events
+          WHERE namespace=$1
+          ORDER BY
+            CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END,
+            priority DESC,updated_at DESC
+          LIMIT $2
+        `, [ns, MAX_RECENT]),
+        pool.query(`
+          SELECT status,count(*)::integer AS count
+          FROM artway_agent_events WHERE namespace=$1 GROUP BY status
+        `, [ns]),
+      ]);
+      const state = publicState(rows.rows.map(fromRow));
+      const counts = Object.fromEntries(countRows.rows.map((row) => [row.status, Number(row.count) || 0]));
+      return {
+        ...state,
+        active: Number(counts.queued || 0) + Number(counts.running || 0),
+        queued: Number(counts.queued || 0),
+        running: Number(counts.running || 0),
+        counts,
+      };
     }
     const version = await readVersioned(FALLBACK_KEY, { items: [] });
     return publicState(version.value?.items);

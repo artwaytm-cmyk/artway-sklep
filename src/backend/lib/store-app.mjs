@@ -318,7 +318,7 @@ const agentEvents = createAgentEventSystem({
   pool: postgresPool, namespace: STORE_NAME,
   readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja,
   runtime: agentRuntime,
-  coordinate: coordinateProductEvent,
+  coordinate: coordinateProductEvent, getProduct: (productId) => centralProductCatalog.get(productId, { admin: true }),
   text: tekst,
 });
 const { queue: agentEventQueue, emit: emitAgentEvent } = agentEvents;
@@ -373,7 +373,7 @@ async function zwiekszLicznikKoduRabatowego(kod = '') {
   return false;
 }
 const inventoryDecisions = createInventoryDecisionService({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
-const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
+const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, pool: postgresPool, namespace: STORE_NAME });
 const openAiPlatform = createOpenAiPlatformControl({ read: czytaj, write: zapisz });
 const agentSpecialists = createAgentSpecialists({
   readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja,

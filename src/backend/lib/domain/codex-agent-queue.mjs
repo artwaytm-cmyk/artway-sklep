@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createPostgresCodexAgentQueue } from './codex-agent-postgres-queue.mjs';
 
 const KEY = 'codex_agent_jobs';
 const MAX_JOBS = 250;
@@ -87,9 +88,12 @@ function compact(items = []) {
 export function createCodexAgentQueue({
   readVersioned,
   writeIfVersion,
+  pool = null,
+  namespace = 'artway-sklep',
   now = () => new Date(),
   token = () => crypto.randomBytes(24).toString('base64url'),
 } = {}) {
+  if (pool) return createPostgresCodexAgentQueue({ pool, namespace, now, token });
   if (typeof readVersioned !== 'function' || typeof writeIfVersion !== 'function') {
     throw new Error('Kolejka Agenta wymaga wersjonowanego repozytorium.');
   }
