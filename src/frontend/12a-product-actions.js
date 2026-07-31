@@ -73,8 +73,10 @@ async function asortymentSprawdzKolejkeSerwera({render=true}={}){
     }else if(found){
       asortymentPelneProduktyCache.clear();
       if(typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
-      await asortymentCentralnyPobierz(true,{render:false}).catch(()=>null);
-      if(render&&asortymentCentralnyTrasaAktywna())renderuj();
+      if(typeof allegroPublikacjaCentralnaUniewaznij==="function")allegroPublikacjaCentralnaUniewaznij();
+      if(typeof allegroPublikacjaCentralnaPobierz==="function"&&trasa()==="/admin/allegro/oferty")await allegroPublikacjaCentralnaPobierz(true).catch(()=>null);
+      else await asortymentCentralnyPobierz(true,{render:false}).catch(()=>null);
+      if(render&&(asortymentCentralnyTrasaAktywna()||trasa()==="/admin/allegro/oferty"))renderuj();
     }
   }catch(error){if(asortymentAgentKolejka.busy){clearTimeout(asortymentSerwerowaKolejka.timer);asortymentSerwerowaKolejka.timer=setTimeout(()=>void asortymentSprawdzKolejkeSerwera(),5000);}}
   finally{asortymentSerwerowaKolejka.checking=false;asortymentSerwerowaKolejka.lastCheck=Date.now();}
@@ -299,7 +301,7 @@ async function asortymentPotwierdzOperacjeZewnetrzna(direct=false){
     }
     asortymentAllegroDecyzja.results.filter(result=>result.ok&&result.id!==undefined).forEach(result=>{const id=String(result.id);zaznaczoneProdukty.delete(id);zaznaczoneProdukty.delete(Number(id));zaznaczoneAllegroProduktyKatalogu?.delete?.(id);});
     const successful=asortymentAllegroDecyzja.results.filter(result=>result.ok),cloudSaved=state.operation==="withdraw"||successful.length===asortymentAllegroDecyzja.ok&&successful.every(result=>result.readbackConfirmed===true);
-    asortymentAllegroDecyzja={...asortymentAllegroDecyzja,cloudSaved};await allegroWczytajDane(true).catch(()=>{});allegroZapiszCache();asortymentCentralnyWyczyscCache();asortymentOdswiezCentrumDzialan();toast(cloudSaved?`🟠 Operacja Allegro zakończona i trwale zapisana: ${asortymentAllegroDecyzja.ok} poprawnie${asortymentAllegroDecyzja.failed?` • ${asortymentAllegroDecyzja.failed} błędów`:""}${asortymentAllegroDecyzja.remaining?` • pozostało ${asortymentAllegroDecyzja.remaining}`:""}`:"⚠️ Allegro przyjęło operację, ale serwer nie potwierdził jeszcze całej kolejki kartotek");
+    asortymentAllegroDecyzja={...asortymentAllegroDecyzja,cloudSaved};await allegroWczytajDane(true).catch(()=>{});allegroZapiszCache();asortymentCentralnyWyczyscCache();if(typeof allegroPublikacjaCentralnaUniewaznij==="function")allegroPublikacjaCentralnaUniewaznij();if(typeof allegroPublikacjaCentralnaPobierz==="function"&&trasa()==="/admin/allegro/oferty")await allegroPublikacjaCentralnaPobierz(true).catch(()=>null);asortymentOdswiezCentrumDzialan();toast(cloudSaved?`🟠 Operacja Allegro zakończona i trwale zapisana: ${asortymentAllegroDecyzja.ok} poprawnie${asortymentAllegroDecyzja.failed?` • ${asortymentAllegroDecyzja.failed} błędów`:""}${asortymentAllegroDecyzja.remaining?` • pozostało ${asortymentAllegroDecyzja.remaining}`:""}`:"⚠️ Allegro przyjęło operację, ale serwer nie potwierdził jeszcze całej kolejki kartotek");
   }catch(error){asortymentAllegroDecyzja={...asortymentAllegroDecyzja,busy:false,error:error.message||String(error)};asortymentOdswiezCentrumDzialan();toast("⚠️ Operacja Allegro: "+(error.message||error));}
 }
 

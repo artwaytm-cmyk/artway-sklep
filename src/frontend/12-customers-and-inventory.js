@@ -55,7 +55,7 @@ function widokAdminKlient(email){
   if(!k) return adminSzkielet("/admin/klienci", `<div class="panel"><h1>Nie znaleziono klienta</h1><p><a href="#/admin/klienci">← Wróć do listy</a></p></div>`);
   const zam = pobierzZamowienia().filter(z=>z.email===k.email);
   const admin = kontoMaRoleAdmin(k.email), glowny=jestGlownymAdminem(k.email);
-  const zarzadzaDostepem=jestGlownymAdminem(sesja?.email),operacjaWToku=zmianyDostepuUzytkownikowWToku.has(k.email)||resetMfaUzytkownikowWToku.has(k.email)||usunieciaUzytkownikowWToku.has(k.email);
+  const zarzadzaDostepem=jestAdmin(),operacjaWToku=zmianyDostepuUzytkownikowWToku.has(k.email)||resetMfaUzytkownikowWToku.has(k.email)||usunieciaUzytkownikowWToku.has(k.email);
   return adminSzkielet("/admin/klienci", `
   ${klienciSubnavHTML("lista")}
   <div class="panel">
@@ -71,11 +71,11 @@ function widokAdminKlient(email){
       ${polaKartotekiHTML(k, {edycja:true, blokujEmail:true, bezHasla:!zarzadzaDostepem||sesja?.email===k.email})}
       <div class="diag-actions">
         <button class="btn" type="submit">💾 Zapisz kartotekę</button>
-        ${!zarzadzaDostepem||glowny||sesja?.email===k.email?"":`<button class="btn ghost" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')">${operacjaWToku?"⏳ Zapisuję…":admin?"🔒 Odbierz rolę administratora":"🛡️ Nadaj rolę administratora"}</button>`}
-        ${zarzadzaDostepem&&admin&&!glowny&&sesja?.email!==k.email?`<button class="btn ghost" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('Odłączyć obecny Google Authenticator konta ${esc(k.email)}? Stare sesje zostaną wylogowane, a przy następnym logowaniu pojawi się nowy kod QR.')) resetujMfaUzytkownika('${esc(k.email)}')">${operacjaWToku?"⏳ Resetuję…":"↻ Skonfiguruj MFA ponownie"}</button>`:""}
+        ${!zarzadzaDostepem||sesja?.email===k.email?"":`<button class="btn ghost" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')">${operacjaWToku?"⏳ Zapisuję…":admin?"🔒 Odbierz rolę administratora":"🛡️ Nadaj rolę administratora"}</button>`}
+        ${zarzadzaDostepem&&admin&&sesja?.email!==k.email?`<button class="btn ghost" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('Odłączyć obecny Google Authenticator konta ${esc(k.email)}? Stare sesje zostaną wylogowane, a przy następnym logowaniu pojawi się nowy kod QR.')) resetujMfaUzytkownika('${esc(k.email)}')">${operacjaWToku?"⏳ Resetuję…":"↻ Skonfiguruj MFA ponownie"}</button>`:""}
         ${zam.length?`<a class="btn ghost" href="#/admin/zamowienia" onclick="szukajZamowien='${esc(k.email)}';filtrZamowien='wszystkie'">📦 Zamówienia klienta (${zam.length})</a>`:""}
         <a class="btn ghost" href="mailto:${esc(k.email)}">✉️ Napisz e-mail</a>
-        ${zarzadzaDostepem&&!admin&&!glowny?`<button class="btn danger" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('Trwale usunąć konto ${esc(k.email)}? Aktywne sesje natychmiast stracą dostęp.')) usunKlienta('${esc(k.email)}',true)">${operacjaWToku?"⏳ Usuwam…":"🗑️ Usuń konto"}</button>`:""}
+        ${zarzadzaDostepem&&!admin&&sesja?.email!==k.email?`<button class="btn danger" type="button" ${operacjaWToku?"disabled":""} onclick="if(confirm('Trwale usunąć konto ${esc(k.email)}? Aktywne sesje natychmiast stracą dostęp.')) usunKlienta('${esc(k.email)}',true)">${operacjaWToku?"⏳ Usuwam…":"🗑️ Usuń konto"}</button>`:""}
       </div>
       <p class="pay-note" style="text-align:left">Adres e-mail jest identyfikatorem logowania i nie jest zmieniany w kartotece. Zmiana roli, reset hasła i usunięcie konta unieważniają jego wcześniejsze sesje.</p>
     </form>
@@ -94,7 +94,7 @@ async function zapiszKartoteke(e, staryEmail){
   const u = pobierzUzytkownikow();
   const k = u.find(x=>x.email===staryEmail);
   if(!k){ toast("Nie znaleziono klienta"); return; }
-  const zarzadzaDostepem=jestGlownymAdminem(sesja?.email);
+  const zarzadzaDostepem=jestAdmin();
   const dane = daneKartotekiZFormularza(f);
   if(dane.blad){ toast("⚠️ "+dane.blad); return; }
   const nowyEmail = staryEmail;
@@ -102,7 +102,7 @@ async function zapiszKartoteke(e, staryEmail){
   const powtorzoneHaslo = String(f.get("haslo2")||"");
   if(dane.imie.length<2){ toast("⚠️ Podaj imię i nazwisko"); return; }
   if(!nowyEmail.includes("@")){ toast("⚠️ Nieprawidłowy e-mail"); return; }
-  if(noweHaslo&&!zarzadzaDostepem){toast("⚠️ Tylko główny administrator może ustawiać hasła innych kont");return;}
+  if(noweHaslo&&!zarzadzaDostepem){toast("⚠️ Brak uprawnień administratora");return;}
   if(noweHaslo && noweHaslo.length<8){ toast("⚠️ Nowe hasło: min. 8 znaków"); return; }
   if(noweHaslo!==powtorzoneHaslo){ toast("⚠️ Wpisane nowe hasła nie są takie same"); return; }
   const button=e.submitter;if(button){button.disabled=true;button.textContent="Zapisuję…";}
@@ -121,7 +121,7 @@ async function zapiszKartoteke(e, staryEmail){
 }
 async function dodajKlientaAdmin(e){
   e.preventDefault();
-  if(!jestGlownymAdminem(sesja?.email)){toast("Tylko główny administrator może tworzyć konta z panelu");return;}
+  if(!jestAdmin()){toast("Brak uprawnień administratora");return;}
   const f = new FormData(e.target);
   const dane = daneKartotekiZFormularza(f);
   if(dane.blad){ toast("⚠️ "+dane.blad); return; }
@@ -141,8 +141,8 @@ async function dodajKlientaAdmin(e){
 const usunieciaUzytkownikowWToku=new Set();
 async function usunKlienta(email,przejdzDoListy=false){
   const e=String(email||"").trim().toLowerCase();
-  if(!jestGlownymAdminem(sesja?.email)){toast("Tylko główny administrator może usuwać konta");return false;}
-  if(jestGlownymAdminem(e)||e===String(sesja?.email||"").toLowerCase()){toast("Nie można usunąć głównego ani aktualnie używanego konta");return false;}
+  if(!jestAdmin()){toast("Brak uprawnień administratora");return false;}
+  if(e===String(sesja?.email||"").toLowerCase()){toast("Nie można usunąć aktualnie używanego konta");return false;}
   if(kontoMaRoleAdmin(e)){ toast("Najpierw odbierz temu kontu rolę administratora"); return false; }
   if(usunieciaUzytkownikowWToku.has(e))return false;
   usunieciaUzytkownikowWToku.add(e);renderuj();

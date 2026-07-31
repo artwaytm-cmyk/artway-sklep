@@ -275,6 +275,16 @@ test('publiczne listy pokazują tylko sprzedaż, lecz stały adres produktu nie 
   assert.match(getBlock, /bezpośredni adres/);
 });
 
+test('centralny katalog oblicza kolejkę publikacji Allegro jednym zapytaniem PostgreSQL', async () => {
+  const source = await readFile('src/backend/lib/domain/central-product-catalog.mjs', 'utf8');
+  assert.match(source, /publicationQuery/);
+  assert.match(source, /publikacja-bez-oferty/);
+  assert.match(source, /publikacja-weryfikacja/);
+  assert.match(source, /wycofane_brak_towaru/);
+  assert.match(source, /publicationMetrics/);
+  assert.match(source, /options\.stock === 'bez_limitu'/);
+});
+
 test('backend udostępnia stronicowaną kartotekę, pojedynczy produkt, synchronizację i status', async () => {
   const source = await readFile('src/backend/lib/store-app.mjs', 'utf8');
   const route = await readFile('src/backend/lib/central-product-catalog-route.mjs', 'utf8');

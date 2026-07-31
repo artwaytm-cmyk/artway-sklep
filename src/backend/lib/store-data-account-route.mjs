@@ -3,7 +3,7 @@ import { isValidAccountEmail } from './core/account-validation.mjs';
 export function createStoreDataAccountRoute(deps = {}) {
   const {
     odpowiedz, czyAdmin, czytaj, zapisz, czytajWersjonowane, zapiszJesliWersja,
-    requestSession, primaryAdminEmail, tekst, normalizujKlienta, profilKlienta,
+    requestSession, tekst, normalizujKlienta, profilKlienta,
     publicUser, hashPassword, createAccountSession, accountSessionHeaders,
     ograniczRuch, verifyPassword, bezpiecznePorownanie, legacyPasswordHash,
     beginAdminMfa, accessAudit, verifyAdminMfaChallenge, decryptMfaSecret,
@@ -20,20 +20,24 @@ export function createStoreDataAccountRoute(deps = {}) {
       if (action === 'account-profile-save' && !session) return odpowiedz({ ok: false, error: 'Zaloguj się ponownie.', code: 'auth' }, 401);
       const u = action === 'store-user-save' ? normalizujKlienta(body.user) : profilKlienta(body.user, session.email);
       if (!u) return odpowiedz({ ok: false, error: 'Brak danych klienta' }, 422);
-      const rec = await czytaj('users', { items: [] });
-      const items = Array.isArray(rec.items) ? rec.items : [];
-      const i = items.findIndex((x) => (x.email || '').toLowerCase() === u.email);
-      if (i < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono konta. Nowe konto utwórz przez bezpieczny formularz.', code: action === 'account-profile-save' ? 'auth' : 'not_found' }, 404);
-      items[i] = { ...items[i], ...u, email: items[i].email, rola: items[i].rola, passwordHash: items[i].passwordHash, hash: items[i].hash };
-      await zapisz('users', { items, updated_at: new Date().toISOString() });
-      return odpowiedz({ ok: true, stored: true, email: u.email, user: publicUser(items[i]) });
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const version = await czytajWersjonowane('users', { items: [] });
+        const previous = version.value || { items: [] };
+        const items = Array.isArray(previous.items) ? previous.items.map((entry) => ({ ...entry })) : [];
+        const i = items.findIndex((x) => (x.email || '').toLowerCase() === u.email);
+        if (i < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono konta. Nowe konto utwórz przez bezpieczny formularz.', code: action === 'account-profile-save' ? 'auth' : 'not_found' }, 404);
+        items[i] = { ...items[i], ...u, email: items[i].email, rola: items[i].rola, passwordHash: items[i].passwordHash, hash: items[i].hash };
+        const write = await zapiszJesliWersja('users', { ...previous, items, updated_at: new Date().toISOString() }, version);
+        if (!write?.modified) continue;
+        return odpowiedz({ ok: true, stored: true, email: u.email, user: publicUser(items[i]) });
+      }
+      return odpowiedz({ ok: false, error: 'Dane konta zostały równolegle zmienione. Odśwież i ponów zapis.', code: 'users_write_conflict' }, 409);
     }
     if (action === 'store-user-create') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const session = requestSession(req);
-      const ownerEmail = tekst(primaryAdminEmail(), 200).trim().toLowerCase();
-      if (!czyAdmin(req, url) || !session || session.role !== 'admin' || session.email !== ownerEmail) {
-        return odpowiedz({ ok: false, error: 'Tylko główny administrator może tworzyć konta z panelu.', code: 'owner_required' }, 403);
+      if (!czyAdmin(req, url) || !session || session.role !== 'admin') {
+        return odpowiedz({ ok: false, error: 'Brak uprawnień administratora.', code: 'auth' }, 403);
       }
       const body = await req.json().catch(() => ({}));
       const password = String(body.password || '');
@@ -65,15 +69,14 @@ export function createStoreDataAccountRoute(deps = {}) {
     if (action === 'store-user-password-reset') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const session = requestSession(req);
-      const ownerEmail = tekst(primaryAdminEmail(), 200).trim().toLowerCase();
-      if (!czyAdmin(req, url) || !session || session.role !== 'admin' || session.email !== ownerEmail) {
-        return odpowiedz({ ok: false, error: 'Tylko główny administrator może ustawiać hasła innych kont.', code: 'owner_required' }, 403);
+      if (!czyAdmin(req, url) || !session || session.role !== 'admin') {
+        return odpowiedz({ ok: false, error: 'Brak uprawnień administratora.', code: 'auth' }, 403);
       }
       const body = await req.json().catch(() => ({}));
       const email = tekst(body.email, 200).trim().toLowerCase();
       const password = String(body.password || '');
       if (!isValidAccountEmail(email)) return odpowiedz({ ok: false, error: 'Podaj prawidłowe konto.', code: 'invalid_email' }, 422);
-      if (email === ownerEmail || email === session.email) return odpowiedz({ ok: false, error: 'Hasło własnego konta zmień w sekcji Moje konto.', code: 'protected_account' }, 409);
+      if (email === session.email) return odpowiedz({ ok: false, error: 'Hasło własnego konta zmień w sekcji Moje konto.', code: 'protected_account' }, 409);
       if (password.length < 8 || password.length > 200) return odpowiedz({ ok: false, error: 'Nowe hasło musi mieć co najmniej 8 znaków.', code: 'password' }, 422);
       const passwordHash = await hashPassword(password);
       for (let attempt = 0; attempt < 5; attempt++) {
@@ -102,13 +105,9 @@ export function createStoreDataAccountRoute(deps = {}) {
         return odpowiedz({ ok: false, error: 'Zaloguj się ponownie jako administrator.', code: 'auth' }, 403);
       }
       const body = await req.json().catch(() => ({}));
-      const ownerEmail = tekst(primaryAdminEmail(), 200).trim().toLowerCase();
       const targetEmail = tekst(body.email || session.email, 200).trim().toLowerCase();
       const selfReset = targetEmail === session.email;
       if (!isValidAccountEmail(targetEmail)) return odpowiedz({ ok: false, error: 'Podaj prawidłowe konto administratora.', code: 'invalid_email' }, 422);
-      if (!selfReset && session.email !== ownerEmail) {
-        return odpowiedz({ ok: false, error: 'Tylko główny administrator może resetować Authenticator innego konta.', code: 'owner_required' }, 403);
-      }
       const currentPassword = String(body.currentPassword || '');
       for (let attempt = 0; attempt < 5; attempt++) {
         const version = await czytajWersjonowane('users', { items: [] });
@@ -151,13 +150,11 @@ export function createStoreDataAccountRoute(deps = {}) {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const session = requestSession(req);
       if (!czyAdmin(req, url) || !session || session.role !== 'admin') return odpowiedz({ ok: false, error: 'Brak uprawnień administratora.', code: 'auth' }, 403);
-      const ownerEmail = tekst(primaryAdminEmail(), 200).trim().toLowerCase();
-      if (!ownerEmail || session.email !== ownerEmail) return odpowiedz({ ok: false, error: 'Tylko główny administrator może nadawać i odbierać role administratora.', code: 'owner_required' }, 403);
       const body = await req.json().catch(() => ({}));
       const email = tekst(body.email, 200).trim().toLowerCase();
       const role = body.role === 'admin' ? 'admin' : body.role === 'klient' ? 'klient' : '';
       if (!isValidAccountEmail(email) || !role) return odpowiedz({ ok: false, error: 'Wybierz istniejące konto i prawidłową rolę.', code: 'invalid_role_change' }, 422);
-      if (email === ownerEmail || email === session.email) return odpowiedz({ ok: false, error: 'Rola głównego lub aktualnie używanego konta jest chroniona.', code: 'protected_account' }, 409);
+      if (email === session.email) return odpowiedz({ ok: false, error: 'Nie możesz zmienić roli aktualnie używanego konta.', code: 'protected_account' }, 409);
       for (let attempt = 0; attempt < 5; attempt++) {
         const version = await czytajWersjonowane('users', { items: [] });
         const previous = version.value || { items: [] }, items = Array.isArray(previous.items) ? previous.items.map((entry) => ({ ...entry })) : [];
@@ -165,6 +162,9 @@ export function createStoreDataAccountRoute(deps = {}) {
         if (index < 0) return odpowiedz({ ok: false, error: 'Nie znaleziono konta użytkownika.', code: 'not_found' }, 404);
         const before = items[index].rola === 'admin' ? 'admin' : 'klient';
         if (before === role) return odpowiedz({ ok: true, unchanged: true, user: publicUser(items[index]) });
+        if (before === 'admin' && role !== 'admin' && items.filter((entry) => entry?.rola === 'admin').length <= 1) {
+          return odpowiedz({ ok: false, error: 'Nie można odebrać roli ostatniemu administratorowi.', code: 'last_admin_protected' }, 409);
+        }
         const now = new Date().toISOString();
         items[index].rola = role;
         items[index].authVersion = Math.max(0, Number(items[index].authVersion) || 0) + 1;
@@ -181,12 +181,10 @@ export function createStoreDataAccountRoute(deps = {}) {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const session = requestSession(req);
       if (!czyAdmin(req, url) || !session || session.role !== 'admin') return odpowiedz({ ok: false, error: 'Brak uprawnień administratora.', code: 'auth' }, 403);
-      const ownerEmail = tekst(primaryAdminEmail(), 200).trim().toLowerCase();
-      if (!ownerEmail || session.email !== ownerEmail) return odpowiedz({ ok: false, error: 'Tylko główny administrator może usuwać konta.', code: 'owner_required' }, 403);
       const body = await req.json().catch(() => ({}));
       const email = tekst(body.email, 200).trim().toLowerCase();
       if (!isValidAccountEmail(email)) return odpowiedz({ ok: false, error: 'Podaj prawidłowe konto.', code: 'invalid_email' }, 422);
-      if (email === ownerEmail || email === session.email) return odpowiedz({ ok: false, error: 'Nie można usunąć głównego ani aktualnie używanego konta.', code: 'protected_account' }, 409);
+      if (email === session.email) return odpowiedz({ ok: false, error: 'Nie można usunąć aktualnie używanego konta.', code: 'protected_account' }, 409);
       for (let attempt = 0; attempt < 5; attempt++) {
         const version = await czytajWersjonowane('users', { items: [] });
         const previous = version.value || { items: [] }, items = Array.isArray(previous.items) ? previous.items : [];

@@ -5,8 +5,9 @@ import {
   dedicatedDomains,
   dedicatedTableForDomain,
 } from '../src/backend/lib/core/dedicated-domain-storage.mjs';
+import { postgresRuntimeUrl } from './lib/postgres-runtime-url.mjs';
 
-const connectionString = process.env.DATABASE_URL;
+const connectionString = await postgresRuntimeUrl();
 const namespace = String(process.env.ARTWAY_STORE_NAME || 'artway-sklep').trim();
 const requireArchive = process.argv.includes('--require-archive');
 const compareArchive = process.argv.includes('--compare-archive');

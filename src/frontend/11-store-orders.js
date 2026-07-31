@@ -470,9 +470,9 @@ const zmianyDostepuUzytkownikowWToku=new Set();
 const resetMfaUzytkownikowWToku=new Set();
 async function resetujMfaUzytkownika(email){
   const e=String(email||"").trim().toLowerCase(),u=pobierzUzytkownikow(),k=u.find(x=>String(x.email||"").toLowerCase()===e);
-  if(!jestGlownymAdminem(sesja?.email)){toast("Tylko główny administrator może zresetować Authenticator innego konta");return false;}
+  if(!jestAdmin()){toast("Brak uprawnień administratora");return false;}
   if(!k||k.rola!=="admin"){toast("Reset Authenticatora jest dostępny tylko dla kont administratorów");return false;}
-  if(jestGlownymAdminem(e)||e===String(sesja?.email||"").toLowerCase()){toast("Własny Authenticator zresetujesz bezpiecznie w sekcji Moje konto");return false;}
+  if(e===String(sesja?.email||"").toLowerCase()){toast("Własny Authenticator zresetujesz bezpiecznie w sekcji Moje konto");return false;}
   if(resetMfaUzytkownikowWToku.has(e))return false;
   resetMfaUzytkownikowWToku.add(e);renderuj();
   try{
@@ -489,8 +489,6 @@ async function zmienRoleUzytkownika(email){
   if(!jestAdmin()){ toast("Brak uprawnień"); return; }
   const e=String(email||"").toLowerCase(),u=pobierzUzytkownikow(),k=u.find(x=>x.email===e);
   if(!k){ toast("Nie znaleziono użytkownika"); return; }
-  if(!jestGlownymAdminem(sesja?.email)){toast("Tylko główny administrator może zmieniać role");return;}
-  if(jestGlownymAdminem(e)){ toast("Nie można zmienić roli głównego administratora"); return; }
   const maRole=k.rola==="admin";
   if(maRole&&sesja?.email===e){ toast("Nie możesz odebrać uprawnień aktualnie używanemu kontu"); return; }
   if(zmianyDostepuUzytkownikowWToku.has(e))return;
@@ -506,7 +504,7 @@ async function zmienRoleUzytkownika(email){
 }
 function widokAdminKlienci(sekcja="lista"){
   const aktywna=["lista","dodaj","uprawnienia","zamowienia"].includes(String(sekcja||""))?String(sekcja||""):"lista";
-  const zarzadzaDostepem=jestGlownymAdminem(sesja?.email);
+  const zarzadzaDostepem=jestAdmin();
   let kl = pobierzUzytkownikow();
   if(szukajKlientow) kl = kl.filter(k=>(k.imie+" "+k.email).toLowerCase().includes(szukajKlientow));
   if(filtrRoliKlientow==="admin")kl=kl.filter(k=>kontoMaRoleAdmin(k.email));
@@ -525,12 +523,12 @@ function widokAdminKlienci(sekcja="lista"){
     ${zarzadzaDostepem?`<form onsubmit="dodajKlientaAdmin(event)">
       ${polaKartotekiHTML({})}
       <button class="btn" type="submit">➕ Utwórz konto klienta</button>
-    </form>`:`<div class="backend-note">Tworzenie i usuwanie kont oraz zarządzanie rolami jest dostępne wyłącznie dla głównego administratora.</div>`}
+    </form>`:`<div class="backend-note">Ta sekcja wymaga aktywnej sesji administratora.</div>`}
     <p style="font-size:.8rem;color:var(--muted2);margin-top:.6rem">Konto trafia do wspólnej bazy serwerowej bez przełączania bieżącej sesji administratora. Nowe konto zawsze otrzymuje rolę klienta.</p>
   </div>
   <div class="panel" style="${["lista","uprawnienia"].includes(aktywna)?"":"display:none"}">
     <h1>${aktywna==="uprawnienia"?"🛡️ Uprawnienia użytkowników":"👥 Użytkownicy"} (${kl.length}) <button class="btn ghost" style="float:right" onclick="eksportujKlientow()">📤 CSV</button></h1>
-    ${aktywna==="uprawnienia"?`<div class="backend-note" style="margin-bottom:.8rem"><b>Role są kontrolowane przez serwer.</b> Tylko główny administrator może je zmieniać. Odebranie roli lub reset hasła natychmiast unieważnia wcześniejsze sesje, a konto głównego właściciela jest chronione.</div>`:""}
+    ${aktywna==="uprawnienia"?`<div class="backend-note" style="margin-bottom:.8rem"><b>Każdy administrator ma pełne prawa panelu.</b> Administrator może nadawać i odbierać tę rolę innym kontom. Zmiana roli lub reset zabezpieczeń natychmiast unieważnia wcześniejsze sesje; nie można odebrać własnej roli ani pozostawić systemu bez administratora.</div>`:""}
     ${aktywna==="uprawnienia"?`<div class="admin-account-status-grid user-access-summary"><article><span>Wszystkie konta</span><b>${pobierzUzytkownikow().length}</b><small>aktywne kartoteki</small></article><article><span>Administratorzy</span><b>${pobierzUzytkownikow().filter(k=>kontoMaRoleAdmin(k.email)).length}</b><small>w tym konto właściciela</small></article><article><span>Klienci</span><b>${pobierzUzytkownikow().filter(k=>!kontoMaRoleAdmin(k.email)).length}</b><small>bez dostępu do panelu</small></article><article><span>MFA</span><b>${pobierzUzytkownikow().filter(k=>kontoMaRoleAdmin(k.email)&&k.mfaEnabled).length}</b><small>kont z aktywnym Authenticator</small></article></div>`:""}
     ${adminWyszukiwaniePanelHTML({id:"customers",description:"Imię, nazwisko, adres e-mail albo rola użytkownika.",results:kl.length,active:!!szukajKlientow||filtrRoliKlientow!=="wszyscy",open:true,fields:`<label class="search-wide">Użytkownik<input placeholder="Imię, nazwisko lub e-mail…" value="${esc(szukajKlientow)}" oninput="szukajKlientow=this.value.toLowerCase();zaplanujRenderPoWpisaniu()"></label><label>Rola<select onchange="filtrRoliKlientow=this.value;renderuj()"><option value="wszyscy" ${filtrRoliKlientow==="wszyscy"?"selected":""}>Wszystkie role</option><option value="admin" ${filtrRoliKlientow==="admin"?"selected":""}>Administratorzy</option><option value="klient" ${filtrRoliKlientow==="klient"?"selected":""}>Klienci</option></select></label>${szukajKlientow||filtrRoliKlientow!=="wszyscy"?`<button class="btn ghost" onclick="szukajKlientow='';filtrRoliKlientow='wszyscy';renderuj()">Wyczyść filtry</button>`:""}`,actions:adminOperacjeWynikowHTML({id:"customers",selected:zaznaczeniKlienci.size,pageCount:kl.length,resultCount:kl.length,selectPage:"klienciUstawZaznaczenie('strona')",selectAll:"klienciUstawZaznaczenie('filtr')",clear:"klienciWyczyscZaznaczenie()",exportSelected:"klienciEksportujZakres('zaznaczone')",exportAll:"klienciEksportujZakres('filtr')"})})}
     <div class="table-scroll"><table class="log-table">
@@ -548,9 +546,9 @@ function widokAdminKlienci(sekcja="lista"){
         <td>${nZam ? `<a href="#/admin/zamowienia" onclick="szukajZamowien='${esc(k.email)}';filtrZamowien='wszystkie'" title="Zamówienia klienta">${nZam} →</a>` : "0"}</td>
         <td style="white-space:nowrap">
           <a class="btn ghost" href="#/admin/klient/${encodeURIComponent(k.email)}" style="padding:.3rem .55rem" title="Kartoteka klienta">📇</a>
-          ${!zarzadzaDostepem||glowny||sesja?.email===k.email?"":`<button class="btn ghost" ${accessBusy?"disabled":""} onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')" style="padding:.3rem .55rem" title="${admin?"Odbierz rolę administratora":"Nadaj rolę administratora"}">${accessBusy?"⏳":admin?"🔒":"🛡️"}</button>`}
-          ${zarzadzaDostepem&&admin&&!glowny&&sesja?.email!==k.email?`<button class="btn ghost" ${accessBusy?"disabled":""} onclick="if(confirm('Odłączyć obecny Google Authenticator konta ${esc(k.email)}? Stare sesje zostaną wylogowane, a przy następnym logowaniu pojawi się nowy kod QR.')) resetujMfaUzytkownika('${esc(k.email)}')" style="padding:.3rem .55rem" title="Resetuj Google Authenticator">${accessBusy?"⏳":"↻ MFA"}</button>`:""}
-          ${zarzadzaDostepem&&!admin&&!glowny?`<button class="ci-remove" ${accessBusy?"disabled":""} onclick="if(confirm('Trwale usunąć konto ${esc(k.email)}? Aktywne sesje natychmiast stracą dostęp.')) usunKlienta('${esc(k.email)}')" title="Usuń konto">${accessBusy?"⏳":"🗑️"}</button>`:""}
+          ${!zarzadzaDostepem||sesja?.email===k.email?"":`<button class="btn ghost" ${accessBusy?"disabled":""} onclick="if(confirm('${admin?"Odebrać":"Nadać"} uprawnienia administratora dla ${esc(k.email)}?')) zmienRoleUzytkownika('${esc(k.email)}')" style="padding:.3rem .55rem" title="${admin?"Odbierz rolę administratora":"Nadaj rolę administratora"}">${accessBusy?"⏳":admin?"🔒":"🛡️"}</button>`}
+          ${zarzadzaDostepem&&admin&&sesja?.email!==k.email?`<button class="btn ghost" ${accessBusy?"disabled":""} onclick="if(confirm('Odłączyć obecny Google Authenticator konta ${esc(k.email)}? Stare sesje zostaną wylogowane, a przy następnym logowaniu pojawi się nowy kod QR.')) resetujMfaUzytkownika('${esc(k.email)}')" style="padding:.3rem .55rem" title="Resetuj Google Authenticator">${accessBusy?"⏳":"↻ MFA"}</button>`:""}
+          ${zarzadzaDostepem&&!admin&&sesja?.email!==k.email?`<button class="ci-remove" ${accessBusy?"disabled":""} onclick="if(confirm('Trwale usunąć konto ${esc(k.email)}? Aktywne sesje natychmiast stracą dostęp.')) usunKlienta('${esc(k.email)}')" title="Usuń konto">${accessBusy?"⏳":"🗑️"}</button>`:""}
         </td>
       </tr>`;}).join("")}
     </table></div>

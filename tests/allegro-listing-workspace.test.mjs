@@ -101,7 +101,10 @@ test("domyślny filtr pokazuje tylko produkty naprawdę bez oferty Allegro",asyn
   for(const marker of ["Bez oferty Allegro","Gotowe do pierwszego wystawienia","Nowe wymagające uzupełnienia","Szkice do aktywacji","Wycofane — brak towaru","Powiązania do weryfikacji"]){
     assert.match(workspace,new RegExp(marker));
   }
-  assert.match(workspace,/catalogProducts=produktyDoAdministracji\(\)\.filter\(p=>!czyProduktAdminWKoszu\(p\)\)/);
+  assert.match(listing,/product-catalog-query/);
+  assert.match(listing,/allegroPublikacjaCentralnaPobierz/);
+  assert.match(workspace,/catalogProducts=Array\.isArray\(serverData\.items\)/);
+  assert.doesNotMatch(workspace,/catalogProducts=produktyDoAdministracji\(\)/);
   assert.doesNotMatch(workspace,/Istniejące nieaktywne|Nieaktywne/);
   const start=listing.indexOf("function allegroPublikacjaDostepnoscMeta"),end=listing.indexOf("\nfunction allegroPublikacjaOtworzDecyzje",start);
   assert.ok(start>=0&&end>start);
@@ -190,7 +193,9 @@ test("karta produktu wykonuje się z rzeczywistym wspólnym formatowaniem ceny",
 test("wystawianie jest kolejką działań, a nie kopią pełnego katalogu Allegro",async()=>{
   const listing=await read("src/frontend/12b-allegro-listing-workspace.js"),workspace=await read("src/frontend/12c-commerce-catalog-actions.js");
   assert.match(listing,/actionable:availability\.withdrawnNoStock\|\|\(availability\.saleAvailable&&\(noOffer\|\|unresolved\|\|inactive\|\|needsUpdate\)\)/);
-  assert.match(workspace,/all=catalogProducts\.filter\(p=>metaFor\(p\)\.actionable\)/);
+  assert.match(listing,/publikacja-kolejka/);
+  assert.match(workspace,/const all=catalogProducts/);
+  assert.match(workspace,/resultTotal=Number\(serverData\.total\)/);
   assert.match(workspace,/metaCache=new Map\(\)/);
   assert.match(workspace,/Widzisz wyłącznie produkty wymagające działania/);
   assert.match(workspace,/Aktualne, poprawne oferty są automatycznie pomijane/);

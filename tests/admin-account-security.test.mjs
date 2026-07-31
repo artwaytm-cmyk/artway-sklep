@@ -116,7 +116,7 @@ test('własny reset Authenticatora wymaga aktualnego hasła i czyści bieżącą
   assert.equal(users.items[0].authVersion, 5);
 });
 
-test('główny administrator może nadać i odebrać rolę, a zmiana unieważnia stare sesje', async () => {
+test('administrator może nadać i odebrać rolę, a zmiana unieważnia stare sesje', async () => {
   const users = { items: [
     { email: 'admin@example.test', imie: 'Właściciel', rola: 'admin', authVersion: 1 },
     { email: 'pracownik@example.test', imie: 'Pracownik', rola: 'klient', authVersion: 2 },
@@ -138,7 +138,7 @@ test('główny administrator może nadać i odebrać rolę, a zmiana unieważnia
   assert.equal(users.items[1].authVersion, 4);
 });
 
-test('delegowany administrator i klient nie mogą zarządzać rolami ani usuwać kont', async () => {
+test('każdy administrator może zarządzać rolami, a klient pozostaje bez dostępu', async () => {
   const users = { items: [
     { email: 'admin@example.test', rola: 'admin', authVersion: 1 },
     { email: 'delegowany@example.test', rola: 'admin', authVersion: 1 },
@@ -150,8 +150,9 @@ test('delegowany administrator i klient nie mogą zarządzać rolami ani usuwać
   const roleResult = await delegated(new Request('https://artwaytm.pl/api/store?action=store-user-role', {
     method: 'POST', body: JSON.stringify({ email: 'klient@example.test', role: 'admin' }),
   }), new URL('https://artwaytm.pl/api/store?action=store-user-role'), 'store-user-role');
-  assert.equal(roleResult.status, 403);
-  assert.equal(roleResult.body.code, 'owner_required');
+  assert.equal(roleResult.status, 200);
+  assert.equal(users.items.find((user) => user.email === 'klient@example.test')?.rola, 'admin');
+  assert.equal(roleResult.body.sessionInvalidated, true);
 
   const client = createStoreDataRoute(routeDependencies(users, {
     czyAdmin: () => false,
@@ -162,6 +163,26 @@ test('delegowany administrator i klient nie mogą zarządzać rolami ani usuwać
   }), new URL('https://artwaytm.pl/api/store?action=store-user-delete'), 'store-user-delete');
   assert.equal(deleteResult.status, 403);
   assert.equal(users.items.length, 3);
+});
+
+test('nie można odebrać roli ostatniemu administratorowi ani zmienić własnej roli', async () => {
+  const users = { items: [{ email: 'admin@example.test', rola: 'admin', authVersion: 1 }] };
+  const route = createStoreDataRoute(routeDependencies(users));
+  const self = await route(new Request('https://artwaytm.pl/api/store?action=store-user-role', {
+    method: 'POST', body: JSON.stringify({ email: 'admin@example.test', role: 'klient' }),
+  }), new URL('https://artwaytm.pl/api/store?action=store-user-role'), 'store-user-role');
+  assert.equal(self.status, 409);
+  assert.equal(self.body.code, 'protected_account');
+
+  const routeAsSecondAdmin = createStoreDataRoute(routeDependencies(users, {
+    requestSession: () => ({ email: 'drugi@example.test', role: 'admin', authVersion: 1 }),
+  }));
+  const last = await routeAsSecondAdmin(new Request('https://artwaytm.pl/api/store?action=store-user-role', {
+    method: 'POST', body: JSON.stringify({ email: 'admin@example.test', role: 'klient' }),
+  }), new URL('https://artwaytm.pl/api/store?action=store-user-role'), 'store-user-role');
+  assert.equal(last.status, 409);
+  assert.equal(last.body.code, 'last_admin_protected');
+  assert.equal(users.items[0].rola, 'admin');
 });
 
 test('konto administratora trzeba najpierw zdegradować, a usunięcie klienta jest trwałe', async () => {

@@ -3,6 +3,43 @@ function orderIsActive(order = {}) {
     .includes(String(order.status || '').toLowerCase());
 }
 
+const CLOSED_OFFER_TASK_STATUSES = new Set([
+  'wykonane', 'wykonany', 'zrealizowane', 'zrealizowany', 'zakonczone', 'zakonczony',
+  'zamkniete', 'zamkniety', 'anulowane', 'anulowany', 'usuniete', 'usuniety', 'published',
+  'completed', 'done', 'cancelled', 'canceled',
+]);
+
+export function normalizeAgentTaskStatus(value = '') {
+  return String(value || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function offerTaskIdentity(task = {}, index = 0) {
+  return String(task.productId || task.produktId || task.product_id || task.entityId || task.id || task.taskId || `record-${index}`).trim();
+}
+
+function offerTaskTime(task = {}) {
+  const value = Date.parse(task.updatedAt || task.updated_at || task.completedAt || task.createdAt || task.data || '');
+  return Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Jedna pozycja robocza na produkt. Najpierw wybieramy najnowszy zapis, a
+ * dopiero potem odrzucamy stan końcowy. Dzięki temu dawny błąd nie wraca do
+ * kolejki po późniejszym, poprawnym wykonaniu.
+ */
+export function activeAllegroOfferTasks(items = []) {
+  const latest = new Map();
+  (Array.isArray(items) ? items : []).forEach((task, index) => {
+    if (!task || typeof task !== 'object') return;
+    const identity = offerTaskIdentity(task, index), candidate = { task, index, time: offerTaskTime(task) };
+    const current = latest.get(identity);
+    if (!current || candidate.time > current.time || (candidate.time === current.time && candidate.index > current.index)) latest.set(identity, candidate);
+  });
+  return [...latest.values()].map((entry) => entry.task)
+    .filter((task) => !CLOSED_OFFER_TASK_STATUSES.has(normalizeAgentTaskStatus(task.status)));
+}
+
 export function supplierOrderHasActiveContent(draft = {}) {
   const status = String(draft?.status || '').toLowerCase().normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').trim();
@@ -21,7 +58,8 @@ function executionPolicy(priority = {}, text = (value) => String(value || '')) {
     inpost_prepare: { actionId: 'inpost_prepare', execution: 'approval', requiresApproval: true, deadlineMinutes: 120, owner: 'centrum wysyłek', doneWhen: 'Przesyłka ma etykietę, numer nadania i zapisany status InPost.' },
     allegro_warehouse: { actionId: 'allegro_warehouse', execution: 'draft', requiresApproval: false, deadlineMinutes: 60, owner: 'Agent AI', doneWhen: 'Pozycje zlecenia są sprawdzone, a realne braki dopisane do szkicu producenta.' },
     warehouse_location: { actionId: 'warehouse_location', execution: 'draft', requiresApproval: false, deadlineMinutes: 240, owner: 'magazyn', doneWhen: 'Towar pozostaje zarezerwowany do zamówienia, a magazyn przypisał mu fizyczną lokalizację.' },
-    allegro_offer_fix: { actionId: 'allegro_offer_fix', execution: 'approval', requiresApproval: true, deadlineMinutes: 240, owner: 'katalog Allegro', doneWhen: 'Oferta ma komplet danych i ostatnia operacja API zakończyła się sukcesem.' },
+    allegro_offer_prepare: { actionId: 'allegro_offer_prepare', execution: 'draft', requiresApproval: false, actionLabel: 'Pokaż produkty', deadlineMinutes: 240, owner: 'Agent AI • katalog produktów', doneWhen: 'Każda kartoteka ma zapisane wymagane dane albo konkretny, udokumentowany brak faktu. Sama publikacja pozostaje osobną decyzją.' },
+    allegro_offer_fix: { actionId: 'allegro_offer_fix', execution: 'draft', requiresApproval: false, actionLabel: 'Otwórz kolejkę', deadlineMinutes: 240, owner: 'Agent AI • katalog Allegro', doneWhen: 'Oferta ma komplet danych, a błąd API ma zapisaną przyczynę i wynik kontrolowanej ponownej próby.' },
     supplier_order_draft: { actionId: 'supplier_order_draft', execution: 'draft', requiresApproval: false, deadlineMinutes: 240, owner: 'Agent AI', doneWhen: 'Bieżący dokument producenta zawiera wszystkie niepokryte braki i czeka na zatwierdzenie.' },
     invoice_draft: { actionId: 'invoice_draft', execution: 'draft', requiresApproval: false, deadlineMinutes: 240, owner: 'Agent AI / inFakt', doneWhen: 'Zamówienie firmowe ma szkic lub powiązaną fakturę inFakt.' },
     producer_link_check: { actionId: 'producer_link_check', execution: 'safe_check', requiresApproval: false, deadlineMinutes: 360, owner: 'Agent AI', doneWhen: 'Link został sprawdzony, a wynik i brakujące pola zapisane przy produkcie.' },
@@ -36,6 +74,7 @@ function executionPolicy(priority = {}, text = (value) => String(value || '')) {
   else if (area === 'wysylki') key = 'inpost_prepare';
   else if (area === 'magazyn') key = 'warehouse_location';
   else if (title.includes('zamówienia allegro')) key = 'allegro_warehouse';
+  else if (area === 'produkty' && title.includes('wystawiania produktów na allegro')) key = 'allegro_offer_prepare';
   else if (title.includes('oferty allegro') || title.includes('operacja oferty')) key = 'allegro_offer_fix';
   else if (area === 'producenci') key = 'supplier_order_draft';
   else if (area === 'faktury') key = 'invoice_draft';
@@ -118,8 +157,7 @@ export function createAgentOperationalCenter(deps = {}) {
     });
     const producerLinks = (Array.isArray(data.artway_agent_ai_linki_producentow) ? data.artway_agent_ai_linki_producentow : [])
       .filter((item) => !['pobrano', 'zamkniete', 'zamknięte', 'usunieto', 'usunięto'].includes(String(item?.status || '').toLowerCase()));
-    const offerTasks = (Array.isArray(data.artway_agent_ai_allegro_zadania) ? data.artway_agent_ai_allegro_zadania : [])
-      .filter((item) => !['zrealizowane', 'zamkniete', 'zamknięte', 'anulowane'].includes(String(item?.status || '').toLowerCase()));
+    const offerTasks = activeAllegroOfferTasks(data.artway_agent_ai_allegro_zadania);
     const supplierOrders = (Array.isArray(data.artway_agent_ai_zlecenia) ? data.artway_agent_ai_zlecenia : [])
       .filter((item) => supplierOrderHasActiveContent(item)
         && !['wysłane do producenta', 'wysłane do dostawcy'].includes(String(item?.status || '').toLowerCase()));

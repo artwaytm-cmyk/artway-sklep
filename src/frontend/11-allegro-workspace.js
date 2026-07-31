@@ -20,7 +20,7 @@ function agentAISubnavHTML(aktywny="pulpit"){
 function klienciSubnavHTML(aktywny="lista"){
   const u=pobierzUzytkownikow();
   const admini=u.filter(x=>kontoMaRoleAdmin(x.email)).length;
-  const owner=jestGlownymAdminem(sesja?.email);
+  const owner=jestAdmin();
   return adminSubnavHTML([
     {id:"lista",href:"#/admin/klienci",label:"👥 Lista klientów",badge:u.length},
     ...(owner?[

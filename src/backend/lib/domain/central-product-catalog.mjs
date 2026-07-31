@@ -44,7 +44,7 @@ function centralCatalogListProduct(product = {}, catalogMeta = {}, { admin = fal
     'externalId', 'sku', 'gtin', 'ean', 'kodProducenta', 'mpn', 'zdjecie', 'ikona', 'kolor',
     'sourceUrl', 'producentUrl', 'urlProducenta', 'allegroOfferId', 'allegroProductId', 'allegroCategoryId', 'badge',
     'opisKrotki', 'krotkiOpis', 'warianty', 'agentOnboardingStatus', 'allegroAgentPreparationStatus',
-    'allegroAgentPreparationMissing', 'allegroAgentPreparedAt', 'allegroEditorialSyncState',
+    'allegroAgentPreparationMissing', 'allegroAgentPreparedAt', 'allegroEditorialSyncState', 'allegroEditorialSyncPending',
     'allegroAgentPreparationFingerprint', 'allegroAgentPreparationVersion',
     'allegroAgentPreparationRunId', 'allegroAgentPreparationConfirmedAt',
     'allegroAgentPreparationConfirmedRevision', 'allegroAgentPreparationRetryCount',
@@ -264,8 +264,26 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     if (options.admin) {
       if (options.status === 'active') clauses.push("record_status='active'"); else if (options.status === 'trash') clauses.push("record_status='trash'"); else if (options.status === 'duplikaty') clauses.push('duplicate_store=true');
       if (options.source === 'bazowe') clauses.push("source='bazowy'"); else if (options.source === 'wlasne') clauses.push("source IN ('dodany','import')");
-      if (options.stock === 'dostepne') clauses.push('(stock IS NULL OR stock>0)'); else if (options.stock === 'niskie') clauses.push('stock BETWEEN 1 AND 5'); else if (options.stock === 'brak') clauses.push('stock=0');
-      if (options.allegro === 'polaczone') clauses.push('has_allegro=true'); else if (options.allegro === 'brak') clauses.push('has_allegro=false'); else if (options.allegro === 'aktywne') clauses.push("allegro_status='ACTIVE'"); else if (options.allegro === 'szkice') clauses.push("has_allegro=true AND allegro_status<>'ACTIVE'"); else if (options.allegro === 'duplikaty') clauses.push('duplicate_allegro=true');
+      if (options.stock === 'dostepne') clauses.push('(stock IS NULL OR stock>0)'); else if (options.stock === 'niskie') clauses.push('stock BETWEEN 1 AND 5'); else if (options.stock === 'brak') clauses.push('stock=0'); else if (options.stock === 'bez_limitu') clauses.push('stock IS NULL');
+      if (options.allegro === 'polaczone') clauses.push('has_allegro=true');
+      else if (options.allegro === 'brak') clauses.push('has_allegro=false');
+      else if (options.allegro === 'aktywne') clauses.push("allegro_status='ACTIVE'");
+      else if (options.allegro === 'szkice') clauses.push("has_allegro=true AND allegro_status NOT IN ('ACTIVE','ENDED','ARCHIVED')");
+      else if (options.allegro === 'duplikaty') clauses.push('duplicate_allegro=true');
+      else if (options.allegro === 'publikacja-bez-oferty') clauses.push('has_allegro=false AND sale_available=true');
+      else if (options.allegro === 'publikacja-gotowe') clauses.push("has_allegro=false AND sale_available=true AND COALESCE(data->>'allegroAgentPreparationStatus','') IN ('ready','published') AND lower(COALESCE(admin_list_data->>'allegroAgentPreparationCurrent','false'))='true'");
+      else if (options.allegro === 'publikacja-braki') clauses.push("has_allegro=false AND sale_available=true AND NOT (COALESCE(data->>'allegroAgentPreparationStatus','') IN ('ready','published') AND lower(COALESCE(admin_list_data->>'allegroAgentPreparationCurrent','false'))='true')");
+      else if (options.allegro === 'publikacja-aktualizacja') clauses.push("has_allegro=true AND sale_available=true AND lower(COALESCE(data->>'allegroEditorialSyncPending','false'))='true'");
+      else if (options.allegro === 'publikacja-szkice') clauses.push("has_allegro=true AND sale_available=true AND allegro_status NOT IN ('ACTIVE','ENDED','ARCHIVED')");
+      else if (options.allegro === 'publikacja-zakonczone') clauses.push("has_allegro=true AND sale_available=true AND allegro_status IN ('ENDED','ARCHIVED')");
+      else if (options.allegro === 'publikacja-wstrzymane') clauses.push('has_allegro=true AND sale_available=false');
+      else if (options.allegro === 'publikacja-weryfikacja') clauses.push("has_allegro=true AND COALESCE(allegro_status,'')=''");
+      else if (options.allegro === 'publikacja-kolejka') clauses.push(`(
+        (has_allegro=false AND sale_available=true)
+        OR (has_allegro=true AND sale_available=false)
+        OR (has_allegro=true AND sale_available=true AND allegro_status<>'ACTIVE')
+        OR (has_allegro=true AND sale_available=true AND lower(COALESCE(data->>'allegroEditorialSyncPending','false'))='true')
+      )`);
       const missingMap = { ean: 'ean', zdjecie: 'zdjecie', opis: 'opis', producent: 'producent', kategoria: 'kategoria', zrodlo: 'zrodlo', koszt: 'koszt' };
       if (options.data === 'gotowe') clauses.push('missing_count=0'); else if (options.data === 'braki') clauses.push('missing_count>0'); else if (missingMap[options.data]) { values.push(missingMap[options.data]); clauses.push(`missing_fields ? $${values.length}`); }
       if (options.sale === 'dostepne') clauses.push('sale_available=true'); else if (options.sale === 'niedostepne') clauses.push('sale_available=false');
@@ -319,10 +337,32 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     const pageValues = [...values, options.limit + 1, offset];
     const limitRef = `$${values.length + 1}`, offsetRef = `$${values.length + 2}`;
     const meta = await metadata();
-    const [rows, count, aggregate] = await Promise.all([
+    const publicationQuery = options.admin && options.allegro.startsWith('publikacja-')
+      ? pool.query(`
+          SELECT
+            COUNT(*) FILTER(WHERE has_allegro=false AND sale_available=true)::bigint bez_oferty,
+            COUNT(*) FILTER(WHERE has_allegro=false AND sale_available=true AND COALESCE(data->>'allegroAgentPreparationStatus','') IN ('ready','published') AND lower(COALESCE(admin_list_data->>'allegroAgentPreparationCurrent','false'))='true')::bigint gotowe_nowe,
+            COUNT(*) FILTER(WHERE has_allegro=false AND sale_available=true AND NOT (COALESCE(data->>'allegroAgentPreparationStatus','') IN ('ready','published') AND lower(COALESCE(admin_list_data->>'allegroAgentPreparationCurrent','false'))='true'))::bigint braki_nowe,
+            COUNT(*) FILTER(WHERE has_allegro=true AND sale_available=true AND lower(COALESCE(data->>'allegroEditorialSyncPending','false'))='true')::bigint do_aktualizacji,
+            COUNT(*) FILTER(WHERE has_allegro=true AND sale_available=true AND allegro_status NOT IN ('ACTIVE','ENDED','ARCHIVED'))::bigint szkice_do_aktywacji,
+            COUNT(*) FILTER(WHERE has_allegro=true AND sale_available=true AND allegro_status IN ('ENDED','ARCHIVED'))::bigint zakonczone,
+            COUNT(*) FILTER(WHERE has_allegro=true AND sale_available=false)::bigint wycofane_brak_towaru,
+            COUNT(*) FILTER(WHERE has_allegro=true AND COALESCE(allegro_status,'')='')::bigint do_weryfikacji,
+            COUNT(*) FILTER(WHERE
+              (has_allegro=false AND sale_available=true)
+              OR (has_allegro=true AND sale_available=false)
+              OR (has_allegro=true AND sale_available=true AND allegro_status<>'ACTIVE')
+              OR (has_allegro=true AND sale_available=true AND lower(COALESCE(data->>'allegroEditorialSyncPending','false'))='true')
+            )::bigint wszystkie
+          FROM artway_product_records
+          WHERE namespace=$1 AND record_status='active'
+        `, [ns])
+      : Promise.resolve({ rows: [{}] });
+    const [rows, count, aggregate, publicationResult] = await Promise.all([
       pool.query(`SELECT ${listColumn} product,product_id,external_id,sku FROM ${table} WHERE ${where} ORDER BY ${order} LIMIT ${limitRef} OFFSET ${offsetRef}`, pageValues),
       pool.query(`SELECT COUNT(*)::bigint total FROM ${table} WHERE ${countWhere}`, countValues),
       aggregates(options.admin, meta.sourceRevision),
+      publicationQuery,
     ]);
     const hasMore = rows.rows.length > options.limit;
     const selectedRows = rows.rows.slice(0, options.limit);
@@ -337,7 +377,8 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
       : null;
     const total = Number(count.rows[0]?.total) || 0;
     const ids = options.admin && total <= 5000 ? (await pool.query(`SELECT product_id FROM artway_products WHERE ${countWhere} ORDER BY ${order}`, countValues)).rows.map((row) => row.product_id) : null;
-    return { available: true, items: selectedRows.map((row) => row.product), ids, total, page: options.page, limit: options.limit, nextCursor, pagination: cursorSupported ? 'cursor' : 'offset', summary: aggregate.summary, facets: aggregate.facets, revision: meta.sourceRevision, syncedAt: meta.syncedAt };
+    const publicationMetrics = Object.fromEntries(Object.entries(publicationResult.rows[0] || {}).map(([name, value]) => [name, Number(value) || 0]));
+    return { available: true, items: selectedRows.map((row) => row.product), ids, total, page: options.page, limit: options.limit, nextCursor, pagination: cursorSupported ? 'cursor' : 'offset', summary: aggregate.summary, facets: aggregate.facets, publicationMetrics, revision: meta.sourceRevision, syncedAt: meta.syncedAt };
   };
 
   const get = async (id, { admin = false } = {}) => {

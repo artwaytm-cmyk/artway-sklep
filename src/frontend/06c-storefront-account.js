@@ -150,13 +150,13 @@ function widokKonto(){
       </div>
       <div class="admin-account-actions">
         <a class="btn" href="#/admin">Otwórz panel</a>
-        ${owner?`<a class="btn ghost" href="#/admin/klienci/uprawnienia">Zarządzaj uprawnieniami</a>`:""}
+        <a class="btn ghost" href="#/admin/klienci/uprawnienia">Zarządzaj uprawnieniami</a>
         <a class="btn ghost" href="#/admin/system/diagnostyka">Diagnostyka</a>
         <button class="btn danger" type="button" onclick="wyloguj()">Wyloguj</button>
       </div>
     </section>
     <div class="admin-account-status-grid">
-      <article><span>Rola</span><b>${owner?"Główny administrator":"Administrator"}</b><small>${owner?"Pełne zarządzanie kontami i rolami":"Dostęp operacyjny bez zarządzania właścicielem"}</small></article>
+      <article><span>Rola</span><b>${owner?"Administrator właścicielski":"Administrator"}</b><small>Pełny dostęp do panelu oraz zarządzania kontami i rolami</small></article>
       <article><span>Weryfikacja logowania</span><b>${sesja.mfaEnabled?"Google Authenticator aktywny":"Konfiguracja przy logowaniu"}</b><small>Każde konto administratora wymaga drugiego składnika</small></article>
       <article><span>Limit bezczynności</span><b>${adminIdleTimeoutMinutes()} min</b><small>Po tym czasie nastąpi automatyczne wylogowanie</small></article>
       <article><span>Ważność sesji</span><b>${dataKonta(sesja.sessionExpiresAt)}</b><small>Serwer sprawdza aktualną rolę przy każdym żądaniu</small></article>
