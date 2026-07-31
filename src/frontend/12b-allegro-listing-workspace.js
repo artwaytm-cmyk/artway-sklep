@@ -11,10 +11,11 @@ function allegroPublikacjaPrzelaczFiltr(value){filtrAllegroWystawiania=String(va
 function allegroPublikacjaPrzelaczSort(value){allegroWystawianieSort=String(value||"gotowosc");allegroWystawianieStrona=1;renderuj();}
 function allegroPublikacjaUstawFiltrZaawansowany(key,value){if(!(key in allegroWystawianieFiltry))return;allegroWystawianieFiltry={...allegroWystawianieFiltry,[key]:String(value??"")};allegroWystawianieStrona=1;renderuj();}
 function allegroPublikacjaResetujFiltry(){szukajAllegroWystawiania="";filtrAllegroWystawiania="bez_oferty";allegroWystawianieSort="gotowosc";allegroWystawianieFiltry={kategoria:"wszystkie",producent:"wszyscy",dane:"wszystkie",sprzedaz:"wszystkie",magazyn:"wszystkie",zrodlo:"wszystkie",cenaOd:"",cenaDo:""};allegroWystawianieStrona=1;renderuj();}
-function allegroPublikacjaZaznaczIds(ids=[]){
+function allegroPublikacjaZaznaczIds(ids=[],checked=true){
   const safe=ids.map(String).filter(id=>{const p=asortymentProduktPoId(id);return p&&allegroPublikacjaMetaProduktu(p).selectable;});
-  allegroZaznaczOfertyProduktow(safe,true);
+  allegroZaznaczOfertyProduktow(safe,checked);
 }
+function allegroPublikacjaWyczyscWybor(){zaznaczoneAllegroProduktyKatalogu.clear();zaznaczoneAllegroOferty.clear();renderuj();}
 function allegroPublikacjaPrzelaczWybor(id,checked){
   const p=asortymentProduktPoId(id),allowed=p&&allegroPublikacjaMetaProduktu(p).selectable;
   allegroZaznaczOfertyProduktow([id],!!checked&&!!allowed);

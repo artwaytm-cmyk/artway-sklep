@@ -385,7 +385,7 @@ function allegroZaznaczOfertyProduktow(ids=[],checked=true){
   ids.forEach(raw=>{const id=String(raw),p=pobierzProduktAdmin(raw),o=p?allegroOfertaDlaProduktuSklepu(p):null;checked?zaznaczoneAllegroProduktyKatalogu.add(id):zaznaczoneAllegroProduktyKatalogu.delete(id);if(o)checked?zaznaczoneAllegroOferty.add(String(o.id)):zaznaczoneAllegroOferty.delete(String(o.id));});renderuj();
 }
 function allegroPrzelaczProduktKatalogu(id,checked){allegroZaznaczOfertyProduktow([id],checked);}
-function allegroZaznaczZakresWystawiania(zakres){allegroZaznaczOfertyProduktow(zakres==="strona"?allegroWystawianieStronaIds:allegroWystawianieWynikiIds,true);}
+function allegroZaznaczZakresWystawiania(zakres,checked=true){allegroPublikacjaZaznaczIds(zakres==="strona"?allegroWystawianieStronaIds:allegroWystawianieWynikiIds,checked);}
 function allegroWyczyscZaznaczenieOfert(){zaznaczoneAllegroProduktyKatalogu.clear();zaznaczoneAllegroOferty.clear();renderuj();}
 function allegroEksportujProduktyWystawiania(zakres="filtr"){
   let ids=allegroWystawianieWynikiIds;

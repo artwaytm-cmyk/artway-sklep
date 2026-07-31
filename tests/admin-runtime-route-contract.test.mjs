@@ -49,7 +49,10 @@ test('Allegro ma jeden widoczny proces ofertowy, a finanse i zatowarowanie są w
   assert.match(navigation, /\["oplacalnosc","📈 Opłacalność"\]/);
   assert.match(warehouse, /icon:"📥",label:"Plan zatowarowania"/);
   assert.match(unified, /function allegroOfertyIPublikacjaHTML\(/);
-  assert.match(unified, /Dopasowanie[\s\S]+Kontrola danych[\s\S]+Publikacja[\s\S]+Potwierdzenie/);
+  assert.match(unified, /Do wystawienia i aktualizacji/);
+  assert.match(unified, /Sprzedaż i statusy/);
+  assert.doesNotMatch(unified, /allegro-unified-offer-flow/);
+  assert.doesNotMatch(unified, /OBSZAR ROBOCZY/);
 });
 
 test('trasy panelu ładują jawnie moduły wymagane przez swoje widoki', async () => {

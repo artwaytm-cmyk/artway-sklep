@@ -544,11 +544,9 @@ test('Oferty i publikacja rozdzielają brak towaru od szkiców i nie pokazują o
   const assertRuntime = observeRuntime(page);
   await loginAdmin(page);
   await page.goto('/#/admin/allegro/oferty');
-  await expect(page.locator('[data-allegro-offers-mode="sprzedaz"]')).toBeVisible();
-  await expect(page.locator('.admin-channel-truth.is-allegro')).toContainText('Stan potwierdzony bezpośrednio przez API');
-  await expect(page.getByRole('columnheader', { name: 'Kanał sprzedaży' })).toBeVisible();
-  await page.getByRole('button', { name: /Wystawianie i aktualizacje/ }).click();
   await expect(page.locator('[data-allegro-offers-mode="publikacja"]')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Do wystawienia i aktualizacji/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Wystaw lub aktualizuj/ }).first()).toBeVisible();
   const queueFilter = page.getByLabel('Dokładny stan kolejki');
   await expect(queueFilter).toBeVisible();
   for (const label of ['Bez oferty Allegro', 'Szkice do aktywacji', 'Zakończone z innego powodu', 'Wycofane — brak towaru']) {
@@ -558,10 +556,14 @@ test('Oferty i publikacja rozdzielają brak towaru od szkiców i nie pokazują o
   await expect(page.getByRole('button', { name: /Wycofane — brak towaru/ })).toBeVisible();
   await expect(page.getByLabel('Dostępność w sprzedaży')).toBeVisible();
   await expect(page.getByLabel('Stan magazynowy')).toBeVisible();
-  await page.getByRole('button', { name: /W sprzedaży \/ aktywne/ }).click();
+  await page.getByRole('button', { name: /Sprzedaż i statusy/ }).click();
   await expect(page.locator('[data-allegro-offers-mode="sprzedaz"]')).toBeVisible();
   await expect(page.locator('.admin-channel-truth.is-allegro')).toContainText('Stan potwierdzony bezpośrednio przez API');
+  await expect(page.getByRole('columnheader', { name: 'Dopasowanie' })).toBeVisible();
   await expect(page.getByRole('columnheader', { name: 'Kanał sprzedaży' })).toBeVisible();
+  const statusFilter = page.getByLabel('Status kanału');
+  await expect(statusFilter).toContainText('Wstrzymane — brak u producenta');
+  await expect(statusFilter).toContainText('Zakończone');
   assertRuntime();
 });
 
