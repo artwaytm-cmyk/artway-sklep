@@ -95,6 +95,8 @@ test('ciężkie dane produktów i magazynu mają oddzielne źródła oraz kontro
   assert.match(migration, /DELETE FROM artway_domain_records[\s\S]*settings:artway_stany/);
   assert.match(verifier, /INTERVAL '24 hours'/);
   assert.match(verifier, /consecutive_matches\+1>=4/);
+  assert.match(verifier, /BEGIN ISOLATION LEVEL REPEATABLE READ/);
+  assert.doesNotMatch(verifier, /pool\.query\(definition\./);
   assert.match(observation, /INTERVAL '7 days'/);
   assert.match(observation, /automaticDrop: false/);
   assert.match(lookupMigration, /artway_product_payloads_import_item_idx/);

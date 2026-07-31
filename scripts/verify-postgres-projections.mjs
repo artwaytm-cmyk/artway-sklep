@@ -214,25 +214,32 @@ const definitions = [
 ];
 
 const results = [];
+const client = await pool.connect();
+let transactionOpen = false;
 try {
+  // Wszystkie liczniki i hashe muszą pochodzić z jednej migawki MVCC.
+  // Bez tego aktywny Agent mógł zapisać produkt pomiędzy trzema SELECT-ami,
+  // co tworzyło fałszywy alarm mimo poprawnego triggera projekcji.
+  await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+  transactionOpen = true;
   for (const definition of definitions) {
-    const [source, projected, mismatches] = await Promise.all([
-      pool.query(definition.source, [namespace]),
-      pool.query(definition.projected, [namespace]),
-      pool.query(definition.mismatches, [namespace]),
-    ]);
+    // Klient pg wykonuje jedno zapytanie naraz. Jawna sekwencja zachowuje tę
+    // samą migawkę transakcji bez ostrzeżeń o nakładających się client.query().
+    const source = await client.query(definition.source, [namespace]);
+    const projected = await client.query(definition.projected, [namespace]);
+    const mismatches = await client.query(definition.mismatches, [namespace]);
     const sourceCount = Number(source.rows[0]?.count) || 0;
     const projectionCount = Number(projected.rows[0]?.count) || 0;
     const mismatchCount = Number(mismatches.rows[0]?.count) || 0;
     const matches = sourceCount === projectionCount && mismatchCount === 0;
     if (matches) {
-      await pool.query(`
+      await client.query(`
         UPDATE artway_projection_errors
         SET resolved_at=NOW()
         WHERE namespace=$1 AND projection=$2 AND resolved_at IS NULL
       `, [namespace, definition.name]);
     }
-    const updated = await pool.query(`
+    const updated = await client.query(`
       UPDATE artway_projection_checks SET
         source_count=$3,projection_count=$4,mismatch_count=$5,
         compared_at=NOW(),
@@ -280,8 +287,14 @@ try {
     });
   }
   const ok = results.every((result) => result.matches);
+  await client.query('COMMIT');
+  transactionOpen = false;
   process.stdout.write(`${JSON.stringify({ ok, namespace, results }, null, 2)}\n`);
   if (strict && !ok) process.exitCode = 2;
+} catch (error) {
+  if (transactionOpen) await client.query('ROLLBACK').catch(() => {});
+  throw error;
 } finally {
+  client.release();
   await pool.end();
 }
