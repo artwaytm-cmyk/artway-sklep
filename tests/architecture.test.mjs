@@ -70,6 +70,7 @@ test('raport architektury ujawnia pełną kolejkę podziału bez limitu top 5', 
   assert.match(report, /for \(const source of sourceWarnings\)/);
   assert.doesNotMatch(report, /sourceRisks[\s\S]{0,200}\.slice\(0,\s*5\)/);
   assert.match(report, /Raport pokazuje wszystkie, bez skracania listy/);
+  assert.match(report, /strict && warnings\.length/);
 });
 
 test('wydzielone domeny pozostają małe i są częścią właściwego pakietu', async () => {
@@ -135,10 +136,13 @@ test('pierwsze wejście klienta nie pobiera ciężkiego panelu administratora', 
   const publicBundle = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/app.js');
   const adminBundle = ASSET_BUNDLES.find((bundle) => bundle.output === 'assets/admin.js');
   const publicJs = await assetMetrics('assets/app.js');
+  const deferredAnalytics = await assetMetrics('assets/store-analytics.js');
   const publicCss = await assetMetrics('assets/styles.css');
   assert.ok(publicBundle && adminBundle, 'konfiguracja musi zawierać osobny pakiet sklepu i panelu');
   assert.ok(!publicBundle.sources.some((source) => adminBundle.sources.includes(source)), 'kod panelu nie może wejść do pakietu klienta');
   assert.ok(publicJs.raw <= B.browser.storefrontScript.maxRawBytes && publicJs.gzip <= B.browser.storefrontScript.maxGzipBytes, 'początkowy JavaScript przekroczył budżet transmisji; podziel kod trasy sklepu');
+  assert.ok(deferredAnalytics.raw <= B.browser.storefrontDeferred.maxRawBytes && deferredAnalytics.gzip <= B.browser.storefrontDeferred.maxGzipBytes, 'odroczona analityka SEO przekroczyła budżet osobnego modułu');
+  assert.ok(!publicBundle.sources.includes('src/frontend/09a-seo-analytics.js'), 'analityka SEO nie może blokować pierwszego renderu sklepu');
   assert.ok(publicCss.raw <= B.browser.storefrontStyles.maxRawBytes && publicCss.gzip <= B.browser.storefrontStyles.maxGzipBytes, 'początkowy CSS przekroczył budżet transmisji');
 });
 

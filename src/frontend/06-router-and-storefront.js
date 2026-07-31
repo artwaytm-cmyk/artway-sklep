@@ -4,13 +4,14 @@ const ADMIN_MODULY_RUNTIME = Object.freeze({
   inventory:"admin-inventory",seo:"admin-seo",productEditor:"admin-product-editor",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system",vonHalsky:"admin-von-halsky"
 });
 const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",warehouse:"admin-warehouse",commerce:"admin-commerce",vonHalsky:"admin-von-halsky"});
-const SKLEP_MODULY_RUNTIME = Object.freeze({account:"store-account",content:"store-content"});
+const SKLEP_MODULY_RUNTIME = Object.freeze({account:"store-account",content:"store-content",analytics:"store-analytics"});
 const adminZaladowaneModuly = new Set();
 const adminObietniceModulow = new Map();
 const adminZaladowaneStyle = new Set();
 const adminObietniceStyle = new Map();
 const sklepZaladowaneModuly = new Set();
 const sklepObietniceModulow = new Map();
+let sklepAnalitykaZaplanowana=false;
 let adminStylePromise = null;
 let adminRenderPoZaladowaniuFrame = 0;
 function adminZaplanujRenderPoZaladowaniu(){
@@ -90,6 +91,18 @@ function zaladujSklepModul(modul,version){
   });
   const promise=wczytaj().catch(error=>{sklepObietniceModulow.delete(modul);document.getElementById(id)?.remove();throw error;});
   sklepObietniceModulow.set(modul,promise);return promise;
+}
+function sklepZaplanujAnalityke(route=trasa()){
+  if(String(route||"").startsWith("/admin")||String(route||"")==="/diagnostyka")return;
+  if(typeof seoSledzTrase==="function"){seoSledzTrase(route);return;}
+  if(sklepAnalitykaZaplanowana)return;
+  sklepAnalitykaZaplanowana=true;
+  const version=document.querySelector('meta[name="artway-version"]')?.content||"dev";
+  const run=()=>zaladujSklepModul("analytics",version).then(()=>{
+    sklepAnalitykaZaplanowana=false;
+    if(typeof seoSledzTrase==="function")seoSledzTrase(trasa());
+  }).catch(error=>{sklepAnalitykaZaplanowana=false;loguj("ostrzezenie",`Nie udało się wczytać anonimowej analityki SEO: ${error.message}`);});
+  if(typeof requestIdleCallback==="function")requestIdleCallback(run,{timeout:1500});else setTimeout(run,250);
 }
 function adminModulyTrasyGotowe(route=""){
   const moduly=adminModulyDlaTrasy(route);
@@ -460,7 +473,7 @@ function renderuj(){
     else w.innerHTML = `<div class="page"><div class="panel"><h1>404 — nie ma takiej strony 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
     if(t==="/"||t==="") { rysujChipy(); rysuj(); }
     seoAktualizujMetaDlaTrasy(t);
-    if(typeof seoSledzTrase==="function")seoSledzTrase(t);
+    sklepZaplanujAnalityke(t);
     if((t==="/admin/system"||t==="/admin/aktualizacja"||t==="/admin/publikacja")&&!systemWersjaStan.sprawdzono&&!systemWersjaStan.ladowanie)setTimeout(()=>systemSprawdzWersje(true),0);
     if((t==="/admin/system/diagnostyka"||t==="/diagnostyka")&&!systemDiagStan.ladowanie&&(!systemDiagStan.sprawdzono||Date.now()-Date.parse(systemDiagStan.sprawdzonoAt||0)>5*60*1000))setTimeout(()=>systemOdswiezDiagnostyke(true),0);
     if(t==="/admin/system/logi"&&!systemCentralDiag.loading&&(!systemCentralDiag.loaded||Date.now()-Date.parse(systemCentralDiag.fetchedAt||0)>60*1000))setTimeout(()=>systemOdswiezCentralneBledy(false),0);

@@ -38,7 +38,7 @@ jobs:
         run: npm run verify
 
       - name: Budżety architektury
-        run: npm run audit:architecture
+        run: npm run audit:architecture -- --strict
 
       - name: Pomiar pokrycia testami
         run: npm run test:coverage

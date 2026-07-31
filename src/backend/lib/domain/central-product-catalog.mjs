@@ -12,6 +12,20 @@ import { produktBezDanychPrywatnych } from '../infakt-purchase.mjs';
 import { mergeCatalogProducts } from './catalog-quality.mjs';
 import { canonicalManufacturerName } from './product-field-validation.mjs';
 import { agentReviewJsonSql } from './product-agent-review-state.mjs';
+import {
+  CENTRAL_PRODUCT_DERIVED_FIELDS,
+  centralAllegroPreparationCurrent,
+  centralCatalogApplyAuthority,
+  centralPreparationStableJson as stableJson,
+  centralProductOwn as own,
+} from './central-product-preparation-state.mjs';
+
+export {
+  CENTRAL_ALLEGRO_PREPARATION_FIELDS,
+  centralAllegroPreparationCurrent,
+  centralAllegroPreparationFingerprint,
+  centralCatalogApplyAuthority,
+} from './central-product-preparation-state.mjs';
 
 const asArray = (value) => Array.isArray(value) ? value : [];
 const asObject = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -22,95 +36,8 @@ const numberOrNull = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 const normalize = (value) => text(value, 5000).toLocaleLowerCase('pl-PL').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l').replace(/[^a-z0-9]+/g, ' ').trim();
-const own = (object, key) => Object.prototype.hasOwnProperty.call(asObject(object), String(key)) || Object.prototype.hasOwnProperty.call(asObject(object), key);
 const searchTsQuery = (value) => normalize(value).split(/\s+/).filter(Boolean).slice(0, 12).map((token) => `${token}:*`).join(' & ');
 export const CENTRAL_PRODUCT_SCHEMA_VERSION = 7;
-const CENTRAL_PRODUCT_DERIVED_FIELDS = new Set(['_catalog', 'stan', 'dostepny']);
-
-export const CENTRAL_ALLEGRO_PREPARATION_FIELDS = Object.freeze([
-  'nazwa', 'allegroTitle', 'opisKrotki', 'opis', 'allegroDescription',
-  'producent', 'marka', 'gtin', 'ean', 'kodProducenta', 'mpn', 'zdjecie',
-  'zdjecia', 'sourceEvidence', 'allegroCategoryId', 'allegroProductId',
-  'allegroParameters', 'allegroDescriptionSections', 'allegroSafetyInformation',
-  'allegroResponsibleProducer', 'allegroShippingSubsidy',
-  'allegroShippingRateId', 'allegroShippingRateName',
-  'allegroReturnPolicyId', 'allegroReturnPolicyName',
-  'allegroImpliedWarrantyId', 'allegroImpliedWarrantyName',
-  'allegroWarrantyId', 'allegroWarrantyName',
-]);
-
-function stableJson(value) {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
-  return JSON.stringify(value);
-}
-
-function stablePreparationValue(value) {
-  if (Array.isArray(value)) return value.map(stablePreparationValue);
-  if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value)
-    .filter(([key]) => !/(?:at|date|time|timestamp)$/i.test(key))
-    .map(([key, entry]) => [key, stablePreparationValue(entry)]));
-}
-
-function preparationHash(product = {}, { stableEvidence = true } = {}) {
-  const raw = stableJson(CENTRAL_ALLEGRO_PREPARATION_FIELDS.map((key) => [
-    key,
-    key === 'sourceEvidence' && stableEvidence
-      ? stablePreparationValue(product[key] ?? null)
-      : product[key] ?? null,
-  ]));
-  let hash = 2166136261;
-  for (const byte of Buffer.from(raw, 'utf8')) {
-    hash ^= byte;
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
-}
-
-export function centralCatalogApplyAuthority(product = {}, authority = {}) {
-  const source = { ...asObject(product) };
-  const saved = asObject(authority?.data);
-  const fields = [...new Set(asArray(authority?.fields || authority?.authoritative_fields)
-    .map((field) => text(field, 120))
-    .filter((field) => field && !CENTRAL_PRODUCT_DERIVED_FIELDS.has(field)))];
-  for (const field of fields) {
-    if (own(saved, field)) source[field] = saved[field];
-    else delete source[field];
-  }
-  return source;
-}
-
-export function centralAllegroPreparationFingerprint(product = {}) {
-  return `allegro-preparation-v5-${preparationHash(product)}`;
-}
-
-export function centralAllegroPreparationCurrent(product = {}) {
-  const status = text(product.allegroAgentPreparationStatus, 40).toLowerCase();
-  const missing = asArray(product.allegroAgentPreparationMissing).map((item) => text(item, 300)).filter(Boolean);
-  if (!['ready', 'published'].includes(status) || missing.length) return false;
-  if (status === 'published' && text(product.allegroOfferId, 120)) return true;
-  const version = Number(product.allegroAgentPreparationVersion) || 0;
-  const savedFingerprint = text(product.allegroAgentPreparationFingerprint, 120);
-  if (version >= 4 && savedFingerprint.startsWith('allegro-preparation-v5-')) {
-    return savedFingerprint === centralAllegroPreparationFingerprint(product);
-  }
-  // Bezpieczna zgodność podczas migracji: stare podpisy v4 nadal są
-  // weryfikowane dawnym algorytmem. Każdy następny potwierdzony zapis
-  // przechodzi już na v5, który pomija daty technicznego odczytu źródła.
-  if (version >= 4 && savedFingerprint.startsWith('allegro-preparation-v4-')) {
-    return savedFingerprint === `allegro-preparation-v4-${preparationHash(product, { stableEvidence: false })}`;
-  }
-  // Rekordy v3 były zapisywane przed wprowadzeniem kanonicznego JSON. Ich
-  // kolejność kluczy zmieniała się po przejściu przez JSONB, dlatego zamiast
-  // ponownie liczyć niestabilny skrót uznajemy wyłącznie ostatni, potwierdzony
-  // przez serwer zapis przygotowania. Kolejna zmiana treści przejdzie już na v4.
-  return version === 3
-    && text(product.lastAdminMutationArea, 80) === 'allegro-preparation'
-    && text(product.lastAdminMutationId, 160).startsWith('allegro-preparation:')
-    && asArray(product.lastAdminMutationFields).includes('allegroAgentPreparationFingerprint');
-}
-
 function centralCatalogListProduct(product = {}, catalogMeta = {}, { admin = false } = {}) {
   const fields = [
     'id', 'nazwa', 'name', 'cena', 'cenaAllegro', 'cenaVonHalsky', 'staraCena', 'kategoria', 'producent', 'marka',

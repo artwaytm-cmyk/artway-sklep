@@ -32,7 +32,7 @@
     "maintain:postgres-partitions": "node scripts/maintain-postgres-partitions.mjs",
     "migrate:domain": "node scripts/migrate-normalized-domain-storage.mjs",
     "verify:domain-tables": "node scripts/verify-dedicated-domain-storage.mjs",
-    "verify": "npm run lint && npm run typecheck && npm run build:check && npm run check:legacy && npm run audit:functional && npm test",
+    "verify": "npm run lint && npm run typecheck && npm run build:check && npm run audit:architecture -- --strict && npm run check:legacy && npm run audit:functional && npm test",
     "check": "npm run verify"
   },
   "dependencies": {

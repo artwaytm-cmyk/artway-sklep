@@ -21,6 +21,7 @@ const RELEASE_MANAGER_ID = 'artway-atomic-release-v1';
 export const REQUIRED_PUBLIC_FILES = Object.freeze([
   'index.html',
   'assets/app.js',
+  'assets/store-analytics.js',
   'assets/styles.css',
   'assets/admin-core.js',
   'assets/admin-system.js',

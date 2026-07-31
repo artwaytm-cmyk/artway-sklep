@@ -44,6 +44,7 @@ for (const source of sourceWarnings) {
   await sourceRow(`Źródło — ${source.path}`, source.path, source.budget);
 }
 await assetRow('Sklep JavaScript', 'assets/app.js', B.browser.storefrontScript);
+await assetRow('Sklep — odroczona analityka', 'assets/store-analytics.js', B.browser.storefrontDeferred);
 await assetRow('Sklep CSS', 'assets/styles.css', B.browser.storefrontStyles);
 await assetRow('Panel — rdzeń', 'assets/admin-core.js', B.browser.adminCore);
 await assetRow('Panel — wspólne UI', 'assets/admin-ui.js', B.browser.adminSharedUi);
@@ -55,6 +56,7 @@ await assetRow('Panel CSS', 'assets/admin.css', B.browser.adminStyles);
 console.table(rows);
 const failures = rows.filter((row) => row.state === 'FAIL');
 const warnings = rows.filter((row) => row.state === 'WARN');
+const strict = process.argv.includes('--strict');
 console.log(`Budżety: ${rows.length - failures.length - warnings.length} OK, ${warnings.length} ostrzeżeń, ${failures.length} przekroczeń.`);
 console.log(`Jawna kolejka podziału: ${sourceWarnings.length} modułów źródłowych ponad celem. Raport pokazuje wszystkie, bez skracania listy.`);
-if (failures.length) process.exitCode = 1;
+if (failures.length || (strict && warnings.length)) process.exitCode = 1;

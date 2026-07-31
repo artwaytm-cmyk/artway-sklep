@@ -19,6 +19,7 @@ export const ARCHITECTURE_BUDGETS = Object.freeze({
   }),
   browser: Object.freeze({
     storefrontScript: Object.freeze({ targetGzipBytes: 125 * KIB, maxGzipBytes: 160 * KIB, maxRawBytes: 540 * KIB }),
+    storefrontDeferred: Object.freeze({ targetGzipBytes: 8 * KIB, maxGzipBytes: 12 * KIB, maxRawBytes: 40 * KIB }),
     storefrontStyles: Object.freeze({ targetGzipBytes: 20 * KIB, maxGzipBytes: 25 * KIB, maxRawBytes: 80 * KIB }),
     adminCore: Object.freeze({ targetGzipBytes: 8 * KIB, maxGzipBytes: 10 * KIB, maxRawBytes: 24 * KIB }),
     adminSharedUi: Object.freeze({ targetGzipBytes: 8 * KIB, maxGzipBytes: 10 * KIB, maxRawBytes: 24 * KIB }),

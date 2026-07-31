@@ -33,12 +33,16 @@ export const ASSET_BUNDLES = Object.freeze([
       'src/frontend/06b-storefront-catalog.js',
       'src/frontend/07b-shipping-integrations.js',
       'src/frontend/09-seo-public.js',
-      'src/frontend/09a-seo-analytics.js',
       'src/frontend/17-cart-and-checkout.js',
       'src/frontend/17a-checkout-and-delivery.js',
       'src/frontend/18-pwa.js',
       'src/frontend/18-ui-and-bootstrap.js',
     ],
+  },
+  {
+    output: 'assets/store-analytics.js',
+    banner: '/* GENERATED STORE ANALYTICS — loaded after the first storefront render */',
+    sources: ['src/frontend/09a-seo-analytics.js'],
   },
   {
     output: 'assets/store-account.js',

@@ -3677,13 +3677,14 @@ const ADMIN_MODULY_RUNTIME = Object.freeze({
   inventory:"admin-inventory",seo:"admin-seo",productEditor:"admin-product-editor",catalog:"admin-catalog",personalization:"admin-personalization",system:"admin-system",vonHalsky:"admin-von-halsky"
 });
 const ADMIN_STYLE_RUNTIME = Object.freeze({agent:"admin-agent",warehouse:"admin-warehouse",commerce:"admin-commerce",vonHalsky:"admin-von-halsky"});
-const SKLEP_MODULY_RUNTIME = Object.freeze({account:"store-account",content:"store-content"});
+const SKLEP_MODULY_RUNTIME = Object.freeze({account:"store-account",content:"store-content",analytics:"store-analytics"});
 const adminZaladowaneModuly = new Set();
 const adminObietniceModulow = new Map();
 const adminZaladowaneStyle = new Set();
 const adminObietniceStyle = new Map();
 const sklepZaladowaneModuly = new Set();
 const sklepObietniceModulow = new Map();
+let sklepAnalitykaZaplanowana=false;
 let adminStylePromise = null;
 let adminRenderPoZaladowaniuFrame = 0;
 function adminZaplanujRenderPoZaladowaniu(){
@@ -3763,6 +3764,18 @@ function zaladujSklepModul(modul,version){
   });
   const promise=wczytaj().catch(error=>{sklepObietniceModulow.delete(modul);document.getElementById(id)?.remove();throw error;});
   sklepObietniceModulow.set(modul,promise);return promise;
+}
+function sklepZaplanujAnalityke(route=trasa()){
+  if(String(route||"").startsWith("/admin")||String(route||"")==="/diagnostyka")return;
+  if(typeof seoSledzTrase==="function"){seoSledzTrase(route);return;}
+  if(sklepAnalitykaZaplanowana)return;
+  sklepAnalitykaZaplanowana=true;
+  const version=document.querySelector('meta[name="artway-version"]')?.content||"dev";
+  const run=()=>zaladujSklepModul("analytics",version).then(()=>{
+    sklepAnalitykaZaplanowana=false;
+    if(typeof seoSledzTrase==="function")seoSledzTrase(trasa());
+  }).catch(error=>{sklepAnalitykaZaplanowana=false;loguj("ostrzezenie",`Nie udało się wczytać anonimowej analityki SEO: ${error.message}`);});
+  if(typeof requestIdleCallback==="function")requestIdleCallback(run,{timeout:1500});else setTimeout(run,250);
 }
 function adminModulyTrasyGotowe(route=""){
   const moduly=adminModulyDlaTrasy(route);
@@ -4133,7 +4146,7 @@ function renderuj(){
     else w.innerHTML = `<div class="page"><div class="panel"><h1>404 — nie ma takiej strony 😕</h1><p><a href="#/">← Wróć do sklepu</a></p></div></div>`;
     if(t==="/"||t==="") { rysujChipy(); rysuj(); }
     seoAktualizujMetaDlaTrasy(t);
-    if(typeof seoSledzTrase==="function")seoSledzTrase(t);
+    sklepZaplanujAnalityke(t);
     if((t==="/admin/system"||t==="/admin/aktualizacja"||t==="/admin/publikacja")&&!systemWersjaStan.sprawdzono&&!systemWersjaStan.ladowanie)setTimeout(()=>systemSprawdzWersje(true),0);
     if((t==="/admin/system/diagnostyka"||t==="/diagnostyka")&&!systemDiagStan.ladowanie&&(!systemDiagStan.sprawdzono||Date.now()-Date.parse(systemDiagStan.sprawdzonoAt||0)>5*60*1000))setTimeout(()=>systemOdswiezDiagnostyke(true),0);
     if(t==="/admin/system/logi"&&!systemCentralDiag.loading&&(!systemCentralDiag.loaded||Date.now()-Date.parse(systemCentralDiag.fetchedAt||0)>60*1000))setTimeout(()=>systemOdswiezCentralneBledy(false),0);
@@ -5260,52 +5273,6 @@ function seoAktualizujMetaDlaTrasy(route=trasa()){
   else if(route==="/promocje"||route==="/nowosci"){const name=route==="/promocje"?"Promocje":"Nowości";title=`${name} | ${baseTitle}`;desc=route==="/promocje"?"Aktualne promocje na gry, zabawki kreatywne, balony i artykuły imprezowe.":"Nowe gry, zabawki kreatywne, balony i artykuły imprezowe w Artway-TM.";canonical=`${location.origin}${route}`;schema={"@context":"https://schema.org","@type":"CollectionPage",name,description:desc,url:canonical};}
   document.title=title;setMeta("description",desc);setMeta("robots",route.startsWith("/admin")||["/diagnostyka","/logowanie","/rejestracja","/konto","/zamowienia"].includes(route)?"noindex,nofollow":"index,follow,max-image-preview:large");setMeta("og:locale","pl_PL",true);setMeta("og:site_name",baseTitle,true);setMeta("og:title",title,true);setMeta("og:description",desc,true);setMeta("og:url",canonical,true);setMeta("og:type",route.startsWith("/produkt/")?"product":"website",true);setMeta("og:image",image,true);setMeta("twitter:card",image?"summary_large_image":"summary");setMeta("twitter:title",title);setMeta("twitter:description",desc);setMeta("twitter:image",image);setMeta("product:price:amount",price,true);setMeta("product:price:currency",price?"PLN":"",true);
   let link=document.head.querySelector('link[rel="canonical"]');if(!link){link=document.createElement("link");link.rel="canonical";document.head.appendChild(link);}link.href=canonical;let script=document.getElementById("artway-seo-schema");if(!script){script=document.createElement("script");script.id="artway-seo-schema";script.type="application/ld+json";document.head.appendChild(script);}script.textContent=JSON.stringify(schema);
-}
-
-/* Anonimowy pomiar efektów SEO. Zapisuje wyłącznie dzienne sumy kanałów, domen wejścia i konwersji. */
-const SEO_DOMENY=new Set(["artwaytm.pl","allsklep.pl"]);
-function seoNormalizujDomene(value=""){const host=String(value||"").toLowerCase().replace(/^www\./,"").split(":")[0];return SEO_DOMENY.has(host)?host:"";}
-function seoBezpiecznaSciezka(value="/"){const path=String(value||"/").split(/[?#]/)[0].replace(/[\u0000-\u001f\u007f]/g,"").slice(0,180);return path.startsWith("/")?path:"/";}
-function seoUsunZnacznikDomeny(){try{const url=new URL(location.href);if(!url.searchParams.has("entry_domain"))return;url.searchParams.delete("entry_domain");history.replaceState(history.state,"",`${url.pathname}${url.search}${url.hash}`);}catch(e){}}
-function seoKanalZHosta(host=""){
-  const value=String(host||"").toLowerCase();
-  if(/(^|\.)google\./.test(value))return "google";
-  if(/(^|\.)bing\.com$/.test(value))return "bing";
-  if(/(^|\.)duckduckgo\.com$/.test(value))return "duckduckgo";
-  if(/(^|\.)yahoo\./.test(value))return "yahoo";
-  if(/(^|\.)ecosia\.org$/.test(value))return "ecosia";
-  if(/(^|\.)(?:search\.brave\.com|qwant\.com|startpage\.com|yandex\.[a-z.]+|seznam\.cz)$/.test(value))return "other_search";
-  return "";
-}
-function seoAtrybucjaSesji(route="/"){
-  try{
-    const stored=JSON.parse(sessionStorage.getItem("artway_seo_attribution_v2")||"null");if(stored?.entryDomain&&stored?.channel)return stored;
-    const url=new URL(location.href),own=seoNormalizujDomene(location.hostname)||"artwaytm.pl",via=seoNormalizujDomene(url.searchParams.get("entry_domain")),referrer=document.referrer?new URL(document.referrer):null,referrerHost=String(referrer?.hostname||"").toLowerCase().replace(/^www\./,""),searchChannel=seoKanalZHosta(referrerHost),campaignName=String(url.searchParams.get("utm_campaign")||url.searchParams.get("utm_source")||"").toLowerCase().replace(/[^a-z0-9_.-]/g,"").slice(0,80);
-    const externalReferrer=referrerHost&&!SEO_DOMENY.has(referrerHost)?referrerHost.replace(/[^a-z0-9.-]/g,"").slice(0,120):"";
-    const attribution={entryDomain:via||own,landingPath:seoBezpiecznaSciezka(route||location.pathname),channel:searchChannel||(campaignName?"campaign":externalReferrer?"referral":"direct"),campaign:campaignName,referrerDomain:externalReferrer};
-    sessionStorage.setItem("artway_seo_attribution_v2",JSON.stringify(attribution));seoUsunZnacznikDomeny();return attribution;
-  }catch(e){return {entryDomain:"artwaytm.pl",landingPath:seoBezpiecznaSciezka(route),channel:"direct",campaign:"",referrerDomain:""};}
-}
-function seoWyslijZdarzenie(event,data={}){
-  const attribution=seoAtrybucjaSesji(data.route||trasa());if(!attribution.channel||jestAdmin())return;
-  const body={event,channel:attribution.channel,entryDomain:attribution.entryDomain,landingPath:attribution.landingPath,campaign:attribution.campaign,referrerDomain:attribution.referrerDomain,productId:data.productId||"",value:Math.max(0,Number(data.value)||0),items:Array.isArray(data.items)?data.items.slice(0,100):[]};
-  fetch("/api/seo/event",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body),keepalive:true,credentials:"omit"}).catch(()=>{});
-}
-function seoSledzTrase(route="/"){
-  if(String(route).startsWith("/admin"))return;seoAtrybucjaSesji(route);
-  try{
-    if(!sessionStorage.getItem("artway_seo_landing")){sessionStorage.setItem("artway_seo_landing","1");seoWyslijZdarzenie("landing",{route});}
-    if(String(route).startsWith("/produkt/")){
-      const id=String(route).split("/")[2]||"",key=`artway_seo_view_${id}`;
-      if(id&&!sessionStorage.getItem(key)){sessionStorage.setItem(key,"1");seoWyslijZdarzenie("product_view",{productId:id});}
-    }
-  }catch(e){}
-}
-function seoSledzKoszyk(productId){seoWyslijZdarzenie("add_to_cart",{productId});}
-function seoSledzZamowienie(value,orderId="",items=[]){
-  const safeId=String(orderId||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80),key=`artway_seo_order_sent_${safeId||"current"}`;
-  try{if(sessionStorage.getItem(key))return;sessionStorage.setItem(key,"1");}catch(e){}
-  seoWyslijZdarzenie("order",{value,items:(Array.isArray(items)?items:[]).map(item=>({productId:item?.id||"",units:Number(item?.ilosc)||1,revenue:Number(item?.wartosc)||0}))});
 }
 
 /* ═══════════ KOSZYK ═══════════ */
