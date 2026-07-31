@@ -567,9 +567,10 @@ function odswiezZnacznikDiag(){
 }
 
 /* ═══════════ PRODUKTY ═══════════
-   Strona najpierw próbuje wczytać products.json. Jeśli się nie uda
-   (np. otwarta z dysku), nie pokazuje nieaktualnych produktów demonstracyjnych. */
-const PRODUKTY_ZAPASOWE = []; // brak demonstracyjnych towarów — źródłem awaryjnym jest aktualny products.json
+   Sklep pobiera z PostgreSQL wyłącznie potrzebną stronę listy, a pełną kartę
+   dopiero po jej otwarciu. products.json pozostaje artefaktem wydania do
+   ręcznego eksportu i diagnostyki — nigdy nie jest ładowany przy starcie. */
+const PRODUKTY_ZAPASOWE = []; // brak demonstracyjnych towarów i ciężkich snapshotów w pamięci przeglądarki
 
 // Stan integracji jest częścią wspólnego rdzenia aplikacji. Panel korzysta z
 // niego na każdej trasie (m.in. przy synchronizacji bazy), dlatego nie może być
@@ -598,7 +599,7 @@ function zapamietajProduktyCentralne(lista=[]){
   (Array.isArray(lista)?lista:[]).forEach(p=>{if(p&&p.id!==undefined)mapa.set(String(p.id),p);});
   produktyCentralnePobrane=[...mapa.values()].slice(-5000);produktyBazoweCache={bazowe:null,importowane:null,centralne:null,items:[]};if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
 }
-let zrodloProduktow = "zapasowe";
+let zrodloProduktow = "oczekuje-na-postgresql";
 // Wyłącznie nietrwały cache widoku. Pełne kartoteki nigdy nie startują już
 // z localStorage — źródłem jest PostgreSQL, a products.json to generowany
 // podczas wydania publiczny snapshot awaryjny.
@@ -1285,7 +1286,7 @@ async function chmuraWczytajStan(){
   try{
     const lokalnaRewizja=Math.max(0,Number(wczytajLS("artway_chmura_rev",0))||0);
     const trybAdmina=maUprawnieniaZapisuChmury(),wersjeDomen=trybAdmina?chmuraWersjeDomenAdmina:chmuraWersjeDomenPubliczne;
-    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev,settingsDomains:JSON.stringify(wersjeDomen||{}),catalogMode:trybAdmina?"legacy":"central",adminData:0,...(lokalnaRewizja?{settingsRev:lokalnaRewizja}:{})}});
+    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev,settingsDomains:JSON.stringify(wersjeDomen||{}),catalogMode:"central",adminData:0,...(lokalnaRewizja?{settingsRev:lokalnaRewizja}:{})}});
     chmuraOstatniPullZmienilDane=(await chmuraPobierzKatalogImportowany(d))||chmuraOstatniPullZmienilDane;
     chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, admin:d.admin===true||chmuraStan.admin, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
     const revLok = lokalnaRewizja;
@@ -2630,7 +2631,23 @@ function stanPublikacjiKatalogu(){
   }
   return {gotowy:zrodloProduktow==="json"&&!brakujace.length&&!nieaktualne.length,razem:aktualne.length,bazowe:bazowe.size,brakujace,nieaktualne};
 }
-function porzadkujBezpieczneReferencje(){
+async function porzadkujBezpieczneReferencje(){
+  // Przy paginowanym katalogu brak produktu w pamięci oznacza zwykle tylko,
+  // że jego strona nie została jeszcze pobrana. Najpierw odczytujemy dokładnie
+  // identyfikatory z koszyka, a mapowań administratora nie usuwamy na podstawie
+  // niepełnego widoku. Przejściowa awaria API również nie może opróżnić koszyka.
+  if(chmuraKatalogCentralnyPubliczny){
+    if(koszyk.length&&typeof sklepPobierzProduktyCentralnePoId==="function"){
+      const wynik=await sklepPobierzProduktyCentralnePoId(koszyk.map(item=>item.id));
+      if(wynik.ok){
+        const przed=koszyk.length;koszyk=koszyk.filter((x,i,a)=>wynik.found.has(String(x.id))&&Number(x.ile)>0&&a.findIndex(y=>String(y.id)===String(x.id)&&String(y.wariant||"")===String(x.wariant||""))===i);
+        if(koszyk.length!==przed)zapiszLS("artway_koszyk",koszyk);
+        return {koszyk:przed-koszyk.length,mapowania:0};
+      }
+      return {koszyk:0,mapowania:0,odroczono:true};
+    }
+    return {koszyk:0,mapowania:0};
+  }
   const widoczne=new Set(produkty.map(p=>String(p.id))),wszystkie=new Set([...produktyBazoweWspolne(),...(produktyDodane||[]),...(koszDodanych||[])].map(p=>String(p.id)));
   const koszykPrzed=koszyk.length;
   koszyk=koszyk.filter((x,i,a)=>widoczne.has(String(x.id))&&Number(x.ile)>0&&a.findIndex(y=>String(y.id)===String(x.id)&&String(y.wariant||"")===String(x.wariant||""))===i);
@@ -3633,32 +3650,17 @@ function moderujOpinie(id, akcja){
   loguj("info",`Moderacja opinii ${id}: ${akcja}`);
   renderuj();
 }
-const PRODUKTY_BAZOWE_CACHE_KEY="base-products-v2";
-const PRODUKTY_BAZOWE_CACHE_TTL_MS=6*60*60*1000;
-function walidujBazoweProdukty(dane){
-  if(!Array.isArray(dane))throw new Error("products.json nie zawiera tablicy produktów");
-  const poprawne=dane.filter(p=>p&&p.id!==undefined&&String(p.nazwa||"").trim()),unikalne=new Set(poprawne.map(p=>String(p.id)));
-  if(poprawne.length!==dane.length||unikalne.size!==poprawne.length)throw new Error("products.json zawiera niepoprawne lub powtórzone rekordy");
-  return poprawne;
-}
+// Zachowana nazwa funkcji jest zgodna ze starszym bootstrapem, ale odczyt nie
+// pobiera już pełnego pliku. Pierwszy ekran to zwykła strona tego samego,
+// kursorowego katalogu PostgreSQL, którego używają filtry i wyszukiwarka.
 async function pobierzBazoweProdukty(){
-  const wersja=document.querySelector('meta[name="artway-version"]')?.content||"dev",teraz=Date.now();
-  let cache=null,cacheProducts=null;
-  try{cache=typeof chmuraRuntimeCacheOdczytaj==="function"?await chmuraRuntimeCacheOdczytaj(PRODUKTY_BAZOWE_CACHE_KEY):null;cacheProducts=cache?.products?walidujBazoweProdukty(cache.products):null;}catch(e){cache=null;cacheProducts=null;}
-  if(cacheProducts){prodBazowe=cacheProducts;zrodloProduktow="json";}
-  if(cacheProducts&&String(cache.version||"")===wersja&&teraz-Number(cache.savedAt||0)<PRODUKTY_BAZOWE_CACHE_TTL_MS)return true;
   try{
-    const headers={};if(cache?.etag)headers["If-None-Match"]=String(cache.etag);if(cache?.lastModified)headers["If-Modified-Since"]=String(cache.lastModified);
-    const r=await fetch(`/products.json?v=${encodeURIComponent(wersja)}`,{cache:"no-cache",headers});
-    if(r.status===304&&cacheProducts){await chmuraRuntimeCacheZapisz(PRODUKTY_BAZOWE_CACHE_KEY,{...cache,version:wersja,savedAt:teraz});return true;}
-    if(!r.ok)throw new Error("HTTP "+r.status);
-    const poprawne=walidujBazoweProdukty(await r.json());prodBazowe=poprawne;zrodloProduktow="json";
-    if(typeof chmuraRuntimeCacheZapisz==="function")await chmuraRuntimeCacheZapisz(PRODUKTY_BAZOWE_CACHE_KEY,{version:wersja,count:poprawne.length,products:poprawne,etag:r.headers.get("etag")||"",lastModified:r.headers.get("last-modified")||"",savedAt:teraz});
-    return true;
+    const params={audience:"public",sort:"external",page:1,limit:produktyNaStronie},data=await sklepKatalogCentralnyPobierz(params);
+    if(!data?.available||!Array.isArray(data.items))throw new Error("Brak strony centralnego katalogu.");
+    prodBazowe=[];zrodloProduktow="postgresql-paginowany";return true;
   }catch(e){
-    if(cacheProducts){loguj("info","Użyto trwałej pamięci katalogu; odświeżenie products.json zostanie ponowione później.");return true;}
-    prodBazowe=PRODUKTY_ZAPASOWE;zrodloProduktow="zapasowe";
-    loguj("ostrzezenie","products.json niedostępny — katalog demonstracyjny został zablokowany, aby nie pokazywać nieaktualnych produktów.");return false;
+    prodBazowe=PRODUKTY_ZAPASOWE;if(!produktyCentralnePobrane.length)zrodloProduktow="postgresql-niedostepny";
+    loguj("ostrzezenie","Nie udało się pobrać pierwszej strony katalogu PostgreSQL. Pełny snapshot nie został pobrany, aby nie blokować przeglądarki.");return false;
   }
 }
 function finalizujWczytanieProduktow(){
@@ -4382,7 +4384,8 @@ function widokSklep(){
   return awaryjnyNaglowekGlowny+widoczneSekcje.map(id => SEKCJE[id] ? SEKCJE[id]() : "").join("\n");
 }
 
-let sklepKatalogCentralnyCache=new Map(),sklepKatalogCentralnyStan={signature:"",loading:false,data:null,error:""},sklepKatalogCentralnyFacety={categories:[],producers:[]},sklepKatalogCentralnyPodsumowanie={},sklepKatalogCentralnyTimer=null,sklepProduktCentralnyWToku=new Map(),sklepProduktCentralnyBledy=new Map();
+const SKLEP_KATALOG_CACHE_KEY="public-catalog-pages-v1",SKLEP_KATALOG_CACHE_FRESH_MS=5*60*1000,SKLEP_KATALOG_CACHE_STALE_MS=24*60*60*1000,SKLEP_KATALOG_CACHE_LIMIT=24;
+let sklepKatalogCentralnyCache=new Map(),sklepKatalogCentralnyStan={signature:"",loading:false,data:null,error:""},sklepKatalogCentralnyFacety={categories:[],producers:[]},sklepKatalogCentralnyPodsumowanie={},sklepKatalogCentralnyTimer=null,sklepProduktCentralnyWToku=new Map(),sklepProduktCentralnyBledy=new Map(),sklepKatalogTrwaly={loaded:false,promise:null,entries:{}};
 function sklepKatalogCentralnySort(value="default"){return ({"price-asc":"cena-rosnaco","price-desc":"cena-malejaco",name:"nazwa",rating:"ocena",newest:"najnowsze"})[value]||"external";}
 function sklepKatalogCentralnyOfertaParams(){
   const oferta=ustawieniaOfertyGlownej(),params={};
@@ -4395,22 +4398,62 @@ function sklepKatalogCentralnyParametryGlowne(){
   return params;
 }
 function sklepKatalogCentralnySygnatura(params){return JSON.stringify(Object.fromEntries(Object.entries(params||{}).filter(([,value])=>value!==""&&value!==null&&value!==undefined)));}
+async function sklepKatalogTrwalyWczytaj(){
+  if(sklepKatalogTrwaly.loaded)return sklepKatalogTrwaly.entries;
+  if(sklepKatalogTrwaly.promise)return sklepKatalogTrwaly.promise;
+  sklepKatalogTrwaly.promise=(async()=>{
+    const saved=typeof chmuraRuntimeCacheOdczytaj==="function"?await chmuraRuntimeCacheOdczytaj(SKLEP_KATALOG_CACHE_KEY):null,now=Date.now(),entries={};
+    for(const [signature,entry] of Object.entries(saved?.entries||{}))if(entry?.data&&now-Number(entry.at||0)<=SKLEP_KATALOG_CACHE_STALE_MS)entries[signature]=entry;
+    sklepKatalogTrwaly={loaded:true,promise:null,entries};return entries;
+  })();
+  return sklepKatalogTrwaly.promise;
+}
+async function sklepKatalogTrwalyZapisz(signature,data){
+  if(!signature||!data||typeof chmuraRuntimeCacheZapisz!=="function")return false;
+  const entries=await sklepKatalogTrwalyWczytaj();entries[signature]={at:Date.now(),data};
+  const ograniczone=Object.fromEntries(Object.entries(entries).sort((a,b)=>Number(b[1]?.at||0)-Number(a[1]?.at||0)).slice(0,SKLEP_KATALOG_CACHE_LIMIT));
+  sklepKatalogTrwaly.entries=ograniczone;return chmuraRuntimeCacheZapisz(SKLEP_KATALOG_CACHE_KEY,{schema:1,savedAt:Date.now(),entries:ograniczone});
+}
+function sklepKatalogZastosujStrone(signature,data,at=Date.now()){
+  sklepKatalogCentralnyCache.set(signature,{at,data});while(sklepKatalogCentralnyCache.size>SKLEP_KATALOG_CACHE_LIMIT)sklepKatalogCentralnyCache.delete(sklepKatalogCentralnyCache.keys().next().value);
+  sklepKatalogCentralnyFacety=data.facets||sklepKatalogCentralnyFacety;sklepKatalogCentralnyPodsumowanie=data.summary||sklepKatalogCentralnyPodsumowanie;zapamietajProduktyCentralne(data.items||[]);zrodloProduktow="postgresql-paginowany";chmuraKatalogCentralnyPubliczny=true;zbudujProdukty();
+  sklepKatalogCentralnyStan={signature,loading:false,data,error:""};return data;
+}
 async function sklepKatalogCentralnyPobierz(params,force=false){
-  if(!chmuraKatalogCentralnyPubliczny)return null;const signature=sklepKatalogCentralnySygnatura(params),cached=!force?sklepKatalogCentralnyCache.get(signature):null;
-  if(cached&&Date.now()-cached.at<5*60*1000)return cached.data;
+  const signature=sklepKatalogCentralnySygnatura(params),cached=!force?sklepKatalogCentralnyCache.get(signature):null;
+  if(cached&&Date.now()-cached.at<SKLEP_KATALOG_CACHE_FRESH_MS)return cached.data;
   if(sklepKatalogCentralnyStan.loading&&sklepKatalogCentralnyStan.signature===signature)return null;
   sklepKatalogCentralnyStan={signature,loading:true,data:null,error:""};
-  try{const data=await chmura("product-catalog-query",{params,timeout:30000});sklepKatalogCentralnyCache.set(signature,{at:Date.now(),data});while(sklepKatalogCentralnyCache.size>24)sklepKatalogCentralnyCache.delete(sklepKatalogCentralnyCache.keys().next().value);sklepKatalogCentralnyFacety=data.facets||sklepKatalogCentralnyFacety;sklepKatalogCentralnyPodsumowanie=data.summary||sklepKatalogCentralnyPodsumowanie;zapamietajProduktyCentralne(data.items||[]);zbudujProdukty();sklepKatalogCentralnyStan={signature,loading:false,data,error:""};return data;}
-  catch(error){sklepKatalogCentralnyStan={signature,loading:false,data:null,error:String(error?.message||error)};return null;}
+  const trwale=await sklepKatalogTrwalyWczytaj(),trwaly=!force?trwale[signature]:null;
+  if(trwaly&&Date.now()-Number(trwaly.at||0)<SKLEP_KATALOG_CACHE_FRESH_MS)return sklepKatalogZastosujStrone(signature,trwaly.data,Number(trwaly.at)||Date.now());
+  try{
+    const data=await chmura("product-catalog-query",{params:{...params,audience:"public"},timeout:30000});
+    if(!data?.available||!Array.isArray(data.items))throw new Error("Centralny katalog nie zwrócił prawidłowej strony produktów.");
+    sklepKatalogTrwalyZapisz(signature,data).catch(()=>false);return sklepKatalogZastosujStrone(signature,data);
+  }catch(error){
+    if(trwaly?.data){loguj("ostrzezenie","Katalog PostgreSQL chwilowo niedostępny — pokazano ostatnią małą stronę z pamięci urządzenia.");return sklepKatalogZastosujStrone(signature,{...trwaly.data,cacheStale:true},Date.now());}
+    sklepKatalogCentralnyStan={signature,loading:false,data:null,error:String(error?.message||error)};return null;
+  }
 }
 function sklepKatalogCentralnyWidok(params){
-  const signature=sklepKatalogCentralnySygnatura(params),cached=sklepKatalogCentralnyCache.get(signature);if(cached&&Date.now()-cached.at<5*60*1000)return {ready:true,data:cached.data};
+  const signature=sklepKatalogCentralnySygnatura(params),cached=sklepKatalogCentralnyCache.get(signature);if(cached&&Date.now()-cached.at<SKLEP_KATALOG_CACHE_FRESH_MS)return {ready:true,data:cached.data};
   if(sklepKatalogCentralnyStan.error&&sklepKatalogCentralnyStan.signature===signature)return {error:sklepKatalogCentralnyStan.error};
   if(!sklepKatalogCentralnyStan.loading||sklepKatalogCentralnyStan.signature!==signature)setTimeout(()=>sklepKatalogCentralnyPobierz(params).then(()=>{if(chmuraKatalogCentralnyPubliczny)renderuj();}),0);
   return {loading:true};
 }
 function sklepKatalogCentralnyZaplanuj(){clearTimeout(sklepKatalogCentralnyTimer);sklepKatalogCentralnyTimer=setTimeout(()=>rysuj(),220);}
 async function sklepPobierzProduktCentralny(id,force=false){const key=String(id);if(force)sklepProduktCentralnyBledy.delete(key);if(sklepProduktCentralnyBledy.has(key))return null;if(sklepProduktCentralnyWToku.has(key))return sklepProduktCentralnyWToku.get(key);const request=chmura("product-catalog-item",{params:{id:key,audience:"public"},timeout:20000}).then(data=>{if(data.product){sklepProduktCentralnyBledy.delete(key);const pelny={...data.product,_catalog:{...(data.product._catalog||{}),detailLevel:"full"}};zapamietajProduktyCentralne([pelny]);zbudujProdukty();return pelny;}sklepProduktCentralnyBledy.set(key,"Nie znaleziono produktu.");return null;}).catch(error=>{sklepProduktCentralnyBledy.set(key,String(error?.message||error));return null;}).finally(()=>sklepProduktCentralnyWToku.delete(key));sklepProduktCentralnyWToku.set(key,request);return request;}
+async function sklepPobierzProduktyCentralnePoId(ids=[]){
+  const unique=[...new Set((Array.isArray(ids)?ids:[]).map(String).filter(Boolean))];if(!unique.length)return {ok:true,items:[],found:new Set()};
+  const items=[];
+  try{
+    for(let start=0;start<unique.length;start+=50){
+      const batch=unique.slice(start,start+50),data=await chmura("product-catalog-query",{params:{audience:"public",ids:batch.join(","),sort:"id",page:1,limit:batch.length},timeout:30000});
+      if(!data?.available||!Array.isArray(data.items))throw new Error("Niepełna odpowiedź katalogu produktów.");items.push(...data.items);
+    }
+    zapamietajProduktyCentralne(items);zbudujProdukty();return {ok:true,items,found:new Set(items.map(item=>String(item.id)))};
+  }catch(error){return {ok:false,items:[],found:new Set(),error:String(error?.message||error)};}
+}
 function sklepKatalogCentralnyLiczbaKategorii(galaz){const zestaw=galaz instanceof Set?galaz:new Set(galaz||[]);return (sklepKatalogCentralnyFacety.categories||[]).reduce((s,item)=>s+(zestaw.has(item.value)?Number(item.count)||0:0),0);}
 function rysujChipy(){
   const c = $("chips"); if(!c) return;
@@ -6230,7 +6273,7 @@ $("searchInput").oninput = e=>{
   const porzadkowaniePamieci=zwolnijPamiecPodreczna();
   if(porzadkowaniePamieci.usunieto.length)loguj("info",`Odciążono pamięć podręczną: ${(porzadkowaniePamieci.przed/1024).toFixed(0)} KB → ${(porzadkowaniePamieci.po/1024).toFixed(0)} KB`);
   const ladowanieProduktow=pobierzBazoweProdukty();
-  await Promise.all([chmuraWczytajStan(),ladowanieProduktow,pobierzPaynowKonfiguracjePubliczna()]); // ustawienia, katalog i bezpieczny status płatności pobieramy równolegle
+  await Promise.all([chmuraWczytajStan(),ladowanieProduktow,pobierzPaynowKonfiguracjePubliczna()]); // ustawienia, pierwszą małą stronę PostgreSQL i bezpieczny status płatności pobieramy równolegle
   zastosujUstawienia();
   await zainicjujAdmina();
   await odtworzSesjeCentralna();
@@ -6239,7 +6282,7 @@ $("searchInput").oninput = e=>{
   odswiezUlubioneLicznik();
   odswiezZnacznikDiag();
   finalizujWczytanieProduktow();
-  const porzadkowanieReferencji=porzadkujBezpieczneReferencje();
+  const porzadkowanieReferencji=await porzadkujBezpieczneReferencje();
   if(porzadkowanieReferencji.koszyk||porzadkowanieReferencji.mapowania){odswiezKoszyk();zbudujProdukty();}
   uruchomAutoSynchronizacjeChmury();
 })();

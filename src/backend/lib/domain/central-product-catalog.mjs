@@ -422,7 +422,11 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
           FROM artway_product_records records
           WHERE records.namespace=$1 AND records.product_id=$2 AND records.record_status<>'removed'
         `, [ns, text(id, 120)])
-      : await pool.query("SELECT public_data product FROM artway_storefront_products WHERE namespace=$1 AND product_id=$2 AND record_status='active' AND sale_available=true", [ns, text(id, 120)]);
+      // Lista sprzedażowa filtruje sale_available=true, ale bezpośredni adres
+      // karty pozostaje dostępny także podczas czasowego wstrzymania. Publiczna
+      // projekcja nie zawiera danych prywatnych, a klient widzi brak możliwości
+      // zakupu zamiast błędnego 404 i utraty stałego adresu produktu.
+      : await pool.query("SELECT public_data product FROM artway_storefront_products WHERE namespace=$1 AND product_id=$2 AND record_status='active'", [ns, text(id, 120)]);
     return result.rows[0]?.product || null;
   };
 

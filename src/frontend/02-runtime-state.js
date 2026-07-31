@@ -80,9 +80,10 @@ function odswiezZnacznikDiag(){
 }
 
 /* ═══════════ PRODUKTY ═══════════
-   Strona najpierw próbuje wczytać products.json. Jeśli się nie uda
-   (np. otwarta z dysku), nie pokazuje nieaktualnych produktów demonstracyjnych. */
-const PRODUKTY_ZAPASOWE = []; // brak demonstracyjnych towarów — źródłem awaryjnym jest aktualny products.json
+   Sklep pobiera z PostgreSQL wyłącznie potrzebną stronę listy, a pełną kartę
+   dopiero po jej otwarciu. products.json pozostaje artefaktem wydania do
+   ręcznego eksportu i diagnostyki — nigdy nie jest ładowany przy starcie. */
+const PRODUKTY_ZAPASOWE = []; // brak demonstracyjnych towarów i ciężkich snapshotów w pamięci przeglądarki
 
 // Stan integracji jest częścią wspólnego rdzenia aplikacji. Panel korzysta z
 // niego na każdej trasie (m.in. przy synchronizacji bazy), dlatego nie może być
@@ -111,7 +112,7 @@ function zapamietajProduktyCentralne(lista=[]){
   (Array.isArray(lista)?lista:[]).forEach(p=>{if(p&&p.id!==undefined)mapa.set(String(p.id),p);});
   produktyCentralnePobrane=[...mapa.values()].slice(-5000);produktyBazoweCache={bazowe:null,importowane:null,centralne:null,items:[]};if(typeof uniewaznijProduktyAdminCache==="function")uniewaznijProduktyAdminCache();
 }
-let zrodloProduktow = "zapasowe";
+let zrodloProduktow = "oczekuje-na-postgresql";
 // Wyłącznie nietrwały cache widoku. Pełne kartoteki nigdy nie startują już
 // z localStorage — źródłem jest PostgreSQL, a products.json to generowany
 // podczas wydania publiczny snapshot awaryjny.

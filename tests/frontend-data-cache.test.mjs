@@ -28,8 +28,11 @@ test('bazowy katalog i widoki panelu pozostają w trwałej, adaptacyjnej pamięc
   const [catalog,cloud,router,responsive]=await Promise.all([
     read('assets/app.js'),read('src/frontend/03-cloud-sync.js'),read('assets/app.js'),read('src/frontend/08a-admin-responsive-layout.js'),
   ]);
-  assert.match(catalog,/PRODUKTY_BAZOWE_CACHE_TTL_MS=6\*60\*60\*1000/);
-  assert.match(catalog,/If-None-Match/);
+  assert.match(catalog,/SKLEP_KATALOG_CACHE_FRESH_MS=5\*60\*1000/);
+  assert.match(catalog,/SKLEP_KATALOG_CACHE_STALE_MS=24\*60\*60\*1000/);
+  assert.match(catalog,/SKLEP_KATALOG_CACHE_LIMIT=24/);
+  assert.match(catalog,/chmuraRuntimeCacheZapisz\(SKLEP_KATALOG_CACHE_KEY/);
+  assert.doesNotMatch(catalog,/fetch\s*\(\s*[`'"]\/products\.json/);
   assert.match(cloud,/przed<7_500_000/);
   assert.doesNotMatch(cloud,/KLUCZE_PRZESTARZALYCH_CACHE[\s\S]{0,300}"artway_produkty_katalog"/);
   assert.match(responsive,/navigator\.storage\.persist\(\)/);

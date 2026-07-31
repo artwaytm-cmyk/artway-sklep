@@ -265,6 +265,16 @@ test('publiczny katalog obsługuje gałęzie, wybrane produkty, nowości i oceny
   assert.equal(record.ratingCount, 1);
 });
 
+test('publiczne listy pokazują tylko sprzedaż, lecz stały adres produktu nie znika przy czasowym wstrzymaniu', async () => {
+  const source = await readFile('src/backend/lib/domain/central-product-catalog.mjs', 'utf8');
+  const queryBlock = source.slice(source.indexOf('const query = async'), source.indexOf('const get = async'));
+  const getBlock = source.slice(source.indexOf('const get = async'), source.indexOf('const listDataPage'));
+  assert.match(queryBlock, /sale_available=true/);
+  assert.match(getBlock, /record_status='active'/);
+  assert.doesNotMatch(getBlock, /record_status='active' AND sale_available=true/);
+  assert.match(getBlock, /bezpośredni adres/);
+});
+
 test('backend udostępnia stronicowaną kartotekę, pojedynczy produkt, synchronizację i status', async () => {
   const source = await readFile('src/backend/lib/store-app.mjs', 'utf8');
   const route = await readFile('src/backend/lib/central-product-catalog-route.mjs', 'utf8');
@@ -295,17 +305,27 @@ test('Asortyment korzysta z paginacji serwerowej i zachowuje tryb awaryjny', asy
 });
 
 test('sklep publiczny używa tej samej centralnej paginacji i pobiera szczegół dopiero po wejściu', async () => {
-  const [cloudCore, cloudPersistence, storefront, pull] = await Promise.all([
+  const [cloudCore, cloudPersistence, storefront, bootstrapCatalog, inventory, bootstrap, pull] = await Promise.all([
     readFile('src/frontend/03-cloud-sync.js', 'utf8'),
     readFile('src/frontend/03d-cloud-persistence-runtime.js', 'utf8'),
     readFile('src/frontend/06b-storefront-catalog.js', 'utf8'),
+    readFile('src/frontend/05c-inventory-movements.js', 'utf8'),
+    readFile('src/frontend/05-catalog-inventory.js', 'utf8'),
+    readFile('src/frontend/18-ui-and-bootstrap.js', 'utf8'),
     readFile('src/backend/lib/domain/store-data-pull.mjs', 'utf8'),
   ]);
   const cloud = `${cloudCore}\n${cloudPersistence}`;
-  assert.match(cloud, /catalogMode:trybAdmina\?"legacy":"central"/);
+  assert.match(cloud, /catalogMode:"central"/);
   assert.match(cloud, /chmuraKatalogCentralnyPubliczny/);
   assert.match(storefront, /sklepKatalogCentralnyPobierz/);
   assert.match(storefront, /product-catalog-item/);
+  assert.match(storefront, /SKLEP_KATALOG_CACHE_LIMIT=24/);
+  assert.match(storefront, /sklepPobierzProduktyCentralnePoId/);
+  assert.match(bootstrapCatalog, /sklepKatalogCentralnyPobierz/);
+  assert.doesNotMatch(bootstrapCatalog, /fetch\s*\(\s*[`'"]\/products\.json/);
+  assert.match(inventory, /async function porzadkujBezpieczneReferencje/);
+  assert.match(inventory, /Przejściowa awaria API również nie może opróżnić koszyka/);
+  assert.match(bootstrap, /await porzadkujBezpieczneReferencje\(\)/);
   assert.match(pull, /PUBLIC_CENTRAL_CATALOG_KEYS/);
   assert.match(pull, /catalog_central: centralCatalogMode/);
 });

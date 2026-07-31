@@ -52,7 +52,8 @@ test('powtórne wejście do panelu pobiera tylko rewizję zamiast wielomegabajto
   assert.match(cloud, /settingsRev:lokalnaRewizja/);
   assert.match(pull, /settings_unchanged: true/);
   assert.match(pull, /excluded\.includes\(key\)/);
-  assert.match(pull, /excludeKeys: centralCatalogMode \? PUBLIC_CENTRAL_EXCLUDED_KEYS : \[\]/);
+  assert.match(pull, /excludeKeys: centralCatalogMode \? \(admin \? CENTRAL_PRODUCT_SNAPSHOT_KEYS : PUBLIC_CENTRAL_EXCLUDED_KEYS\) : \[\]/);
+  assert.match(cloud, /catalogMode:"central"/);
   assert.match(pull, /settingsRevisionUnchanged/);
   assert.match(pull, /url\.searchParams\.has\('settingsDomains'\)/);
   assert.match(cloud, /serwerNowszy \|\| zmienioneDomeny/);

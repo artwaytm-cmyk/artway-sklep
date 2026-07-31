@@ -15878,9 +15878,10 @@ function testyDiagnostyczne(){
   dodaj("Konfiguracja","Dane prawne",danePrawneFirmyKompletne()?"ok":"bad",danePrawneFirmyKompletne()?"Brak pól przykładowych":"Uzupełnij dane firmy w treściach prawnych");
   dodaj("Bezpieczeństwo","Hasło administratora",domyslneHasloAdmina?"bad":"ok",domyslneHasloAdmina?"Nadal ustawione jest hasło admin":"Hasło zostało zmienione");
   dodaj("Bezpieczeństwo","Role kont administracyjnych",administratorzyDiag.length?"ok":"bad",`${administratorzyDiag.length} kont z rolą administratora • ${kontaDiag.length-administratorzyDiag.length} kont klientów`);
-  dodaj("Publikacja","Źródło produktów",zrodloProduktow==="json"?"ok":"warn",zrodloProduktow==="json"?"products.json dostępny":"Używana jest lista zapasowa");
+  const katalogPaginowany=zrodloProduktow==="postgresql-paginowany"||chmuraKatalogCentralnyPubliczny;
+  dodaj("Publikacja","Źródło produktów",katalogPaginowany?"ok":"warn",katalogPaginowany?`PostgreSQL • pobrano ${produktyCentralnePobrane.length} potrzebnych kart • pełny katalog nie obciąża przeglądarki`:`Centralny katalog chwilowo niedostępny • ${zrodloProduktow}`);
   const centralnyKatalog=stanBramki.store?.storage?.migrated===true&&String(stanBramki.store?.storage?.engine||"").startsWith("postgres-");
-  dodaj("Publikacja","Centralny katalog produktów",!integracjeSprawdzone?"pending":centralnyKatalog?"ok":publikacjaKatalogu.gotowy?"ok":"warn",!integracjeSprawdzone?"Trwa kontrola źródła katalogu":centralnyKatalog?`PostgreSQL jest źródłem prawdy • ${stanBramki.store.storage.records||publikacjaKatalogu.razem} rekordów domenowych • products.json pełni wyłącznie rolę startowej kopii awaryjnej`:publikacjaKatalogu.gotowy?`Awaryjny products.json zabezpiecza ${publikacjaKatalogu.razem} kart`:`Brakujące ${publikacjaKatalogu.brakujace.length} • zmienione ${publikacjaKatalogu.nieaktualne.length}`);
+  dodaj("Publikacja","Centralny katalog produktów",!integracjeSprawdzone?"pending":centralnyKatalog?"ok":publikacjaKatalogu.gotowy?"ok":"warn",!integracjeSprawdzone?"Trwa kontrola źródła katalogu":centralnyKatalog?`PostgreSQL jest źródłem prawdy • ${stanBramki.store.storage.records||sklepKatalogCentralnyPodsumowanie.total||publikacjaKatalogu.razem} rekordów • klient pobiera strony po ${produktyNaStronie}, a products.json jest wyłącznie ręcznym artefaktem wydania`:publikacjaKatalogu.gotowy?`Artefakt eksportowy zabezpiecza ${publikacjaKatalogu.razem} kart`:`Brakujące ${publikacjaKatalogu.brakujace.length} • zmienione ${publikacjaKatalogu.nieaktualne.length}`);
   dodaj("Publikacja","Atomowe wydanie strony",!systemWersjaStan.sprawdzono||systemWersjaStan.ladowanie?"pending":systemWersjaStan.release&&systemWersjaStan.backendOnline?"ok":"bad",!systemWersjaStan.sprawdzono||systemWersjaStan.ladowanie?"Trwa automatyczna kontrola wydania":systemWersjaStan.release&&systemWersjaStan.backendOnline?`Aktywne wydanie ${systemWersjaStan.release.releaseId}`:systemWersjaStan.error||"Nie udało się potwierdzić aktywnego wydania");
   // Suma wielu małych, poprawnych ustawień serwerowych może przekroczyć próg
   // pojedynczego zapisu. Ostrzeżenie ma dotyczyć ciężkiego klucza, starego
@@ -15958,7 +15959,7 @@ function widokDiagnostyka(){
         </div>
       </div>
       <div class="diag-grid">
-        <div class="diag-card"><b>${produkty.length}</b><small>produktów • ${zrodloProduktow}</small></div>
+        <div class="diag-card"><b>${sklepKatalogCentralnyPodsumowanie.total||produkty.length}</b><small>produktów w PostgreSQL • ${produkty.length} w bieżącej pamięci</small></div>
         <div class="diag-card"><b>${pobierzZamowienia().length}</b><small>zamówień</small></div>
         <div class="diag-card"><b>${pobierzUzytkownikow().filter(u=>!kontoMaRoleAdmin(u.email)).length}</b><small>kont klientów</small></div>
         <div class="diag-card"><b>${pobierzUzytkownikow().filter(u=>kontoMaRoleAdmin(u.email)).length}</b><small>administratorów</small></div>
@@ -16071,7 +16072,7 @@ function wyczyscLogi(){ localStorage.removeItem("artway_logi"); toast("Dziennik 
 async function kopiujRaport(){
   const testy=testyDiagnostyczne(), raport=[
     "RAPORT DIAGNOSTYCZNY Artway-TM — "+new Date().toLocaleString("pl-PL"),
-    `Kondycja: ${wynikKondycji(testy)}% | Produkty: ${produkty.length} (${zrodloProduktow}) | Konta: ${pobierzUzytkownikow().length} | Zamówienia: ${pobierzZamowienia().length}`,
+    `Kondycja: ${wynikKondycji(testy)}% | Produkty PostgreSQL: ${sklepKatalogCentralnyPodsumowanie.total||produkty.length} (w pamięci ${produkty.length}) | Konta: ${pobierzUzytkownikow().length} | Zamówienia: ${pobierzZamowienia().length}`,
     "","TESTY:",...testy.map(x=>`- [${x.status.toUpperCase()}] ${x.grupa} / ${x.nazwa}: ${x.szczegoly}`),
     "","OSTATNIE ZDARZENIA:",...pobierzLogi().slice(0,30).map(l=>`[${l.czas}] ${l.poziom.toUpperCase()}: ${l.tresc}${l.zrodlo?" ("+l.zrodlo+")":""}`)
   ].join("\n");

@@ -8,7 +8,7 @@ async function chmuraWczytajStan(){
   try{
     const lokalnaRewizja=Math.max(0,Number(wczytajLS("artway_chmura_rev",0))||0);
     const trybAdmina=maUprawnieniaZapisuChmury(),wersjeDomen=trybAdmina?chmuraWersjeDomenAdmina:chmuraWersjeDomenPubliczne;
-    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev,settingsDomains:JSON.stringify(wersjeDomen||{}),catalogMode:trybAdmina?"legacy":"central",adminData:0,...(lokalnaRewizja?{settingsRev:lokalnaRewizja}:{})}});
+    const d = await chmura("pull",{params:{catalogRev:chmuraKatalogImportowanyRev,settingsDomains:JSON.stringify(wersjeDomen||{}),catalogMode:"central",adminData:0,...(lokalnaRewizja?{settingsRev:lokalnaRewizja}:{})}});
     chmuraOstatniPullZmienilDane=(await chmuraPobierzKatalogImportowany(d))||chmuraOstatniPullZmienilDane;
     chmuraStan = {...chmuraStan, dostepna:true, sprawdzono:true, admin:d.admin===true||chmuraStan.admin, rev:d.rev||0, updated_at:d.updated_at||null, error:""};
     const revLok = lokalnaRewizja;

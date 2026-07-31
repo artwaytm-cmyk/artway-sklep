@@ -51,14 +51,14 @@ test('promocja ma jedno źródło prawdy i sklep posiada manifest', () => {
   assert.ok(fs.existsSync(new URL('../icons/artway-icon.svg', import.meta.url)));
 });
 
-test('katalog produktów używa wersjonowanej pamięci IndexedDB i odrzuca uszkodzony plik', () => {
+test('katalog produktów pamięta tylko ograniczone strony PostgreSQL i nie pobiera pełnego snapshotu', () => {
   const catalog = read('assets/app.js');
-  assert.match(catalog, /products\.json\?v=/);
-  assert.match(catalog, /PRODUKTY_BAZOWE_CACHE_KEY="base-products-v2"/);
-  assert.match(catalog, /cache:"no-cache"/);
-  assert.match(catalog, /chmuraRuntimeCacheOdczytaj\(PRODUKTY_BAZOWE_CACHE_KEY\)/);
-  assert.match(catalog, /new Set\(poprawne\.map/);
-  assert.match(catalog, /unikalne\.size!==poprawne\.length/);
+  assert.doesNotMatch(catalog, /fetch\s*\(\s*[`'"]\/products\.json/);
+  assert.match(catalog, /SKLEP_KATALOG_CACHE_KEY="public-catalog-pages-v1"/);
+  assert.match(catalog, /SKLEP_KATALOG_CACHE_LIMIT=24/);
+  assert.match(catalog, /chmuraRuntimeCacheOdczytaj\(SKLEP_KATALOG_CACHE_KEY\)/);
+  assert.match(catalog, /product-catalog-query/);
+  assert.match(catalog, /Centralny katalog nie zwrócił prawidłowej strony produktów/);
 });
 
 test('szablon GoDan wyłącznie dopisuje katalogi i nie usuwa produktów', () => {

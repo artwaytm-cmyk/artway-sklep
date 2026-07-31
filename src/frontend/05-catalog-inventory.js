@@ -108,7 +108,23 @@ function stanPublikacjiKatalogu(){
   }
   return {gotowy:zrodloProduktow==="json"&&!brakujace.length&&!nieaktualne.length,razem:aktualne.length,bazowe:bazowe.size,brakujace,nieaktualne};
 }
-function porzadkujBezpieczneReferencje(){
+async function porzadkujBezpieczneReferencje(){
+  // Przy paginowanym katalogu brak produktu w pamięci oznacza zwykle tylko,
+  // że jego strona nie została jeszcze pobrana. Najpierw odczytujemy dokładnie
+  // identyfikatory z koszyka, a mapowań administratora nie usuwamy na podstawie
+  // niepełnego widoku. Przejściowa awaria API również nie może opróżnić koszyka.
+  if(chmuraKatalogCentralnyPubliczny){
+    if(koszyk.length&&typeof sklepPobierzProduktyCentralnePoId==="function"){
+      const wynik=await sklepPobierzProduktyCentralnePoId(koszyk.map(item=>item.id));
+      if(wynik.ok){
+        const przed=koszyk.length;koszyk=koszyk.filter((x,i,a)=>wynik.found.has(String(x.id))&&Number(x.ile)>0&&a.findIndex(y=>String(y.id)===String(x.id)&&String(y.wariant||"")===String(x.wariant||""))===i);
+        if(koszyk.length!==przed)zapiszLS("artway_koszyk",koszyk);
+        return {koszyk:przed-koszyk.length,mapowania:0};
+      }
+      return {koszyk:0,mapowania:0,odroczono:true};
+    }
+    return {koszyk:0,mapowania:0};
+  }
   const widoczne=new Set(produkty.map(p=>String(p.id))),wszystkie=new Set([...produktyBazoweWspolne(),...(produktyDodane||[]),...(koszDodanych||[])].map(p=>String(p.id)));
   const koszykPrzed=koszyk.length;
   koszyk=koszyk.filter((x,i,a)=>widoczne.has(String(x.id))&&Number(x.ile)>0&&a.findIndex(y=>String(y.id)===String(x.id)&&String(y.wariant||"")===String(x.wariant||""))===i);

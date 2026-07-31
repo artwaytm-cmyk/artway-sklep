@@ -44,9 +44,10 @@ test('diagnostyka zdjęć obejmuje tylko produkty dostępne w publicznej sprzeda
   assert.match(diagnostics, /Wszystkie aktywne produkty mają zdjęcia/);
 });
 
-test('centralny PostgreSQL jest źródłem katalogu, a products.json kopią startową', () => {
+test('centralny PostgreSQL jest źródłem katalogu, a przeglądarka utrzymuje tylko potrzebne strony', () => {
   const diagnostics = read('src/frontend/16-diagnostics.js');
   assert.match(diagnostics, /"Centralny katalog produktów"/);
   assert.match(diagnostics, /PostgreSQL jest źródłem prawdy/);
-  assert.match(diagnostics, /products\.json pełni wyłącznie rolę startowej kopii awaryjnej/);
+  assert.match(diagnostics, /klient pobiera strony po/);
+  assert.match(diagnostics, /products\.json jest wyłącznie ręcznym artefaktem wydania/);
 });

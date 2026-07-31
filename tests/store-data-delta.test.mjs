@@ -96,6 +96,28 @@ test('publiczny bootstrap centralnego katalogu pomija ciężkie mapy produktów'
   assert.equal(result.body.orders, undefined);
 });
 
+test('administrator także używa centralnego katalogu, lecz nadal otrzymuje domeny magazynu', async () => {
+  let deltaOptions = null;
+  const deps = dependencies({
+    czytajUstawieniaPrzyrostowo: async (fallback, options) => {
+      deltaOptions = options;
+      return {
+        value: { ...options.base, data: { ...options.base.data, artway_produkty_edytowane: { p1: { cena: 99 } }, artway_stany: { p1: 4 } } },
+        domainVersions: { artway_produkty_edytowane: 7, artway_stany: 8 },
+        changedKeys: ['artway_produkty_edytowane', 'artway_stany'],
+      };
+    },
+  });
+  const route = createStoreDataRoute(deps);
+  const result = await route({ method: 'GET' }, new URL('https://artwaytm.pl/api/store?action=pull&catalogMode=central&adminData=0'), 'pull');
+  assert.equal(result.body.admin, true);
+  assert.equal(result.body.catalog_central, true);
+  assert.ok(deltaOptions.excludeKeys.includes('artway_produkty_edytowane'));
+  assert.equal(deltaOptions.excludeKeys.includes('artway_stany'), false);
+  assert.equal(result.body.settings?.artway_produkty_edytowane, undefined);
+  assert.deepEqual(result.body.settings?.artway_stany, { p1: 4 });
+});
+
 test('słownik użytkowników ma osobną wersjonowaną kolejkę', async () => {
   const route = createStoreDataRoute(dependencies()), request = { method: 'GET' };
   const first = await route(request, new URL('https://artwaytm.pl/api/store?action=store-users-admin'), 'store-users-admin');

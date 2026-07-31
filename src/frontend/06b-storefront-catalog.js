@@ -1,4 +1,5 @@
-let sklepKatalogCentralnyCache=new Map(),sklepKatalogCentralnyStan={signature:"",loading:false,data:null,error:""},sklepKatalogCentralnyFacety={categories:[],producers:[]},sklepKatalogCentralnyPodsumowanie={},sklepKatalogCentralnyTimer=null,sklepProduktCentralnyWToku=new Map(),sklepProduktCentralnyBledy=new Map();
+const SKLEP_KATALOG_CACHE_KEY="public-catalog-pages-v1",SKLEP_KATALOG_CACHE_FRESH_MS=5*60*1000,SKLEP_KATALOG_CACHE_STALE_MS=24*60*60*1000,SKLEP_KATALOG_CACHE_LIMIT=24;
+let sklepKatalogCentralnyCache=new Map(),sklepKatalogCentralnyStan={signature:"",loading:false,data:null,error:""},sklepKatalogCentralnyFacety={categories:[],producers:[]},sklepKatalogCentralnyPodsumowanie={},sklepKatalogCentralnyTimer=null,sklepProduktCentralnyWToku=new Map(),sklepProduktCentralnyBledy=new Map(),sklepKatalogTrwaly={loaded:false,promise:null,entries:{}};
 function sklepKatalogCentralnySort(value="default"){return ({"price-asc":"cena-rosnaco","price-desc":"cena-malejaco",name:"nazwa",rating:"ocena",newest:"najnowsze"})[value]||"external";}
 function sklepKatalogCentralnyOfertaParams(){
   const oferta=ustawieniaOfertyGlownej(),params={};
@@ -11,22 +12,62 @@ function sklepKatalogCentralnyParametryGlowne(){
   return params;
 }
 function sklepKatalogCentralnySygnatura(params){return JSON.stringify(Object.fromEntries(Object.entries(params||{}).filter(([,value])=>value!==""&&value!==null&&value!==undefined)));}
+async function sklepKatalogTrwalyWczytaj(){
+  if(sklepKatalogTrwaly.loaded)return sklepKatalogTrwaly.entries;
+  if(sklepKatalogTrwaly.promise)return sklepKatalogTrwaly.promise;
+  sklepKatalogTrwaly.promise=(async()=>{
+    const saved=typeof chmuraRuntimeCacheOdczytaj==="function"?await chmuraRuntimeCacheOdczytaj(SKLEP_KATALOG_CACHE_KEY):null,now=Date.now(),entries={};
+    for(const [signature,entry] of Object.entries(saved?.entries||{}))if(entry?.data&&now-Number(entry.at||0)<=SKLEP_KATALOG_CACHE_STALE_MS)entries[signature]=entry;
+    sklepKatalogTrwaly={loaded:true,promise:null,entries};return entries;
+  })();
+  return sklepKatalogTrwaly.promise;
+}
+async function sklepKatalogTrwalyZapisz(signature,data){
+  if(!signature||!data||typeof chmuraRuntimeCacheZapisz!=="function")return false;
+  const entries=await sklepKatalogTrwalyWczytaj();entries[signature]={at:Date.now(),data};
+  const ograniczone=Object.fromEntries(Object.entries(entries).sort((a,b)=>Number(b[1]?.at||0)-Number(a[1]?.at||0)).slice(0,SKLEP_KATALOG_CACHE_LIMIT));
+  sklepKatalogTrwaly.entries=ograniczone;return chmuraRuntimeCacheZapisz(SKLEP_KATALOG_CACHE_KEY,{schema:1,savedAt:Date.now(),entries:ograniczone});
+}
+function sklepKatalogZastosujStrone(signature,data,at=Date.now()){
+  sklepKatalogCentralnyCache.set(signature,{at,data});while(sklepKatalogCentralnyCache.size>SKLEP_KATALOG_CACHE_LIMIT)sklepKatalogCentralnyCache.delete(sklepKatalogCentralnyCache.keys().next().value);
+  sklepKatalogCentralnyFacety=data.facets||sklepKatalogCentralnyFacety;sklepKatalogCentralnyPodsumowanie=data.summary||sklepKatalogCentralnyPodsumowanie;zapamietajProduktyCentralne(data.items||[]);zrodloProduktow="postgresql-paginowany";chmuraKatalogCentralnyPubliczny=true;zbudujProdukty();
+  sklepKatalogCentralnyStan={signature,loading:false,data,error:""};return data;
+}
 async function sklepKatalogCentralnyPobierz(params,force=false){
-  if(!chmuraKatalogCentralnyPubliczny)return null;const signature=sklepKatalogCentralnySygnatura(params),cached=!force?sklepKatalogCentralnyCache.get(signature):null;
-  if(cached&&Date.now()-cached.at<5*60*1000)return cached.data;
+  const signature=sklepKatalogCentralnySygnatura(params),cached=!force?sklepKatalogCentralnyCache.get(signature):null;
+  if(cached&&Date.now()-cached.at<SKLEP_KATALOG_CACHE_FRESH_MS)return cached.data;
   if(sklepKatalogCentralnyStan.loading&&sklepKatalogCentralnyStan.signature===signature)return null;
   sklepKatalogCentralnyStan={signature,loading:true,data:null,error:""};
-  try{const data=await chmura("product-catalog-query",{params,timeout:30000});sklepKatalogCentralnyCache.set(signature,{at:Date.now(),data});while(sklepKatalogCentralnyCache.size>24)sklepKatalogCentralnyCache.delete(sklepKatalogCentralnyCache.keys().next().value);sklepKatalogCentralnyFacety=data.facets||sklepKatalogCentralnyFacety;sklepKatalogCentralnyPodsumowanie=data.summary||sklepKatalogCentralnyPodsumowanie;zapamietajProduktyCentralne(data.items||[]);zbudujProdukty();sklepKatalogCentralnyStan={signature,loading:false,data,error:""};return data;}
-  catch(error){sklepKatalogCentralnyStan={signature,loading:false,data:null,error:String(error?.message||error)};return null;}
+  const trwale=await sklepKatalogTrwalyWczytaj(),trwaly=!force?trwale[signature]:null;
+  if(trwaly&&Date.now()-Number(trwaly.at||0)<SKLEP_KATALOG_CACHE_FRESH_MS)return sklepKatalogZastosujStrone(signature,trwaly.data,Number(trwaly.at)||Date.now());
+  try{
+    const data=await chmura("product-catalog-query",{params:{...params,audience:"public"},timeout:30000});
+    if(!data?.available||!Array.isArray(data.items))throw new Error("Centralny katalog nie zwrócił prawidłowej strony produktów.");
+    sklepKatalogTrwalyZapisz(signature,data).catch(()=>false);return sklepKatalogZastosujStrone(signature,data);
+  }catch(error){
+    if(trwaly?.data){loguj("ostrzezenie","Katalog PostgreSQL chwilowo niedostępny — pokazano ostatnią małą stronę z pamięci urządzenia.");return sklepKatalogZastosujStrone(signature,{...trwaly.data,cacheStale:true},Date.now());}
+    sklepKatalogCentralnyStan={signature,loading:false,data:null,error:String(error?.message||error)};return null;
+  }
 }
 function sklepKatalogCentralnyWidok(params){
-  const signature=sklepKatalogCentralnySygnatura(params),cached=sklepKatalogCentralnyCache.get(signature);if(cached&&Date.now()-cached.at<5*60*1000)return {ready:true,data:cached.data};
+  const signature=sklepKatalogCentralnySygnatura(params),cached=sklepKatalogCentralnyCache.get(signature);if(cached&&Date.now()-cached.at<SKLEP_KATALOG_CACHE_FRESH_MS)return {ready:true,data:cached.data};
   if(sklepKatalogCentralnyStan.error&&sklepKatalogCentralnyStan.signature===signature)return {error:sklepKatalogCentralnyStan.error};
   if(!sklepKatalogCentralnyStan.loading||sklepKatalogCentralnyStan.signature!==signature)setTimeout(()=>sklepKatalogCentralnyPobierz(params).then(()=>{if(chmuraKatalogCentralnyPubliczny)renderuj();}),0);
   return {loading:true};
 }
 function sklepKatalogCentralnyZaplanuj(){clearTimeout(sklepKatalogCentralnyTimer);sklepKatalogCentralnyTimer=setTimeout(()=>rysuj(),220);}
 async function sklepPobierzProduktCentralny(id,force=false){const key=String(id);if(force)sklepProduktCentralnyBledy.delete(key);if(sklepProduktCentralnyBledy.has(key))return null;if(sklepProduktCentralnyWToku.has(key))return sklepProduktCentralnyWToku.get(key);const request=chmura("product-catalog-item",{params:{id:key,audience:"public"},timeout:20000}).then(data=>{if(data.product){sklepProduktCentralnyBledy.delete(key);const pelny={...data.product,_catalog:{...(data.product._catalog||{}),detailLevel:"full"}};zapamietajProduktyCentralne([pelny]);zbudujProdukty();return pelny;}sklepProduktCentralnyBledy.set(key,"Nie znaleziono produktu.");return null;}).catch(error=>{sklepProduktCentralnyBledy.set(key,String(error?.message||error));return null;}).finally(()=>sklepProduktCentralnyWToku.delete(key));sklepProduktCentralnyWToku.set(key,request);return request;}
+async function sklepPobierzProduktyCentralnePoId(ids=[]){
+  const unique=[...new Set((Array.isArray(ids)?ids:[]).map(String).filter(Boolean))];if(!unique.length)return {ok:true,items:[],found:new Set()};
+  const items=[];
+  try{
+    for(let start=0;start<unique.length;start+=50){
+      const batch=unique.slice(start,start+50),data=await chmura("product-catalog-query",{params:{audience:"public",ids:batch.join(","),sort:"id",page:1,limit:batch.length},timeout:30000});
+      if(!data?.available||!Array.isArray(data.items))throw new Error("Niepełna odpowiedź katalogu produktów.");items.push(...data.items);
+    }
+    zapamietajProduktyCentralne(items);zbudujProdukty();return {ok:true,items,found:new Set(items.map(item=>String(item.id)))};
+  }catch(error){return {ok:false,items:[],found:new Set(),error:String(error?.message||error)};}
+}
 function sklepKatalogCentralnyLiczbaKategorii(galaz){const zestaw=galaz instanceof Set?galaz:new Set(galaz||[]);return (sklepKatalogCentralnyFacety.categories||[]).reduce((s,item)=>s+(zestaw.has(item.value)?Number(item.count)||0:0),0);}
 function rysujChipy(){
   const c = $("chips"); if(!c) return;

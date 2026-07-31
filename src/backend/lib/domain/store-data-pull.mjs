@@ -33,7 +33,7 @@ export function createStoreDataPullHandler(deps = {}) {
     filterOrders, text, readBaseSettings, readSettingsDelta, adminUserRecord,
   } = deps;
   return async function storeDataPull(req, url) {
-    const admin = isAdmin(req, url), centralCatalogMode = !admin && url.searchParams.get('catalogMode') === 'central';
+    const admin = isAdmin(req, url), centralCatalogMode = url.searchParams.get('catalogMode') === 'central';
     const [baseSettings, importedPayload] = await Promise.all([
       readBaseSettings({ data: {}, rev: 0, updated_at: null }),
       productLinkImport.payload({ requestedRev: url.searchParams.get('catalogRev'), admin }),
@@ -50,7 +50,7 @@ export function createStoreDataPullHandler(deps = {}) {
       const delta = await readSettingsDelta({ data: {}, rev: 0, updated_at: null }, {
         versions,
         base: baseSettings,
-        excludeKeys: centralCatalogMode ? PUBLIC_CENTRAL_EXCLUDED_KEYS : [],
+        excludeKeys: centralCatalogMode ? (admin ? CENTRAL_PRODUCT_SNAPSHOT_KEYS : PUBLIC_CENTRAL_EXCLUDED_KEYS) : [],
       });
       settings = delta.value || baseSettings;
       domainVersions = delta.domainVersions || {};
