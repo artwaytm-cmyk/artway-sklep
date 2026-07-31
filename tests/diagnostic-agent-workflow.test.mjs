@@ -3,27 +3,27 @@ import assert from 'node:assert/strict';
 import { createDiagnosticAgentWorkflow } from '../src/backend/lib/domain/diagnostic-agent-workflow.mjs';
 import { diagnosticsModelPolicy, specialistModelPolicy } from '../src/backend/lib/domain/agent-model-policy.mjs';
 
-test('codzienna diagnostyka i specjaliści używają GPT-5 nano, a GPT-5.4 nano jest kontrolowanym fallbackiem', () => {
+test('diagnostyka i specjaliści używają GPT-5.4 nano, a GPT-5.6 Luna jest kontrolowanym fallbackiem', () => {
   assert.deepEqual(diagnosticsModelPolicy({}), {
-    model: 'gpt-5-nano',
+    model: 'gpt-5.4-nano',
     tier: 'economical-routine',
     reasoning: 'low',
     mode: 'standard',
     maxOutputTokens: 2200,
     escalation: false,
   });
-  assert.equal(diagnosticsModelPolicy({}, { escalation: true }).model, 'gpt-5.4-nano');
-  assert.equal(specialistModelPolicy('product_content', { env: {} }).model, 'gpt-5-nano');
-  assert.equal(specialistModelPolicy('seo_promotion', { env: {} }).model, 'gpt-5-nano');
-  assert.equal(specialistModelPolicy('seo_promotion', { env: {}, escalation: true }).model, 'gpt-5.4-nano');
-  assert.equal(specialistModelPolicy('allegro_publication', { env: {} }).model, 'gpt-5-nano');
-  assert.equal(specialistModelPolicy('allegro_publication', { env: {}, escalation: true }).model, 'gpt-5.4-nano');
+  assert.equal(diagnosticsModelPolicy({}, { escalation: true }).model, 'gpt-5.6-luna');
+  assert.equal(specialistModelPolicy('product_content', { env: {} }).model, 'gpt-5.4-nano');
+  assert.equal(specialistModelPolicy('seo_promotion', { env: {} }).model, 'gpt-5.4-nano');
+  assert.equal(specialistModelPolicy('seo_promotion', { env: {}, escalation: true }).model, 'gpt-5.6-luna');
+  assert.equal(specialistModelPolicy('allegro_publication', { env: {} }).model, 'gpt-5.4-nano');
+  assert.equal(specialistModelPolicy('allegro_publication', { env: {}, escalation: true }).model, 'gpt-5.6-luna');
 });
 
 test('stary ogólny OPENAI_MODEL nie wyłącza routingu specjalistów', () => {
   const env = { OPENAI_MODEL: 'gpt-5.6-terra' };
-  assert.equal(specialistModelPolicy('allegro_publication', { env }).model, 'gpt-5-nano');
-  assert.equal(specialistModelPolicy('seo_promotion', { env }).model, 'gpt-5-nano');
+  assert.equal(specialistModelPolicy('allegro_publication', { env }).model, 'gpt-5.4-nano');
+  assert.equal(specialistModelPolicy('seo_promotion', { env }).model, 'gpt-5.4-nano');
 });
 
 test('workflow Agents SDK zwraca strukturalną analizę i nie przekazuje sekretu w danych śledzenia', async () => {
@@ -56,9 +56,9 @@ test('workflow Agents SDK zwraca strukturalną analizę i nie przekazuje sekretu
     source: 'panel',
     count: 18,
   }, { manual: true, deep: true });
-  assert.equal(workflow.status().model, 'gpt-5-nano');
-  assert.equal(workflow.status().escalation.model, 'gpt-5.4-nano');
-  assert.equal(captured.agent.model, 'gpt-5.4-nano');
+  assert.equal(workflow.status().model, 'gpt-5.4-nano');
+  assert.equal(workflow.status().escalation.model, 'gpt-5.6-luna');
+  assert.equal(captured.agent.model, 'gpt-5.6-luna');
   assert.equal(captured.agent.modelSettings.reasoning.effort, 'medium');
   assert.equal(captured.options.traceIncludeSensitiveData, false);
   assert.doesNotMatch(captured.input, /sk-proj-nie-wolno/);

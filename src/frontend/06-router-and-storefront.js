@@ -412,12 +412,11 @@ function renderuj(){
       else if(t==="/admin/agent-ai"){
         w.innerHTML = widokAdminAgentAI("pulpit");
         if(!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);
-        if(!agentAIPlanStan.history.length&&!agentAIPlanStan.historyLoading) setTimeout(()=>agentAIPobierzHistorieWykonan(true),0);
       }
       else if(t.startsWith("/admin/agent-ai/")){
-        w.innerHTML = widokAdminAgentAI(t.split("/")[3]||"pulpit");
+        const agentSection=t.split("/")[3]||"pulpit";w.innerHTML = widokAdminAgentAI(agentSection);
         if(!stanBramki.sprawdzono) setTimeout(()=>sprawdzBramke(true),0);
-        if(!agentAIPlanStan.history.length&&!agentAIPlanStan.historyLoading) setTimeout(()=>agentAIPobierzHistorieWykonan(true),0);
+        if(agentAISekcjaKanoniczna(agentSection)==="historia"&&!agentAIPlanStan.history.length&&!agentAIPlanStan.historyLoading)setTimeout(()=>agentAIPobierzHistorieWykonan(true),0);
       }
       else if(t==="/admin/seo") w.innerHTML = widokAdminSEO("pulpit");
       else if(t.startsWith("/admin/seo/")) w.innerHTML = widokAdminSEO(t.split("/")[3]||"pulpit");

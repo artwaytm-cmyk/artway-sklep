@@ -44,7 +44,7 @@ const content = [
   '- Dawne identyfikatory `asst_*` są metadanymi zgodności i linkami do starszej powierzchni Assistants. Nie są procesem wykonawczym sklepu.',
   '- Reusable Prompts oraz Agent Builder zostały przez OpenAI oznaczone jako wycofywane i mają zostać zamknięte 30 listopada 2026 r. Nie tworzymy na nich nowych zależności. Obecne identyfikatory `pmpt_*` są tylko przejściową referencją zgodności.',
   '- Kanoniczne role, prompty, narzędzia, bramki zatwierdzeń i miejsca zapisu pozostają w kodzie serwera: są wersjonowane, testowane i nie znikną wraz z wyłączeniem panelu legacy.',
-  '- Wszystkie codzienne zadania używają `gpt-5-nano`. Jedna próba `gpt-5.4-nano` jest dozwolona wyłącznie po niepoprawnym kontrakcie strukturalnym; `gpt-5.4-mini` nie działa automatycznie.',
+  '- Wszystkie podstawowe zadania używają `gpt-5.4-nano`. Jedna próba `gpt-5.6-luna` jest dozwolona wyłącznie po niepoprawnym kontrakcie strukturalnym lub trudnym wyjątku; Luna nie działa automatycznie przy poprawnym wyniku.',
   `- Bezpłatny tryb awaryjny: lokalny \`${policy.localFallback.model}\` przez Ollama, uruchamiany tylko przy braku środków/niedostępności API albo po nieskutecznej walidacji odpowiedzi.`,
   '- Brak AI nigdy nie jest udawanym sukcesem: deterministyczne reguły mogą zachować działanie strony, ale zapis/publikacja wymagają właściwego potwierdzenia backendu.',
   '',

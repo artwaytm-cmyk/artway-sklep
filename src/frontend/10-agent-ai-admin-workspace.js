@@ -67,30 +67,54 @@ function agentAIProductReportWyczysc(){
   agentAIProductReportFilters={channel:"all",status:"all",listing:"all",query:"",page:1,limit:Number(agentAIProductReportFilters?.limit)||50};
   agentAIProductReportPobierz(false);
 }
+function agentAIOperationsUpdateDom(){
+  const targets=document.querySelectorAll("[data-agent-operations-view]");
+  if(!targets.length||typeof agentAIOperationsHTML!=="function")return;
+  targets.forEach(target=>{target.innerHTML=agentAIOperationsHTML(target.dataset.agentOperationsView||"summary");});
+  if(typeof agentAIKontekstAktualizujDom==="function")agentAIKontekstAktualizujDom();
+}
+async function agentAIOperationsPobierz(silent=true){
+  if(agentAIOperations.loading)return agentAIOperations.data;
+  const requestId=Number(agentAIOperations.requestId||0)+1;
+  agentAIOperations={...agentAIOperations,loading:true,error:"",requestId};
+  if(!silent)agentAIOperationsUpdateDom();
+  try{
+    const data=await chmura("agent-operations-summary",{timeout:30000});
+    if(requestId!==agentAIOperations.requestId)return agentAIOperations.data;
+    agentAIOperations={...agentAIOperations,loading:false,loaded:true,error:"",data,updatedAt:Date.now(),requestId};
+  }catch(error){
+    if(requestId!==agentAIOperations.requestId)return agentAIOperations.data;
+    agentAIOperations={...agentAIOperations,loading:false,loaded:true,error:String(error?.message||error),updatedAt:Date.now(),requestId};
+  }
+  agentAIOperationsUpdateDom();
+  return agentAIOperations.data;
+}
 async function agentAIRuntimePobierz(silent=true){
   if(agentAIRuntime.loading)return agentAIRuntime.runtime;
   agentAIRuntime={...agentAIRuntime,loading:true,error:""};
   if(!silent){const box=$("agentAIRuntimePanel");if(box)box.innerHTML=agentAIRuntimePanelHTML();}
   try{
-    const [data,preparation,productReport]=await Promise.all([
+    const route=String(location.hash||""),part=route.split("/")[3]||"pulpit",active=typeof agentAISekcjaKanoniczna==="function"?agentAISekcjaKanoniczna(part):part,includePreparation=active==="praca";
+    const [data,preparation]=await Promise.all([
       chmura("agent-runtime-status",{timeout:20000}),
-      chmura("allegro-preparation-queue-status",{timeout:20000}).catch(()=>({queue:null})),
-      chmura("agent-product-report",{params:agentAIProductReportParams(),timeout:20000}).catch(()=>({report:null}))
+      includePreparation?chmura("allegro-preparation-queue-status",{timeout:20000}).catch(()=>({queue:null})):Promise.resolve({queue:agentAIRuntime.preparationQueue||null})
     ]);
     agentAIRuntime={...agentAIRuntime,loading:false,loaded:true,error:"",runtime:data.runtime||null,preparationQueue:preparation.queue||null,updatedAt:Date.now()};
-    if(productReport.report)agentAIProductReport={...agentAIProductReport,loading:false,loaded:true,error:"",data:productReport.report,updatedAt:Date.now()};
   }catch(error){
     agentAIRuntime={...agentAIRuntime,loading:false,loaded:true,error:String(error?.message||error),updatedAt:Date.now()};
   }
   const box=$("agentAIRuntimePanel");
   if(box)box.innerHTML=agentAIRuntimePanelHTML();
   agentAIProductReportUpdateDom();
+  const history=document.querySelector("[data-agent-history-view]");if(history&&typeof agentAIHistoriaScalonaHTML==="function")history.outerHTML=agentAIHistoriaScalonaHTML();
   return agentAIRuntime.runtime;
 }
 function agentAIRuntimePolling(){
   if(agentAIRuntime.pollTimer)clearTimeout(agentAIRuntime.pollTimer);
-  if(!String(location.hash||"").startsWith("#/admin/agent-ai")){agentAIRuntime.pollTimer=null;return;}
-  agentAIRuntime.pollTimer=setTimeout(async()=>{await agentAIRuntimePobierz(true);agentAIRuntimePolling();},10000);
+  const route=String(location.hash||""),part=route.split("/")[3]||"pulpit",active=typeof agentAISekcjaKanoniczna==="function"?agentAISekcjaKanoniczna(part):part;
+  if(!route.startsWith("#/admin/agent-ai")||!["pulpit","praca","produkty","historia"].includes(active)){agentAIRuntime.pollTimer=null;return;}
+  const delay=active==="praca"?10000:active==="produkty"?20000:30000;
+  agentAIRuntime.pollTimer=setTimeout(async()=>{await agentAIRuntimePobierz(true);agentAIRuntimePolling();},delay);
 }
 function agentAIRuntimeCzas(value=""){
   const time=Date.parse(value||"");
@@ -181,9 +205,11 @@ function agentAISpecjalisciAktualizujWidocznePanele(){
   if(specialistsPage){specialistsPage.querySelector(".agent-coordinator-card")?.remove();specialistsPage.querySelector(".agent-specialists-hero")?.insertAdjacentHTML("afterend",agentAICodexKoordynatorHTML(agentAISpecjalisci.data?.lastCycle||{}));const platform=specialistsPage.querySelector(".openai-platform-card");if(platform)platform.outerHTML=agentAIOpenAiPlatformHTML(agentAISpecjalisci.data?.openaiPlatform||{});agentAIKonfiguracjaRolWidok();}
   document.querySelectorAll("[data-product-agent-card]").forEach(card=>{const id=card.dataset.productAgentCard,product=pobierzProduktAdmin(id)||produkty.find(p=>String(p.id)===String(id));if(product)card.outerHTML=agentAIWdrozenieProduktuHTML(product,true);});
   const badge=document.querySelector("[data-agent-live-decision-count]");if(badge)badge.textContent=String(agentAISpecjalisci.data?.decisionStats?.open||0);
+  const decisions=document.querySelector("[data-agent-decisions-view]");if(decisions&&typeof agentAIDecyzjeScaloneHTML==="function")decisions.outerHTML=agentAIDecyzjeScaloneHTML();
+  const history=document.querySelector("[data-agent-history-view]");if(history&&typeof agentAIHistoriaScalonaHTML==="function")history.outerHTML=agentAIHistoriaScalonaHTML();
 }
 function agentAISpecjalisciPolling(){
-  clearTimeout(agentAISpecjalisci.pollTimer);const relevant=location.hash.includes("/admin/agent-ai")||location.hash.includes("/admin/produkty/edytuj/");if(!relevant)return;
+  clearTimeout(agentAISpecjalisci.pollTimer);const route=String(location.hash||""),relevant=route.includes("/admin/agent-ai/obsluga")||route.includes("/admin/agent-ai/zasady")||route.includes("/admin/agent-ai/historia")||route.includes("/admin/agent-ai/specjalisci")||route.includes("/admin/agent-ai/uprawnienia")||route.includes("/admin/agent-ai/pamiec")||route.includes("/admin/produkty/edytuj/");if(!relevant)return;
   agentAISpecjalisci.pollTimer=setTimeout(async()=>{await agentAISpecjalisciPobierz(true);agentAISpecjalisciPolling();},60000);
 }
 async function agentAISpecjalistaWykonaj(specialist,context={},instruction="",target={},options={}){
@@ -263,7 +289,7 @@ async function agentAIOpenAiBatchEval(){
 function agentAIOpenAiPlatformHTML(platform={}){
   const capabilities=Array.isArray(platform.capabilities)?platform.capabilities:[],batches=Array.isArray(platform.batches)?platform.batches:[],last=batches[0]||{},score=last.score||{},active=["validating","in_progress","finalizing"].includes(last.status);
   const icons={responses:"💬",ui:"▣",agents:"⌘",realtime:"◖",audio:"🎤",images:"🖼️",logs:"↗",batches:"{ }",evals:"✓",fineTuning:"⚗️",modelUpgrade:"↑",optimization:"◒",migration:"⇄",usage:"↗",apiKey:"🔑"};
-  return `<section class="panel openai-platform-card"><div class="order-section-head"><div><span class="order-pro-label">Jeden obecny klucz • jawna mapa możliwości Platformy</span><h2>OpenAI Platform w sklepie</h2><p class="order-detail-lead">Rutynowe zadania wykonuje GPT-5.4 nano, pełne redakcje GPT-5.4 mini, a zwykły GPT-5.4 uruchamia się wyłącznie przy jawnej eskalacji. GPT-5.5 pozostaje dostępny na koncie, lecz nie pracuje automatycznie, ponieważ kosztuje więcej bez potrzeby dla tych precyzyjnych scenariuszy.</p></div><div class="diag-actions"><button class="btn" onclick="agentAIOpenAiPlatformOdswiez()">↻ Sprawdź Platformę</button><button class="btn ghost" onclick="agentAIOpenAiBatchEval()" ${active?"disabled":""}>${active?"⏳ Batch w toku":"✓ Uruchom test Batch"}</button></div></div><div class="openai-capability-grid">${capabilities.map(item=>`<article class="${esc(item.state||"unknown")}"><span>${icons[item.id]||"✦"}</span><div><b>${esc(item.label)}</b><small>${esc(item.detail)}</small></div><em>${item.state==="active"?"aktywne":item.state==="available"?"dostępne / celowo niewłączone":"sprawdź"}</em></article>`).join("")||`<div class="agent-ops-empty">Status możliwości pojawi się po połączeniu z serwerem.</div>`}</div><footer class="openai-platform-footer"><span><b>Ostatni Batch:</b> ${last.id?`${esc(last.status)} • ${esc(last.cases||0)} przypadki${score.total?` • wynik ${esc(score.passed)}/${esc(score.total)}`:""}`:"oczekuje na pierwszy cykl"}</span><nav><a href="https://platform.openai.com/logs" target="_blank" rel="noopener">Dzienniki i trace ↗</a><a href="https://platform.openai.com/usage" target="_blank" rel="noopener">Stosowanie ↗</a><a href="https://platform.openai.com/evaluations" target="_blank" rel="noopener">Ewaluacje ↗</a></nav></footer></section>`;
+  return `<section class="panel openai-platform-card"><div class="order-section-head"><div><span class="order-pro-label">Jeden obecny klucz • jawna mapa możliwości Platformy</span><h2>OpenAI Platform w sklepie</h2><p class="order-detail-lead">Wszystkie rutynowe zadania i pełne redakcje wykonuje ekonomiczny GPT-5.4 nano. GPT-5.6 Luna może wykonać tylko jedną kontrolowaną próbę awaryjną, gdy podstawowy model zwróci niepoprawny wynik strukturalny albo trudny wyjątek.</p></div><div class="diag-actions"><button class="btn" onclick="agentAIOpenAiPlatformOdswiez()">↻ Sprawdź Platformę</button><button class="btn ghost" onclick="agentAIOpenAiBatchEval()" ${active?"disabled":""}>${active?"⏳ Batch w toku":"✓ Uruchom test Batch"}</button></div></div><div class="openai-capability-grid">${capabilities.map(item=>`<article class="${esc(item.state||"unknown")}"><span>${icons[item.id]||"✦"}</span><div><b>${esc(item.label)}</b><small>${esc(item.detail)}</small></div><em>${item.state==="active"?"aktywne":item.state==="available"?"dostępne / celowo niewłączone":"sprawdź"}</em></article>`).join("")||`<div class="agent-ops-empty">Status możliwości pojawi się po połączeniu z serwerem.</div>`}</div><footer class="openai-platform-footer"><span><b>Ostatni Batch:</b> ${last.id?`${esc(last.status)} • ${esc(last.cases||0)} przypadki${score.total?` • wynik ${esc(score.passed)}/${esc(score.total)}`:""}`:"oczekuje na pierwszy cykl"}</span><nav><a href="https://platform.openai.com/logs" target="_blank" rel="noopener">Dzienniki i trace ↗</a><a href="https://platform.openai.com/usage" target="_blank" rel="noopener">Stosowanie ↗</a><a href="https://platform.openai.com/evaluations" target="_blank" rel="noopener">Ewaluacje ↗</a></nav></footer></section>`;
 }
 function agentAICodexKoordynatorHTML(last={}){
   const plan=last?.coordinatorPlan||{},assignments=Array.isArray(plan.assignments)?plan.assignments:[];
@@ -288,7 +314,7 @@ function agentAIKonfiguracjaRolWidok(){
     const firstStats=page.querySelector(".orders-stat-grid");
     const models=Array.isArray(usage.usageByModel)?usage.usageByModel:[];
     const cacheRate=Number(usage.inputTokens)>0?Math.round(Number(usage.cachedTokens||0)/Number(usage.inputTokens)*100):0;
-    firstStats?.insertAdjacentHTML("afterend",`<section class="panel agent-token-economy"><div class="order-section-head"><div><span class="order-pro-label">Ekonomiczny routing • dane z dzisiejszych wywołań</span><h2>🪙 Zużycie modeli i cache</h2><p class="order-detail-lead">GPT-5.4 nano wykonuje zadania proste i masowe, GPT-5.4 mini pełne redakcje, a zwykły GPT-5.4 jest zarezerwowany dla eskalacji. Długi playbook jest stałym prefiksem cache; dane produktu są wysyłane na końcu.</p></div><strong>≈ ${esc(Number(usage.estimatedUsd||0).toFixed(2))} USD<small>szacunek wg cennika ${esc(usage.pricingSnapshot?.date||"—")}</small></strong></div><div class="agent-token-models">${models.map(item=>`<article><b>${esc(item.model)}</b><span>${esc(item.runs)} uruchomień</span><small>wejście ${Number(item.inputTokens||0).toLocaleString("pl-PL")} • wynik ${Number(item.outputTokens||0).toLocaleString("pl-PL")} • cache ${Number(item.cachedTokens||0).toLocaleString("pl-PL")}</small><em>≈ ${esc(Number(item.estimatedUsd||0).toFixed(2))} USD</em></article>`).join("")||`<div class="agent-ops-empty">Pomiar pojawi się po pierwszym wywołaniu nowej wersji.</div>`}</div><footer><span>Cache odczyt: <b>${esc(cacheRate)}%</b></span><span>Automatyka wejście: <b>${Number(usage.automaticInputTokens||0).toLocaleString("pl-PL")} / ${Number(usage.automaticInputTokenLimit||cfg.automaticInputTokenLimit||0).toLocaleString("pl-PL")}</b></span><span>Automatyka wynik: <b>${Number(usage.automaticOutputTokens||0).toLocaleString("pl-PL")} / ${Number(usage.automaticOutputTokenLimit||cfg.automaticOutputTokenLimit||0).toLocaleString("pl-PL")}</b></span></footer></section>`);
+    firstStats?.insertAdjacentHTML("afterend",`<section class="panel agent-token-economy"><div class="order-section-head"><div><span class="order-pro-label">Kontrolowany routing • dane z dzisiejszych wywołań</span><h2>🪙 Zużycie modeli i cache</h2><p class="order-detail-lead">GPT-5.4 nano jest modelem podstawowym. GPT-5.6 Luna uruchamia się najwyżej raz jako kontrola jakości po niepoprawnym wyniku lub trudnym wyjątku. Długi playbook pozostaje prefiksem cache.</p></div><strong>≈ ${esc(Number(usage.estimatedUsd||0).toFixed(2))} USD<small>szacunek wg cennika ${esc(usage.pricingSnapshot?.date||"—")}</small></strong></div><div class="agent-token-models">${models.map(item=>`<article><b>${esc(item.model)}</b><span>${esc(item.runs)} uruchomień</span><small>wejście ${Number(item.inputTokens||0).toLocaleString("pl-PL")} • wynik ${Number(item.outputTokens||0).toLocaleString("pl-PL")} • cache ${Number(item.cachedTokens||0).toLocaleString("pl-PL")}</small><em>≈ ${esc(Number(item.estimatedUsd||0).toFixed(2))} USD</em></article>`).join("")||`<div class="agent-ops-empty">Pomiar pojawi się po pierwszym wywołaniu nowej wersji.</div>`}</div><footer><span>Cache odczyt: <b>${esc(cacheRate)}%</b></span><span>Automatyka wejście: <b>${Number(usage.automaticInputTokens||0).toLocaleString("pl-PL")} / ${Number(usage.automaticInputTokenLimit||cfg.automaticInputTokenLimit||0).toLocaleString("pl-PL")}</b></span><span>Automatyka wynik: <b>${Number(usage.automaticOutputTokens||0).toLocaleString("pl-PL")} / ${Number(usage.automaticOutputTokenLimit||cfg.automaticOutputTokenLimit||0).toLocaleString("pl-PL")}</b></span></footer></section>`);
   }
   const settings=page.querySelector(".agent-specialist-settings>div:last-child");
   if(settings&&!settings.querySelector('[name="automaticInputTokenLimit"]')){

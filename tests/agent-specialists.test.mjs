@@ -266,7 +266,7 @@ test('produkcyjny specjalista wywołuje opublikowaną wersję promptu OpenAI Pla
   assert.equal(run.platformAgent.fallback, false);
 });
 
-test('GPT-5 nano cacheuje długi stały playbook, ogranicza wynik i zapisuje odczyt cache', async () => {
+test('GPT-5.4 nano cacheuje długi stały playbook, ogranicza wynik i zapisuje odczyt cache', async () => {
   const repo = memoryRepository(); let requestBody;
   const service = createAgentSpecialists({
     ...repo, apiKey: 'real-key', now: () => new Date('2026-07-26T08:00:00.000Z'),
@@ -279,7 +279,7 @@ test('GPT-5 nano cacheuje długi stały playbook, ogranicza wynik i zapisuje odc
     },
   });
   const run = await service.run({ specialist: 'customer_reply', instruction: 'Przygotuj odpowiedź', context: { thread: 'Pytanie o przesyłkę.' } });
-  assert.equal(requestBody.model, 'gpt-5-nano');
+  assert.equal(requestBody.model, 'gpt-5.4-nano');
   assert.equal(requestBody.max_output_tokens, 1200);
   assert.equal(requestBody.prompt_cache_key, undefined);
   assert.equal(requestBody.prompt_cache_options, undefined);

@@ -1616,30 +1616,54 @@ function agentAIProductReportWyczysc(){
   agentAIProductReportFilters={channel:"all",status:"all",listing:"all",query:"",page:1,limit:Number(agentAIProductReportFilters?.limit)||50};
   agentAIProductReportPobierz(false);
 }
+function agentAIOperationsUpdateDom(){
+  const targets=document.querySelectorAll("[data-agent-operations-view]");
+  if(!targets.length||typeof agentAIOperationsHTML!=="function")return;
+  targets.forEach(target=>{target.innerHTML=agentAIOperationsHTML(target.dataset.agentOperationsView||"summary");});
+  if(typeof agentAIKontekstAktualizujDom==="function")agentAIKontekstAktualizujDom();
+}
+async function agentAIOperationsPobierz(silent=true){
+  if(agentAIOperations.loading)return agentAIOperations.data;
+  const requestId=Number(agentAIOperations.requestId||0)+1;
+  agentAIOperations={...agentAIOperations,loading:true,error:"",requestId};
+  if(!silent)agentAIOperationsUpdateDom();
+  try{
+    const data=await chmura("agent-operations-summary",{timeout:30000});
+    if(requestId!==agentAIOperations.requestId)return agentAIOperations.data;
+    agentAIOperations={...agentAIOperations,loading:false,loaded:true,error:"",data,updatedAt:Date.now(),requestId};
+  }catch(error){
+    if(requestId!==agentAIOperations.requestId)return agentAIOperations.data;
+    agentAIOperations={...agentAIOperations,loading:false,loaded:true,error:String(error?.message||error),updatedAt:Date.now(),requestId};
+  }
+  agentAIOperationsUpdateDom();
+  return agentAIOperations.data;
+}
 async function agentAIRuntimePobierz(silent=true){
   if(agentAIRuntime.loading)return agentAIRuntime.runtime;
   agentAIRuntime={...agentAIRuntime,loading:true,error:""};
   if(!silent){const box=$("agentAIRuntimePanel");if(box)box.innerHTML=agentAIRuntimePanelHTML();}
   try{
-    const [data,preparation,productReport]=await Promise.all([
+    const route=String(location.hash||""),part=route.split("/")[3]||"pulpit",active=typeof agentAISekcjaKanoniczna==="function"?agentAISekcjaKanoniczna(part):part,includePreparation=active==="praca";
+    const [data,preparation]=await Promise.all([
       chmura("agent-runtime-status",{timeout:20000}),
-      chmura("allegro-preparation-queue-status",{timeout:20000}).catch(()=>({queue:null})),
-      chmura("agent-product-report",{params:agentAIProductReportParams(),timeout:20000}).catch(()=>({report:null}))
+      includePreparation?chmura("allegro-preparation-queue-status",{timeout:20000}).catch(()=>({queue:null})):Promise.resolve({queue:agentAIRuntime.preparationQueue||null})
     ]);
     agentAIRuntime={...agentAIRuntime,loading:false,loaded:true,error:"",runtime:data.runtime||null,preparationQueue:preparation.queue||null,updatedAt:Date.now()};
-    if(productReport.report)agentAIProductReport={...agentAIProductReport,loading:false,loaded:true,error:"",data:productReport.report,updatedAt:Date.now()};
   }catch(error){
     agentAIRuntime={...agentAIRuntime,loading:false,loaded:true,error:String(error?.message||error),updatedAt:Date.now()};
   }
   const box=$("agentAIRuntimePanel");
   if(box)box.innerHTML=agentAIRuntimePanelHTML();
   agentAIProductReportUpdateDom();
+  const history=document.querySelector("[data-agent-history-view]");if(history&&typeof agentAIHistoriaScalonaHTML==="function")history.outerHTML=agentAIHistoriaScalonaHTML();
   return agentAIRuntime.runtime;
 }
 function agentAIRuntimePolling(){
   if(agentAIRuntime.pollTimer)clearTimeout(agentAIRuntime.pollTimer);
-  if(!String(location.hash||"").startsWith("#/admin/agent-ai")){agentAIRuntime.pollTimer=null;return;}
-  agentAIRuntime.pollTimer=setTimeout(async()=>{await agentAIRuntimePobierz(true);agentAIRuntimePolling();},10000);
+  const route=String(location.hash||""),part=route.split("/")[3]||"pulpit",active=typeof agentAISekcjaKanoniczna==="function"?agentAISekcjaKanoniczna(part):part;
+  if(!route.startsWith("#/admin/agent-ai")||!["pulpit","praca","produkty","historia"].includes(active)){agentAIRuntime.pollTimer=null;return;}
+  const delay=active==="praca"?10000:active==="produkty"?20000:30000;
+  agentAIRuntime.pollTimer=setTimeout(async()=>{await agentAIRuntimePobierz(true);agentAIRuntimePolling();},delay);
 }
 function agentAIRuntimeCzas(value=""){
   const time=Date.parse(value||"");
@@ -1730,9 +1754,11 @@ function agentAISpecjalisciAktualizujWidocznePanele(){
   if(specialistsPage){specialistsPage.querySelector(".agent-coordinator-card")?.remove();specialistsPage.querySelector(".agent-specialists-hero")?.insertAdjacentHTML("afterend",agentAICodexKoordynatorHTML(agentAISpecjalisci.data?.lastCycle||{}));const platform=specialistsPage.querySelector(".openai-platform-card");if(platform)platform.outerHTML=agentAIOpenAiPlatformHTML(agentAISpecjalisci.data?.openaiPlatform||{});agentAIKonfiguracjaRolWidok();}
   document.querySelectorAll("[data-product-agent-card]").forEach(card=>{const id=card.dataset.productAgentCard,product=pobierzProduktAdmin(id)||produkty.find(p=>String(p.id)===String(id));if(product)card.outerHTML=agentAIWdrozenieProduktuHTML(product,true);});
   const badge=document.querySelector("[data-agent-live-decision-count]");if(badge)badge.textContent=String(agentAISpecjalisci.data?.decisionStats?.open||0);
+  const decisions=document.querySelector("[data-agent-decisions-view]");if(decisions&&typeof agentAIDecyzjeScaloneHTML==="function")decisions.outerHTML=agentAIDecyzjeScaloneHTML();
+  const history=document.querySelector("[data-agent-history-view]");if(history&&typeof agentAIHistoriaScalonaHTML==="function")history.outerHTML=agentAIHistoriaScalonaHTML();
 }
 function agentAISpecjalisciPolling(){
-  clearTimeout(agentAISpecjalisci.pollTimer);const relevant=location.hash.includes("/admin/agent-ai")||location.hash.includes("/admin/produkty/edytuj/");if(!relevant)return;
+  clearTimeout(agentAISpecjalisci.pollTimer);const route=String(location.hash||""),relevant=route.includes("/admin/agent-ai/obsluga")||route.includes("/admin/agent-ai/zasady")||route.includes("/admin/agent-ai/historia")||route.includes("/admin/agent-ai/specjalisci")||route.includes("/admin/agent-ai/uprawnienia")||route.includes("/admin/agent-ai/pamiec")||route.includes("/admin/produkty/edytuj/");if(!relevant)return;
   agentAISpecjalisci.pollTimer=setTimeout(async()=>{await agentAISpecjalisciPobierz(true);agentAISpecjalisciPolling();},60000);
 }
 async function agentAISpecjalistaWykonaj(specialist,context={},instruction="",target={},options={}){
@@ -1812,7 +1838,7 @@ async function agentAIOpenAiBatchEval(){
 function agentAIOpenAiPlatformHTML(platform={}){
   const capabilities=Array.isArray(platform.capabilities)?platform.capabilities:[],batches=Array.isArray(platform.batches)?platform.batches:[],last=batches[0]||{},score=last.score||{},active=["validating","in_progress","finalizing"].includes(last.status);
   const icons={responses:"💬",ui:"▣",agents:"⌘",realtime:"◖",audio:"🎤",images:"🖼️",logs:"↗",batches:"{ }",evals:"✓",fineTuning:"⚗️",modelUpgrade:"↑",optimization:"◒",migration:"⇄",usage:"↗",apiKey:"🔑"};
-  return `<section class="panel openai-platform-card"><div class="order-section-head"><div><span class="order-pro-label">Jeden obecny klucz • jawna mapa możliwości Platformy</span><h2>OpenAI Platform w sklepie</h2><p class="order-detail-lead">Rutynowe zadania wykonuje GPT-5.4 nano, pełne redakcje GPT-5.4 mini, a zwykły GPT-5.4 uruchamia się wyłącznie przy jawnej eskalacji. GPT-5.5 pozostaje dostępny na koncie, lecz nie pracuje automatycznie, ponieważ kosztuje więcej bez potrzeby dla tych precyzyjnych scenariuszy.</p></div><div class="diag-actions"><button class="btn" onclick="agentAIOpenAiPlatformOdswiez()">↻ Sprawdź Platformę</button><button class="btn ghost" onclick="agentAIOpenAiBatchEval()" ${active?"disabled":""}>${active?"⏳ Batch w toku":"✓ Uruchom test Batch"}</button></div></div><div class="openai-capability-grid">${capabilities.map(item=>`<article class="${esc(item.state||"unknown")}"><span>${icons[item.id]||"✦"}</span><div><b>${esc(item.label)}</b><small>${esc(item.detail)}</small></div><em>${item.state==="active"?"aktywne":item.state==="available"?"dostępne / celowo niewłączone":"sprawdź"}</em></article>`).join("")||`<div class="agent-ops-empty">Status możliwości pojawi się po połączeniu z serwerem.</div>`}</div><footer class="openai-platform-footer"><span><b>Ostatni Batch:</b> ${last.id?`${esc(last.status)} • ${esc(last.cases||0)} przypadki${score.total?` • wynik ${esc(score.passed)}/${esc(score.total)}`:""}`:"oczekuje na pierwszy cykl"}</span><nav><a href="https://platform.openai.com/logs" target="_blank" rel="noopener">Dzienniki i trace ↗</a><a href="https://platform.openai.com/usage" target="_blank" rel="noopener">Stosowanie ↗</a><a href="https://platform.openai.com/evaluations" target="_blank" rel="noopener">Ewaluacje ↗</a></nav></footer></section>`;
+  return `<section class="panel openai-platform-card"><div class="order-section-head"><div><span class="order-pro-label">Jeden obecny klucz • jawna mapa możliwości Platformy</span><h2>OpenAI Platform w sklepie</h2><p class="order-detail-lead">Wszystkie rutynowe zadania i pełne redakcje wykonuje ekonomiczny GPT-5.4 nano. GPT-5.6 Luna może wykonać tylko jedną kontrolowaną próbę awaryjną, gdy podstawowy model zwróci niepoprawny wynik strukturalny albo trudny wyjątek.</p></div><div class="diag-actions"><button class="btn" onclick="agentAIOpenAiPlatformOdswiez()">↻ Sprawdź Platformę</button><button class="btn ghost" onclick="agentAIOpenAiBatchEval()" ${active?"disabled":""}>${active?"⏳ Batch w toku":"✓ Uruchom test Batch"}</button></div></div><div class="openai-capability-grid">${capabilities.map(item=>`<article class="${esc(item.state||"unknown")}"><span>${icons[item.id]||"✦"}</span><div><b>${esc(item.label)}</b><small>${esc(item.detail)}</small></div><em>${item.state==="active"?"aktywne":item.state==="available"?"dostępne / celowo niewłączone":"sprawdź"}</em></article>`).join("")||`<div class="agent-ops-empty">Status możliwości pojawi się po połączeniu z serwerem.</div>`}</div><footer class="openai-platform-footer"><span><b>Ostatni Batch:</b> ${last.id?`${esc(last.status)} • ${esc(last.cases||0)} przypadki${score.total?` • wynik ${esc(score.passed)}/${esc(score.total)}`:""}`:"oczekuje na pierwszy cykl"}</span><nav><a href="https://platform.openai.com/logs" target="_blank" rel="noopener">Dzienniki i trace ↗</a><a href="https://platform.openai.com/usage" target="_blank" rel="noopener">Stosowanie ↗</a><a href="https://platform.openai.com/evaluations" target="_blank" rel="noopener">Ewaluacje ↗</a></nav></footer></section>`;
 }
 function agentAICodexKoordynatorHTML(last={}){
   const plan=last?.coordinatorPlan||{},assignments=Array.isArray(plan.assignments)?plan.assignments:[];
@@ -1837,7 +1863,7 @@ function agentAIKonfiguracjaRolWidok(){
     const firstStats=page.querySelector(".orders-stat-grid");
     const models=Array.isArray(usage.usageByModel)?usage.usageByModel:[];
     const cacheRate=Number(usage.inputTokens)>0?Math.round(Number(usage.cachedTokens||0)/Number(usage.inputTokens)*100):0;
-    firstStats?.insertAdjacentHTML("afterend",`<section class="panel agent-token-economy"><div class="order-section-head"><div><span class="order-pro-label">Ekonomiczny routing • dane z dzisiejszych wywołań</span><h2>🪙 Zużycie modeli i cache</h2><p class="order-detail-lead">GPT-5.4 nano wykonuje zadania proste i masowe, GPT-5.4 mini pełne redakcje, a zwykły GPT-5.4 jest zarezerwowany dla eskalacji. Długi playbook jest stałym prefiksem cache; dane produktu są wysyłane na końcu.</p></div><strong>≈ ${esc(Number(usage.estimatedUsd||0).toFixed(2))} USD<small>szacunek wg cennika ${esc(usage.pricingSnapshot?.date||"—")}</small></strong></div><div class="agent-token-models">${models.map(item=>`<article><b>${esc(item.model)}</b><span>${esc(item.runs)} uruchomień</span><small>wejście ${Number(item.inputTokens||0).toLocaleString("pl-PL")} • wynik ${Number(item.outputTokens||0).toLocaleString("pl-PL")} • cache ${Number(item.cachedTokens||0).toLocaleString("pl-PL")}</small><em>≈ ${esc(Number(item.estimatedUsd||0).toFixed(2))} USD</em></article>`).join("")||`<div class="agent-ops-empty">Pomiar pojawi się po pierwszym wywołaniu nowej wersji.</div>`}</div><footer><span>Cache odczyt: <b>${esc(cacheRate)}%</b></span><span>Automatyka wejście: <b>${Number(usage.automaticInputTokens||0).toLocaleString("pl-PL")} / ${Number(usage.automaticInputTokenLimit||cfg.automaticInputTokenLimit||0).toLocaleString("pl-PL")}</b></span><span>Automatyka wynik: <b>${Number(usage.automaticOutputTokens||0).toLocaleString("pl-PL")} / ${Number(usage.automaticOutputTokenLimit||cfg.automaticOutputTokenLimit||0).toLocaleString("pl-PL")}</b></span></footer></section>`);
+    firstStats?.insertAdjacentHTML("afterend",`<section class="panel agent-token-economy"><div class="order-section-head"><div><span class="order-pro-label">Kontrolowany routing • dane z dzisiejszych wywołań</span><h2>🪙 Zużycie modeli i cache</h2><p class="order-detail-lead">GPT-5.4 nano jest modelem podstawowym. GPT-5.6 Luna uruchamia się najwyżej raz jako kontrola jakości po niepoprawnym wyniku lub trudnym wyjątku. Długi playbook pozostaje prefiksem cache.</p></div><strong>≈ ${esc(Number(usage.estimatedUsd||0).toFixed(2))} USD<small>szacunek wg cennika ${esc(usage.pricingSnapshot?.date||"—")}</small></strong></div><div class="agent-token-models">${models.map(item=>`<article><b>${esc(item.model)}</b><span>${esc(item.runs)} uruchomień</span><small>wejście ${Number(item.inputTokens||0).toLocaleString("pl-PL")} • wynik ${Number(item.outputTokens||0).toLocaleString("pl-PL")} • cache ${Number(item.cachedTokens||0).toLocaleString("pl-PL")}</small><em>≈ ${esc(Number(item.estimatedUsd||0).toFixed(2))} USD</em></article>`).join("")||`<div class="agent-ops-empty">Pomiar pojawi się po pierwszym wywołaniu nowej wersji.</div>`}</div><footer><span>Cache odczyt: <b>${esc(cacheRate)}%</b></span><span>Automatyka wejście: <b>${Number(usage.automaticInputTokens||0).toLocaleString("pl-PL")} / ${Number(usage.automaticInputTokenLimit||cfg.automaticInputTokenLimit||0).toLocaleString("pl-PL")}</b></span><span>Automatyka wynik: <b>${Number(usage.automaticOutputTokens||0).toLocaleString("pl-PL")} / ${Number(usage.automaticOutputTokenLimit||cfg.automaticOutputTokenLimit||0).toLocaleString("pl-PL")}</b></span></footer></section>`);
   }
   const settings=page.querySelector(".agent-specialist-settings>div:last-child");
   if(settings&&!settings.querySelector('[name="automaticInputTokenLimit"]')){
@@ -1951,3 +1977,175 @@ function agentAIPulpitObserwowalnoscHTML(score=0){
   <section class="panel agent-decision-preview"><div class="order-section-head"><div><span class="order-pro-label">Twoja kolejka</span><h2>Decyzje administratora</h2></div><a class="btn ghost" href="#/admin/agent-ai/automatyzacje">Wszystkie →</a></div><div>${decisions.slice(0,3).map(item=>`<article><span>${esc(item.icon||"◉")}</span><div><b>${esc(item.title||"Decyzja")}</b><small>${esc(item.recommendation||item.summary||"")}</small></div><a class="btn" href="#/admin/agent-ai/automatyzacje">Zdecyduj</a></article>`).join("")||`<div class="agent-decision-empty"><span>✓</span><div><b>Wszystko zatwierdzone</b><small>Nie ma decyzji oczekujących na Ciebie.</small></div></div>`}</div></section></div>
   <section class="panel agent-activity-compact"><div class="order-section-head"><div><span class="order-pro-label">Ostatnie działania</span><h2>Co Agent rzeczywiście wykonał</h2></div><a class="btn ghost" href="#/admin/agent-ai/audyt">Pełny audyt →</a></div><div>${activity.slice(0,8).map(item=>`<article class="${esc(item.status||"")}"><span>${item.status==="success"?"✓":item.status==="error"?"×":item.status==="warning"?"!":"•"}</span><div><b>${esc(item.title||"Działanie Agenta")}</b><small>${esc(item.detail||item.source||"")}</small></div><time>${esc(agentAIRuntimeCzas(item.at))}</time></article>`).join("")||`<div class="agent-ops-empty">Historia pojawi się po pierwszym rzeczywistym zdarzeniu.</div>`}</div></section>`;
 }
+
+/* ═══════════ AGENT AI — SCALONE PROFESJONALNE CENTRUM ═══════════ */
+const AGENT_AI_SEKCJE_KANONICZNE=Object.freeze({
+  pulpit:"pulpit",centrum:"pulpit",
+  rozmowa:"pulpit",komendy:"pulpit",
+  praca:"praca",status:"praca",runtime:"praca",
+  raport:"produkty",wyniki:"produkty",produkty:"produkty",kanaly:"produkty",producenci:"produkty",
+  zadania:"obsluga",plan:"obsluga",zlecenia:"obsluga",obsluga:"obsluga",jakosc:"obsluga",diagnostyka:"obsluga",
+  automatyzacje:"zasady",specjalisci:"zasady",uprawnienia:"zasady",pamiec:"zasady",zasady:"zasady",
+  audyt:"historia",historia:"historia"
+});
+function agentAISekcjaKanoniczna(value="pulpit"){return AGENT_AI_SEKCJE_KANONICZNE[String(value||"").toLowerCase()]||"pulpit";}
+function agentAIMetrykiScalone(){
+  const operations=agentAIOperations.data||{},priorities=Array.isArray(operations.priorities)?operations.priorities:[],summary=operations.summary||{},runtime=agentAIRuntime.runtime||{},events=runtime.eventQueue||{},queue=runtime.queue||{},report=agentAIProductReport.data?.summary||{},specialistDecisions=(agentAISpecjalisci.data?.decisions||[]).length;
+  return {tasks:priorities.length,bad:priorities.filter(x=>x.severity==="critical").length,warn:priorities.filter(x=>x.severity==="warning").length,decisions:priorities.filter(x=>x.requiresApproval).reduce((sum,x)=>sum+Number(x.count||0),0),messages:Number(summary.communicationWaiting||0),onboarding:Number(report.not_started||0)+Number(report.needs_data||0),docs:Number(summary.supplierOrders||0),queue:Number(events.active||queue.active||0),queued:Number(events.queued||queue.counts?.queued||0),working:Number(events.running||0)+Number(queue.counts?.processing||0)+Number(queue.counts?.delivering||0),readyToList:Number(report.ready_to_list||0),productDecisions:Number(report.decision||0),specialistDecisions,history:Number(runtime.activity?.length||0)+Number(events.recent?.length||0)};
+}
+function agentAIStanSystemuMeta(){
+  const runtime=agentAIRuntime.runtime||{},state=String(runtime.state||(!agentAIRuntime.loaded?"loading":"stale")),map={ready:["online","Agent gotowy","Czeka na rzeczywiste zdarzenie"],online:["online","Agent gotowy","Czeka na rzeczywiste zdarzenie"],working:["working","Agent pracuje",runtime.currentWork?.productName||runtime.worker?.currentTask||"Obsługuje odebrany sygnał"],degraded:["warning","Ograniczone działanie","Jedna integracja wymaga kontroli"],stale:["waiting","Agent w gotowości","Brak pracy oznacza brak nowego sygnału"],offline:["offline","Agent offline","Worker wymaga uruchomienia"],loading:["loading","Sprawdzam stan","Pobieranie sygnału z serwera"]};return map[state]||map.loading;
+}
+function agentAINawigacjaScalonaHTML(active="pulpit"){
+  const m=agentAIMetrykiScalone(),groups=[
+    {label:"Sterowanie",items:[{id:"pulpit",href:"#/admin/agent-ai",icon:"⌂",label:"Centrum"},{id:"praca",href:"#/admin/agent-ai/praca",icon:"◉",label:"Praca na żywo",badge:m.working||m.queued||""}]},
+    {label:"Działanie",items:[{id:"obsluga",href:"#/admin/agent-ai/obsluga",icon:"✓",label:"Obsługa",badge:m.tasks||""},{id:"produkty",href:"#/admin/agent-ai/produkty",icon:"▦",label:"Produkty",badge:m.productDecisions||m.readyToList||""}]},
+    {label:"System",items:[{id:"zasady",href:"#/admin/agent-ai/zasady",icon:"⚙",label:"Zasady",badge:m.specialistDecisions||""},{id:"historia",href:"#/admin/agent-ai/historia",icon:"▤",label:"Historia"}]}
+  ];
+  return `<nav class="panel agent-module-nav" aria-label="Podsekcje Agenta AI"><div class="agent-module-brand"><span>🤖</span><div><small>Centrum wykonawcze</small><b>Agent AI</b></div></div><div class="agent-module-groups">${groups.map(group=>`<section><small>${esc(group.label)}</small><div>${group.items.map(item=>`<a class="${item.id===active?"active":""}" href="${item.href}" ${item.id===active?'aria-current="page"':""}><span>${item.icon}</span><b>${esc(item.label)}</b>${item.badge?`<em>${esc(item.badge)}</em>`:""}</a>`).join("")}</div></section>`).join("")}</div></nav>`;
+}
+agentAISubnavHTML=function(active="pulpit"){return agentAINawigacjaScalonaHTML(agentAISekcjaKanoniczna(active));};
+
+function agentAIKontekstHTML(){
+  const m=agentAIMetrykiScalone(),[state,label,detail]=agentAIStanSystemuMeta(),runtime=agentAIRuntime.runtime||{},events=runtime.eventQueue||{},last=events.recent?.[0],lastAt=last?.completedAt||last?.startedAt||last?.createdAt;
+  return `<section class="agent-context-strip" data-agent-context><span class="agent-context-state ${state}"><i></i><b>${esc(label)}</b><small>${esc(detail)}</small></span><span><small>KOLEJKA ZDARZEŃ</small><b>${m.queue} aktywnych • ${m.queued} oczekuje</b></span><span><small>OBSŁUGA SKLEPU</small><b>${m.tasks} spraw • ${m.decisions} decyzji</b></span><span><small>OSTATNI SYGNAŁ</small><b>${lastAt?esc(agentAIRuntimeCzas(lastAt)):"brak nowego zdarzenia"}</b></span><button class="btn ghost" onclick="Promise.all([agentAIRuntimePobierz(false),agentAIOperationsPobierz(false)])">↻ Odśwież dane</button></section>`;
+}
+function agentAIKontekstAktualizujDom(){const current=document.querySelector("[data-agent-context]");if(current)current.outerHTML=agentAIKontekstHTML();}
+function agentAIPodstronaScalonyNaglowekHTML(active="pulpit"){
+  if(active==="pulpit")return "";const m=agentAIMetrykiScalone(),pages={
+    praca:["◉","Praca Agenta na żywo","Rzeczywisty stan procesu z serwera: aktualnie wykonywane zadanie, kolejne etapy, kolejka, wynik i ewentualny błąd. Gdy Agent czeka, widok mówi o tym wprost.","odświeżanie co 10 s"],
+    obsluga:["✓","Obsługa całego sklepu","Jedna serwerowa kolejka spraw z zamówień, magazynu, wysyłek, komunikacji, faktur, kanałów sprzedaży, integracji i diagnostyki.",`${m.tasks} aktywnych`],
+    produkty:["▦","Produkty i kanały","Jedna praca nad kartoteką produktu: źródła, treść sklepu, Allegro i Von Halsky, z trwałym zapisem i bez ponawiania zakończonych kontroli.","dane z PostgreSQL"],
+    zasady:["⚙","Zasady działania","Role pomocnicze, granice autonomii, potwierdzenia i pamięć procedur w jednym miejscu konfiguracji.",`${m.specialistDecisions} wyjątków`],
+    historia:["▤","Historia i audyt","Rozliczalny rejestr zdarzeń, wykonanych działań, decyzji oraz potwierdzonych zapisów.",`${m.history} zakończonych`]
+  },p=pages[active]||pages.obsluga;
+  return `<section class="panel agent-workspace-header"><div><span>${p[0]}</span><div><small>AGENT AI • ${esc(p[1].toUpperCase())}</small><h1>${esc(p[1])}</h1><p>${esc(p[2])}</p></div></div><strong>${esc(p[3])}</strong></section>`;
+}
+agentAIPodstronaNaglowekHTML=function(active="pulpit"){return agentAIPodstronaScalonyNaglowekHTML(agentAISekcjaKanoniczna(active));};
+
+function agentAIPulpitScalonyHTML(score=0){
+  const m=agentAIMetrykiScalone(),[state,label,detail]=agentAIStanSystemuMeta();
+  return `<section class="panel agent-command-center"><div class="agent-command-center-main"><span class="order-pro-label">JEDEN AGENT CAŁEGO SKLEPU • SYSTEM ZDARZENIOWY</span><h1>🤖 Centrum dowodzenia</h1><p>Codex koordynuje właściwe moduły po nowym zamówieniu, wiadomości, zmianie produktu, zdarzeniu magazynowym, błędzie integracji albo Twoim poleceniu. Każdy wynik musi zostać zapisany i odczytany z serwera.</p><div class="agent-command-center-actions"><a class="btn" href="#/admin/agent-ai/obsluga">✓ Obsługa sklepu</a><a class="btn ghost" href="#/admin/agent-ai/produkty">▦ Produkty</a><a class="btn ghost" href="#/admin/agent-ai/praca">◉ Praca na żywo</a></div></div><aside><div class="health-score">${score}%</div><span class="agent-command-health ${state}"><i></i><b>${esc(label)}</b><small>${esc(detail)}</small></span></aside></section><section class="agent-command-metrics">${[["!",m.tasks,"Sprawy operacyjne",`${m.bad} pilnych • ${m.warn} ostrzeżeń`,`#/admin/agent-ai/obsluga`],["✓",m.decisions,"Decyzje administratora","tylko operacje chronione","#/admin/agent-ai/obsluga"],["⚙",m.queue,"Kolejka zdarzeń",`${m.working} wykonywane • ${m.queued} oczekuje`,`#/admin/agent-ai/praca`],["↗",m.readyToList,"Produkty gotowe","do wystawienia w kanałach","#/admin/agent-ai/produkty"]].map(([icon,value,title,note,href])=>`<a href="${href}"><span>${icon}</span><div><b>${value}</b><strong>${esc(title)}</strong><small>${esc(note)}</small></div><em>→</em></a>`).join("")}</section><section class="agent-home-grid"><div>${agentAIRozmowaScalonaHTML()}</div><section class="panel agent-home-operations"><header><div><span class="order-pro-label">PRIORYTETY Z SERWERA</span><h2>Co wymaga uwagi</h2><p>Bez lokalnych, powielonych liczników.</p></div><button class="btn ghost" onclick="agentAIOperationsPobierz(false)">↻</button></header><div data-agent-operations-view="summary">${agentAIOperationsHTML("summary")}</div></section></section>`;
+}
+function agentAIRozmowaScalonaHTML(){
+  const answers=(agentAIHistoria||[]).filter(h=>h.typ==="komenda"&&h.dane&&h.dane.odpowiedz).slice(0,8);
+  const quick=[["📦","Sprawdź nowe zamówienia","sprawdź czy wpadło nowe zlecenie"],["🏬","Pokaż realne braki","czego brakuje do aktywnych zamówień"],["🚚","Sprawdź wysyłki","sprawdź wysyłki i InPost"],["🏷️","Audyt produktów","audyt produktów i katalogu"],["🏭","Sprawdź producentów","sprawdź dostępność u producentów"],["🔄","Synchronizuj dane","synchronizuj bazę"]];
+  const more=[["Przygotuj zamówienie do producenta","przygotuj zamówienie do producenta"],["Popraw opisy produktów","popraw opisy produktów"],["Pokaż stan magazynu","pokaż stan magazynu"],["Sprawdź integracje","diagnostyka integracji"],["Pokaż pamięć","pokaż pamięć"],["Naucz Agenta","zapamiętaj: "]];
+  return `<section class="panel agent-conversation"><div class="agent-conversation-head"><div><span>🤖</span><div><small>CODEX + GPT‑5.4 NANO + DANE SKLEPU</small><h2>Co mam zrobić?</h2><p>Pisz normalnie po polsku. Agent najpierw sprawdza dane i pokazuje plan; zmiany magazynowe oraz działania zewnętrzne wymagają osobnego potwierdzenia.</p></div></div><span id="agentAICommandCloudState" class="lvl ${chmuraStan.dostepna?"lvl-ok":"lvl-info"}">${chmuraStan.dostepna?`wspólna baza • rewizja ${chmuraStan.rev||0}`:"łączenie z bazą"}</span></div><form class="agent-conversation-form" onsubmit="return agentAIPrzyjmijKomende(event)"><textarea id="agentAICommandInput" rows="4" placeholder="Np. sprawdź nowe zamówienia i przygotuj listę brakujących produktów…"></textarea><div><button class="btn" type="submit">🤖 Przekaż Agentowi</button><button class="btn ghost" type="button" onclick="agentAIWstawKomende('wykonaj bezpieczny plan agenta')">▶ Bezpieczna kontrola</button></div></form><div class="agent-command-presets">${quick.map(([icon,label,command])=>`<button type="button" onclick="agentAIWstawKomende(${jsArg(command)})"><span>${icon}</span><b>${esc(label)}</b></button>`).join("")}</div><details class="agent-more-commands"><summary>Więcej gotowych poleceń</summary><div>${more.map(([label,command])=>`<button class="btn ghost" type="button" onclick="agentAIWstawKomende(${jsArg(command)})">${esc(label)}</button>`).join("")}</div></details><div class="agent-command-safety"><span>🛡️</span><div><b>Bezpieczna zasada wykonania</b><small>Rozmowa nie zmienia stanu sama. Agent tworzy osobną decyzję z lokalizacją, ilością i przyciskami Potwierdzam / Odrzucam.</small></div></div><div id="agentAICommandLiveResult" class="agent-response-card agent-command-live-result" hidden></div><div id="agentInventoryDecisionPanel">${agentAIDecyzjeMagazynowePanelHTML()}</div>${answers.length?`<section class="agent-conversation-history"><div><b>Ostatnie odpowiedzi</b><a href="#/admin/agent-ai/historia">Pełny audyt →</a></div>${answers.map(h=>`<article><header><b>${esc(h.dane.polecenie||"Polecenie")}</b><small>${esc(h.dataTxt||"")}</small></header><pre>${esc(h.dane.odpowiedz||"")}</pre></article>`).join("")}</section>`:`<div class="agent-ops-empty">Nie ma jeszcze odpowiedzi z panelu. Wpisz pierwsze polecenie powyżej.</div>`}</section>`;
+}
+function agentAIOperationAreaMeta(area="system"){
+  const map={zamowienia:["🧾","Zamówienia i klienci"],allegro:["🟠","Allegro"],wysylki:["🚚","Wysyłki"],magazyn:["🏬","Magazyn"],producent:["🏭","Dostępność producentów"],producenci:["🏭","Zaopatrzenie"],produkty:["📦","Produkty"],faktury:["💳","Faktury"],synchronizacja:["↻","Synchronizacja"],system:["🛠","System i diagnostyka"]};
+  return map[String(area||"")]||["•",String(area||"Pozostałe")];
+}
+function agentAIOperationsHTML(mode="summary"){
+  const state=agentAIOperations,data=state.data||{},priorities=Array.isArray(data.priorities)?data.priorities:[];
+  if(state.loading&&!state.loaded)return `<div class="agent-runtime-loading"><i></i><div><b>Pobieram wspólną kolejkę obsługi…</b><small>Zamówienia, magazyn, kanały, wysyłki, faktury i diagnostyka są liczone na serwerze.</small></div></div>`;
+  if(state.error&&!state.loaded)return `<div class="backend-note warn"><b>Nie udało się pobrać kolejki obsługi.</b><p>${esc(state.error)}</p><button class="btn" onclick="agentAIOperationsPobierz(false)">Ponów</button></div>`;
+  const rows=mode==="summary"?priorities.slice(0,6):priorities,integrations=data.integrations||{},summary=data.summary||{};
+  return `<div class="agent-operations-shell ${mode}">${mode==="full"?`<section class="agent-operations-overview"><article><span>!</span><div><b>${esc(priorities.filter(x=>x.severity==="critical").length)}</b><small>pilnych obszarów</small></div></article><article><span>✓</span><div><b>${esc(priorities.filter(x=>x.requiresApproval).reduce((sum,x)=>sum+Number(x.count||0),0))}</b><small>decyzji administratora</small></div></article><article><span>⚙</span><div><b>${esc((data.score??0)+"%")}</b><small>kondycja operacyjna</small></div></article><article><span>↻</span><div><b>${esc(data.generatedAt?agentAIRuntimeCzas(data.generatedAt):"brak")}</b><small>ostatni odczyt serwera</small></div></article></section>`:""}<div class="agent-operations-list">${rows.map(item=>{const [icon,area]=agentAIOperationAreaMeta(item.area),level=item.severity==="critical"?"critical":item.severity==="warning"?"warning":"info";return `<article class="${level}"><span>${icon}</span><div><header><b>${esc(item.title||area)}</b><em>${esc(area)} • ${esc(item.count||0)}</em></header><p>${esc(item.action||"")}</p><small>${item.requiresApproval?"Wymaga decyzji administratora":item.execution==="draft"?"Agent przygotowuje szkic bez publikacji":"Agent może wykonać bezpiecznie"} • odpowiedzialny: ${esc(item.owner||"Agent AI")}</small>${mode==="full"&&item.doneWhen?`<strong>Gotowe, gdy: ${esc(item.doneWhen)}</strong>`:""}</div><a class="btn ${item.requiresApproval?"":"ghost"}" href="${esc(item.href||"#/admin/agent-ai/praca")}">${item.requiresApproval?"Zdecyduj":"Otwórz"}</a></article>`;}).join("")||`<div class="agent-decision-empty"><span>✓</span><div><b>Brak aktywnych spraw</b><small>Nowa pozycja pojawi się dopiero po rzeczywistym zdarzeniu w sklepie.</small></div></div>`}</div>${mode==="summary"&&priorities.length>rows.length?`<a class="agent-operations-more" href="#/admin/agent-ai/obsluga">Pokaż wszystkie ${esc(priorities.length)} spraw →</a>`:""}${mode==="full"?`<section class="agent-integration-strip">${Object.entries(integrations).map(([name,ready])=>`<span class="${ready?"ready":"attention"}"><i>${ready?"✓":"!"}</i><b>${esc(name)}</b><small>${ready?"połączono":"wymaga konfiguracji"}</small></span>`).join("")}</section><small class="agent-operations-summary-note">Aktywne zamówienia: ${esc(summary.activeOrders||0)} • Allegro: ${esc(summary.activeAllegro||0)} • bez numeru nadania: ${esc(summary.shipmentsWithoutTracking||0)} • komunikacja: ${esc(summary.communicationWaiting||0)}</small>`:""}</div>`;
+}
+function agentAIPracaNaZywoHTML(){
+  const runtime=agentAIRuntime.runtime||{},worker=runtime.worker||{},queue=runtime.queue||{},counts=queue.counts||{},current=runtime.currentRun,work=runtime.currentWork;
+  const working=!!(current||work||worker.currentTask||Number(counts.processing||0)+Number(counts.delivering||0));
+  const exact=work?`${work.productName||"Zadanie"}: ${work.action||"operacja"} — ${work.phase||"wykonywanie"} → ${work.target||work.channel||"system"}`:"";
+  return `<section class="agent-live-truth ${working?"is-working":"is-waiting"}"><div><span>${working?"⚙":"✓"}</span><div><small>STAN POTWIERDZONY PRZEZ SERWER</small><b>${working?"Agent wykonuje teraz konkretną czynność":"Agent jest gotowy i obecnie czeka"}</b><p>${esc(exact||current?.summary||worker.currentTask||(agentAIRuntime.loaded?"Nie ma aktywnej czynności. Następna praca rozpocznie się dopiero po nowym zdarzeniu albo poleceniu administratora.":"Łączenie z procesem wykonawczym…"))}</p></div></div><div><span><small>W toku</small><b>${esc((counts.processing||0)+(counts.delivering||0)+(work?1:0))}</b></span><span><small>Publikacje oczekujące</small><b>${esc(runtime.publication?.counts?.pending||0)}</b></span><a class="btn" href="#/admin/agent-ai">Wydaj polecenie</a></div></section><div id="agentAIRuntimePanel">${agentAIRuntimePanelHTML()}</div>`;
+}
+function agentAIProductReportChannel(channel="all"){
+  return {all:"Wszystkie kanały",store:"Sklep",allegro:"Allegro",von_halsky:"Von Halsky"}[channel]||"Wszystkie kanały";
+}
+function agentAIProductReportStatus(status=""){
+  return {working:["W toku","lvl-info"],ready:["Gotowe","lvl-ok"],needs_data:["Do uzupełnienia","lvl-ostrzezenie"],decision:["Decyzja / błąd","lvl-blad"],not_started:["Nie rozpoczęto","lvl-info"]}[status]||["Sprawdzanie","lvl-info"];
+}
+function agentAIProductReportChannelCell(channel={}){
+  const state=channel.ready?"ready":channel.prepared?"attention":"empty",label=channel.ready?"gotowe":channel.prepared?"wymaga uzupełnienia":"nie rozpoczęto";
+  return `<span class="agent-report-channel ${state}"><i>${channel.ready?"✓":channel.prepared?"!":"○"}</i><b>${label}</b><small>${channel.updatedAt?esc(agentAIRuntimeCzas(channel.updatedAt)):"brak zapisu"}</small>${channel.savedFields?.length?`<em>${esc(channel.savedFields.slice(0,3).map(agentAIPolePracyLabel).join(", "))}${channel.savedFields.length>3?` +${channel.savedFields.length-3}`:""}</em>`:""}</span>`;
+}
+function agentAIProductReportHTML(){
+  const state=agentAIProductReport,data=state.data||{},summary=data.summary||{},items=Array.isArray(data.items)?data.items:[],filters=agentAIProductReportFilters||{},pages=Math.max(1,Number(data.pages)||1),page=Math.min(pages,Number(data.page||filters.page)||1);
+  if(state.loading&&!state.loaded)return `<section class="panel agent-report-loading"><div class="agent-runtime-loading"><i></i><div><b>Pobieram raport centralnych kartotek…</b><small>Liczenie odbywa się na serwerze bez ładowania całego katalogu do przeglądarki.</small></div></div></section>`;
+  if(state.error&&!data.available)return `<section class="panel"><div class="backend-note warn"><b>Nie udało się pobrać raportu produktów.</b><p>${esc(state.error)}</p><button class="btn" onclick="agentAIProductReportPobierz(false)">Ponów</button></div></section>`;
+  const progress=(ready,total)=>total?Math.round(Number(ready||0)/Number(total)*100):0;
+  const cards=[
+    ["working","⚙",summary.working||0,"Agent pracuje"],
+    ["decision","!",summary.decision||0,"Decyzje i błędy"],
+    ["ready","✓",summary.full_review_confirmed||0,"Pełna kontrola zakończona"],
+    ["ready_to_list","↗",summary.ready_to_list||0,"Gotowe do wystawienia"],
+    ["needs_update","↻",summary.needs_update||0,"Oferty do aktualizacji"]
+  ];
+  return `<section class="agent-product-report">
+    <section class="agent-report-overview">
+      <article><div><span>🛍</span><b>Sklep</b><small>${esc(summary.store_prepared||0)} opisów zapisanych</small></div><strong>${progress(summary.store_ready,summary.total)}%</strong><progress max="100" value="${progress(summary.store_ready,summary.total)}"></progress></article>
+      <article><div><span>🟠</span><b>Allegro</b><small>${esc(summary.allegro_prepared||0)} produktów przygotowanych</small></div><strong>${progress(summary.allegro_ready,summary.total)}%</strong><progress max="100" value="${progress(summary.allegro_ready,summary.total)}"></progress></article>
+      <article><div><span>📦</span><b>Von Halsky</b><small>${esc(summary.von_prepared||0)} produktów sprawdzonych</small></div><strong>${progress(summary.von_ready,summary.total)}%</strong><progress max="100" value="${progress(summary.von_ready,summary.total)}"></progress></article>
+    </section>
+    <section class="agent-report-counters">${cards.map(([id,icon,count,label])=>`<button type="button" class="${filters.status===id||filters.listing===id?"active":""}" onclick="${["ready_to_list","needs_update"].includes(id)?`agentAIProductReportFiltr('listing','${id}')`:`agentAIProductReportFiltr('status','${id}')`}"><span>${icon}</span><b>${esc(count)}</b><small>${esc(label)}</small></button>`).join("")}</section>
+    <section class="panel agent-report-catalog">
+      <header><div><span class="order-pro-label">TRWAŁY ZAPIS • RAPORT NA ŻYWO</span><h2>Produkty obsłużone przez Agenta</h2><p>Wiersz pojawia się lub zmienia dopiero po rzeczywistym zdarzeniu i zapisie centralnej kartoteki.</p></div><span class="agent-report-live"><i></i> automatyczne odświeżanie co 10 s</span></header>
+      <div class="agent-report-filters">
+        <label class="search-wide">Szukaj<input id="agentAIProductReportSearch" value="${esc(filters.query||"")}" placeholder="Nazwa, EAN, SKU, EXTERNAL_ID lub producent…" oninput="agentAIProductReportSzukaj(this)" autocomplete="off"></label>
+        <label>Kanał<select onchange="agentAIProductReportFiltr('channel',this.value)">${[["all","Wszystkie"],["store","Sklep"],["allegro","Allegro"],["von_halsky","Von Halsky"]].map(([id,label])=>`<option value="${id}" ${filters.channel===id?"selected":""}>${label}</option>`).join("")}</select></label>
+        <label>Stan pracy<select onchange="agentAIProductReportFiltr('status',this.value)">${[["all","Wszystkie"],["working","W toku"],["ready","Gotowe"],["needs_data","Do uzupełnienia"],["decision","Decyzja / błąd"],["not_started","Nie rozpoczęto"]].map(([id,label])=>`<option value="${id}" ${filters.status===id?"selected":""}>${label}</option>`).join("")}</select></label>
+        <label>Publikacja<select onchange="agentAIProductReportFiltr('listing',this.value)">${[["all","Wszystkie"],["ready_to_list","Gotowe do wystawienia"],["needs_update","Do aktualizacji"],["already_listed","Już na Allegro"],["hidden","Ukryte w sprzedaży"]].map(([id,label])=>`<option value="${id}" ${filters.listing===id?"selected":""}>${label}</option>`).join("")}</select></label>
+        <label>Na stronie<select onchange="agentAIProductReportFiltr('limit',this.value)">${[25,50,100,250].map(limit=>`<option value="${limit}" ${Number(filters.limit)===limit?"selected":""}>${limit}</option>`).join("")}</select></label>
+        <button class="btn ghost" onclick="agentAIProductReportWyczysc()">Wyczyść filtry</button>
+      </div>
+      <div class="agent-report-result-meta"><div><b>${esc(data.total||0)} wyników</b><small>${esc(agentAIProductReportChannel(filters.channel))} • aktualizacja ${data.revision?esc(agentAIRuntimeCzas(data.revision)):"brak zmian"}</small></div><button class="btn ghost" onclick="agentAIProductReportPobierz(false)">↻ Odśwież teraz</button></div>
+      <div class="agent-report-table">
+        <div class="agent-report-table-head"><span>Produkt</span><span>Sklep</span><span>Allegro</span><span>Von Halsky</span><span>Wynik i działanie</span></div>
+        ${items.map(item=>{const status=agentAIProductReportStatus(item.status),missing=item.task?.missing||[],review=item.fullReview||{},reviewDue=review.verificationDueAt?new Date(review.verificationDueAt).toLocaleDateString("pl-PL"):"";return `<article class="status-${esc(item.status)}">
+          <div class="agent-report-product">${item.image?`<img src="${esc(item.image)}" alt="" loading="lazy">`:`<span>📦</span>`}<div><b>${esc(item.name||`Produkt ${item.productId}`)}</b><small>ID ${esc(item.productId)} • EAN ${esc(item.ean||"—")}</small><em>${esc(item.producer||"producent nieustalony")}</em></div></div>
+          ${agentAIProductReportChannelCell(item.store)}${agentAIProductReportChannelCell(item.allegro)}${agentAIProductReportChannelCell(item.vonHalsky)}
+          <div class="agent-report-result"><span class="lvl ${status[1]}">${esc(status[0])}</span>${review.current?`<b>✓ Pełna kontrola zapisana</b><small>Nie wymaga natychmiastowej weryfikacji${reviewDue?` • następna po ${esc(reviewDue)}`:""}</small>`:item.allegro?.readyToList?`<b>Gotowy do wystawienia na Allegro</b>`:item.allegro?.needsUpdate?`<b>Oferta wymaga aktualizacji</b>`:""}${missing.length&&!review.current?`<small>Braki: ${esc(missing.slice(0,4).join(", "))}</small>`:!review.current?`<small>Ostatni zapis ${esc(agentAIRuntimeCzas(item.updatedAt))}</small>`:""}<div><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(item.productId)}">Edytuj</a>${item.allegro?.readyToList?`<a class="btn" href="#/admin/allegro/oferty">Wystaw</a>`:""}</div></div>
+        </article>`;}).join("")||`<div class="agent-ops-empty"><span>✓</span><b>Brak produktów dla wybranych filtrów</b><small>Widok odświeży się automatycznie, gdy wpłynie nowe zdarzenie.</small></div>`}
+      </div>
+      ${pages>1?`<nav class="agent-report-pagination"><button class="btn ghost" onclick="agentAIProductReportFiltr('page',${page-1})" ${page<=1?"disabled":""}>← Poprzednia</button><span>Strona <b>${page}</b> z <b>${pages}</b></span><button class="btn ghost" onclick="agentAIProductReportFiltr('page',${page+1})" ${page>=pages?"disabled":""}>Następna →</button></nav>`:""}
+    </section>
+  </section>`;
+}
+function agentAIProductReportPageHTML(){return `<div id="agentAIProductReportPanel">${agentAIProductReportHTML()}</div>`;}
+function agentAIObszarHTML(id,title,description,content,open=false,badge=""){
+  return `<details class="agent-workspace-fold" id="${esc(id)}" ${open?"open":""}><summary><span><b>${esc(title)}</b><small>${esc(description)}</small></span>${badge?`<em>${esc(badge)}</em>`:""}<i>⌄</i></summary><div>${content}</div></details>`;
+}
+function agentAIOtworzObszar(id){
+  const area=document.getElementById(String(id||""));if(!area)return;area.open=true;area.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function agentAIObslugaScalonaHTML(){
+  const m=agentAIMetrykiScalone();
+  return `<section class="panel agent-operations-board"><header><div><span class="order-pro-label">JEDNO ŹRÓDŁO • SERWER</span><h2>Sprawy całego sklepu</h2><p>Każda pozycja ma właściciela, sposób wykonania i warunek zakończenia. Znika automatycznie po usunięciu rzeczywistej przyczyny.</p></div><button class="btn ghost" onclick="agentAIOperationsPobierz(false)">↻ Odśwież</button></header><div data-agent-operations-view="full">${agentAIOperationsHTML("full")}</div></section>${agentAIObszarHTML("agent-work-decisions","Decyzje administratora","Tylko działania chronione: zmiana stanu, publikacja, wysyłka, faktura albo inna operacja zewnętrzna.",agentAIDecyzjeScaloneHTML(),true,`${m.decisions} otwartych`)}`;
+}
+function agentAIDecyzjeScaloneHTML(){
+  const items=Array.isArray(agentAISpecjalisci.data?.decisions)?agentAISpecjalisci.data.decisions:[];
+  return `<section data-agent-decisions-view class="agent-unified-decisions"><div class="agent-decision-list">${items.map(agentAISpecjalistaDecyzjaHTML).join("")||`<div class="agent-decision-empty"><span>✓</span><div><b>Nie czeka żadna chroniona decyzja</b><small>Nowa karta pojawi się dopiero po rzeczywistym zdarzeniu wymagającym administratora.</small></div></div>`}</div>${agentAIDecyzjeMagazynowePanelHTML()}</section>`;
+}
+function agentAIProduktyScaloneHTML(requested="produkty"){
+  const report=agentAIProductReportPageHTML(),sources=requested==="producenci"?`${agentAILinkiProducentowPanelHTML()}${producenciKartotekaPanelHTML()}`:"";
+  return `${report}<section class="agent-product-tools"><a href="#/admin/produkty/dodaj"><span>＋</span><div><b>Dodaj produkt</b><small>ręcznie albo z jednego linku</small></div></a><a href="#/admin/produkty/z-pliku"><span>⇧</span><div><b>Import linków</b><small>kolejka źródeł bez duplikatów</small></div></a><a href="#/admin/asortyment/jakosc"><span>✓</span><div><b>Jakość katalogu</b><small>duplikaty i brakujące fakty</small></div></a><button type="button" onclick="location.hash='#/admin/agent-ai/producenci'"><span>🏭</span><div><b>Źródła i producenci</b><small>kontakty oraz linki pomocnicze</small></div></button></section>${sources?`<section class="agent-product-sources">${sources}</section>`:""}`;
+}
+function agentAIZasadyScaloneHTML(requested="zasady"){
+  const decisions=(agentAISpecjalisci.data?.decisions||[]).length,memory=(agentAIPamiec||[]).length;
+  return `<section class="agent-automation-overview"><article><span>✦</span><div><b>GPT‑5.4 nano + GPT‑5.6 Luna</b><small>GPT‑5.4 nano obsługuje pracę podstawową, Luna tylko kontrolowaną eskalację jakości.</small></div><em>${decisions} wyjątków</em></article><article><span>🛡️</span><div><b>Granice autonomii</b><small>Wyraźny podział: wykonaj, przygotuj albo zapytaj administratora.</small></div><em>ochrona aktywna</em></article><article><span>🧠</span><div><b>Pamięć procedur</b><small>Reguły wspólne dla wszystkich urządzeń administratorów.</small></div><em>${memory} reguł</em></article></section>${agentAIObszarHTML("agent-auto-permissions","Uprawnienia i potwierdzenia","Najpierw jedno źródło zasad określających, co Agent może wykonać sam.",agentAIUprawnieniaPanelHTML(),requested==="uprawnienia"||requested==="zasady","chronione")}${agentAIObszarHTML("agent-auto-specialists","Role pomocnicze i modele","Codex wybiera właściwą rolę; model pomocniczy nie otrzymuje prawa bezpośredniego zapisu.",agentAISpecjalisciPanelHTML(),requested==="specjalisci",`${decisions} wyjątków`)}${agentAIObszarHTML("agent-auto-memory","Pamięć i procedury","Trwałe reguły pracy używane przy kolejnych zdarzeniach.",agentAIPamiecPanelHTML(),requested==="pamiec",`${memory} reguł`)}`;
+}
+function agentAIHistoriaScalonaHTML(){
+  const runtime=agentAIRuntime.runtime||{},events=runtime.eventQueue||{},activity=Array.isArray(runtime.activity)?runtime.activity:[],recentEvents=Array.isArray(events.recent)?events.recent:[],runs=Array.isArray(agentAIPlanStan.history)?agentAIPlanStan.history:[],decisions=Array.isArray(agentAISpecjalisci.data?.recentDecisions)?agentAISpecjalisci.data.recentDecisions:[];
+  const rows=[...activity.map(item=>({at:item.at,title:item.productName||item.title||"Działanie Agenta",detail:item.detail||item.source||"",status:item.status||"info",source:"Agent"})),...recentEvents.map(item=>({at:item.completedAt||item.startedAt||item.createdAt,title:item.payload?.action||item.type||"Zdarzenie",detail:`${item.area||"system"} • ${item.entityId||"bez identyfikatora"}`,status:item.status||"info",source:"Kolejka zdarzeń"}))].sort((a,b)=>String(b.at||"").localeCompare(String(a.at||""))).slice(0,100);
+  return `<section data-agent-history-view class="agent-history-unified"><section class="agent-history-metrics"><article><span>✓</span><div><b>${rows.filter(item=>["success","completed","confirmed"].includes(item.status)).length}</b><small>potwierdzonych wykonań</small></div></article><article><span>◉</span><div><b>${recentEvents.length}</b><small>sygnałów serwera</small></div></article><article><span>🛡</span><div><b>${decisions.length}</b><small>rozstrzygniętych decyzji</small></div></article><article><span>⌘</span><div><b>${runs.length}</b><small>audytów wykonawczych</small></div></article></section><section class="panel agent-history-stream"><header><div><span class="order-pro-label">POSTGRESQL • DZIENNIK SERWERA</span><h2>Historia wykonanych działań</h2><p>Bez lokalnego archiwum i bez ręcznie zamykanych pozorowanych zadań.</p></div><button class="btn ghost" onclick="Promise.all([agentAIRuntimePobierz(false),agentAISpecjalisciPobierz(true),agentAIPobierzHistorieWykonan(true)])">↻ Odśwież</button></header><div>${rows.map(item=>`<article class="${esc(item.status)}"><span>${["success","completed","confirmed"].includes(item.status)?"✓":item.status==="error"||item.status==="failed"?"×":"•"}</span><div><b>${esc(item.title)}</b><small>${esc(item.detail)}</small></div><em>${esc(item.source)}<time>${esc(agentAIRuntimeCzas(item.at))}</time></em></article>`).join("")||`<div class="agent-ops-empty">Brak zapisanych działań serwera.</div>`}</div></section></section>`;
+}
+function agentAIScalonaTrescSekcji(active,analysis,requested,score){
+  if(active==="praca")return agentAIPracaNaZywoHTML();
+  if(active==="obsluga")return agentAIObslugaScalonaHTML();
+  if(active==="produkty")return agentAIProduktyScaloneHTML(requested);
+  if(active==="zasady")return agentAIZasadyScaloneHTML(requested);
+  if(active==="historia")return agentAIHistoriaScalonaHTML();
+  return agentAIPulpitScalonyHTML(score);
+}
+widokAdminAgentAI=function(section="pulpit"){
+  const requested=String(section||"pulpit").toLowerCase(),active=agentAISekcjaKanoniczna(requested),score=Math.max(0,Math.min(100,Number(agentAIOperations.data?.score??0))),runtimeAge=Date.now()-Number(agentAIRuntime.updatedAt||0),operationsAge=Date.now()-Number(agentAIOperations.updatedAt||0);
+  if((!agentAIRuntime.loaded||runtimeAge>60_000)&&!agentAIRuntime.loading)setTimeout(()=>agentAIRuntimePobierz(true),0);
+  if(["pulpit","praca","produkty","historia"].includes(active))setTimeout(()=>agentAIRuntimePolling(),0);
+  if(["pulpit","obsluga"].includes(active)&&(!agentAIOperations.loaded||operationsAge>30_000)&&!agentAIOperations.loading)setTimeout(()=>agentAIOperationsPobierz(true),0);
+  if(active==="produkty"&&(!agentAIProductReport.loaded||Date.now()-Number(agentAIProductReport.updatedAt||0)>30_000)&&!agentAIProductReport.loading)setTimeout(()=>agentAIProductReportPobierz(true),0);
+  if(["obsluga","zasady","historia"].includes(active)&&!agentAISpecjalisci.loaded&&!agentAISpecjalisci.loading)setTimeout(()=>agentAISpecjalisciPobierz(false),0);
+  if(["obsluga","zasady","historia"].includes(active))setTimeout(()=>agentAISpecjalisciPolling(),0);
+  const decisionAge=Date.now()-(Date.parse(agentAIDecyzjeMagazynowe.updatedAt)||0);if(["pulpit","obsluga"].includes(active)&&(!agentAIDecyzjeMagazynowe.loaded||decisionAge>60_000)&&!agentAIDecyzjeMagazynowe.loading)setTimeout(()=>agentAIDecyzjeMagazynowePobierz(true),0);
+  return adminSzkielet("/admin/agent-ai",`${agentAINawigacjaScalonaHTML(active)}${agentAIKontekstHTML()}${agentAIPodstronaScalonyNaglowekHTML(active)}<main class="agent-workspace agent-workspace-${active}">${agentAIScalonaTrescSekcji(active,null,requested,score)}</main>`);
+};

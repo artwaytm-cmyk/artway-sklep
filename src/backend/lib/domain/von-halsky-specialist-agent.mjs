@@ -140,7 +140,7 @@ const draftTool = tool({
 });
 
 export function createVonHalskySpecialistAgent({
-  model = 'gpt-5-nano',
+  model = 'gpt-5.4-nano',
   reasoning = 'low',
   maxOutputTokens = 2200,
 } = {}) {
@@ -265,8 +265,8 @@ function resultForGenericPipeline(output = {}, product = {}, identity = {}) {
 }
 
 export async function requestVonHalskyAgentResponse({
-  model = 'gpt-5-nano',
-  qualityFallbackModel = 'gpt-5.4-nano',
+  model = 'gpt-5.4-nano',
+  qualityFallbackModel = 'gpt-5.6-luna',
   reasoning = 'low',
   maxOutputTokens = 2200,
   input = '',
@@ -279,7 +279,7 @@ export async function requestVonHalskyAgentResponse({
     brand: product.brand || product.marka,
     producer: product.producer || product.producent,
   });
-  const attempts = [...new Set([clean(model, 100) || 'gpt-5-nano', clean(qualityFallbackModel, 100)].filter(Boolean))];
+  const attempts = [...new Set([clean(model, 100) || 'gpt-5.4-nano', clean(qualityFallbackModel, 100)].filter(Boolean))];
   let lastError = null;
   for (let index = 0; index < attempts.length; index += 1) {
     const selectedModel = attempts[index];

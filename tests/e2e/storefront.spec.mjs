@@ -768,10 +768,10 @@ test('InPost Von Halsky ma osobny katalog sprzedaży i nie miesza się z nadawan
   await expect(page.locator('[data-vh-channel-truth]')).toContainText('Polecenia oczekujące');
   await expect(page.locator('.von-halsky-offer-flow')).toContainText('Dopasuj');
   await expect(page.locator('.von-halsky-offer-flow')).toContainText('Opublikuj');
-  await expect(page.locator('.von-halsky-channel-truth')).toContainText('W sprzedaży');
+  await expect(page.locator('.admin-channel-truth.is-von-halsky')).toContainText('W sprzedaży');
   await expect(page.locator('[data-vh-stage-filters]')).toContainText('Wewnętrzna kolejka Artway-TM');
-  await expect(page.locator('.von-halsky-stage-filters')).toContainText('Do wystawienia');
-  await expect(page.locator('.von-halsky-stage-filters')).toContainText('Do przygotowania');
+  await expect(page.locator('.admin-channel-stage-filters')).toContainText('Do wystawienia');
+  await expect(page.locator('.admin-channel-stage-filters')).toContainText('Do przygotowania');
   await expect(page.locator('.von-halsky-table')).toBeVisible();
   await expect(page.locator('.von-halsky-table').getByRole('columnheader', { name: 'Kanał sprzedaży' })).toBeVisible();
   await expect(page.getByLabel('Etap sprzedaży')).toBeVisible();

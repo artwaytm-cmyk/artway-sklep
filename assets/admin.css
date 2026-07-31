@@ -1365,7 +1365,7 @@ body.admin-mode .agent-module-nav.admin-unified-modulebar{grid-template-columns:
 body.admin-mode .admin-unified-modulebar :is(.warehouse-module-brand,.agent-module-brand){padding:4px 10px;border-color:var(--line)}
 body.admin-mode .admin-unified-modulebar .warehouse-module-links{grid-template-columns:repeat(7,minmax(82px,1fr));gap:5px}
 body.admin-mode .admin-unified-modulebar .warehouse-module-links a{min-height:46px;padding:7px 8px;border-radius:10px}
-body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups{display:grid;grid-template-columns:repeat(7,minmax(80px,1fr));gap:5px}
+body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups{display:grid;grid-template-columns:repeat(6,minmax(88px,1fr));gap:5px}
 body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups>section{display:contents}
 body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups>section>span{display:none}
 body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups>section>div{display:contents}

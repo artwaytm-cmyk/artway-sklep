@@ -238,6 +238,7 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
       'src/frontend/10-agent-ai-admin-workspace.js',
       'src/frontend/10-agent-ai-communications-workspace.js',
       'src/frontend/11a-agent-observability-workspace.js',
+      'src/frontend/11-agent-ai-workspace.js',
     ],
   },
   {
@@ -282,7 +283,6 @@ export const ADMIN_RUNTIME_BUNDLES = Object.freeze([
       'src/frontend/11-inpost-order-contract-quote.js',
       'src/frontend/11-store-order-readiness.js',
       'src/frontend/11-store-orders.js',
-      'src/frontend/11-agent-ai-workspace.js',
     ],
   },
   {

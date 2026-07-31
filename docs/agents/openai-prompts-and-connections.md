@@ -9,7 +9,7 @@ Wersja kanonicznych playbooków: `2026-07-29.3`. Ten plik jest generowany przez 
 - Dawne identyfikatory `asst_*` są metadanymi zgodności i linkami do starszej powierzchni Assistants. Nie są procesem wykonawczym sklepu.
 - Reusable Prompts oraz Agent Builder zostały przez OpenAI oznaczone jako wycofywane i mają zostać zamknięte 30 listopada 2026 r. Nie tworzymy na nich nowych zależności. Obecne identyfikatory `pmpt_*` są tylko przejściową referencją zgodności.
 - Kanoniczne role, prompty, narzędzia, bramki zatwierdzeń i miejsca zapisu pozostają w kodzie serwera: są wersjonowane, testowane i nie znikną wraz z wyłączeniem panelu legacy.
-- Wszystkie codzienne zadania używają `gpt-5-nano`. Jedna próba `gpt-5.4-nano` jest dozwolona wyłącznie po niepoprawnym kontrakcie strukturalnym; `gpt-5.4-mini` nie działa automatycznie.
+- Wszystkie podstawowe zadania używają `gpt-5.4-nano`. Jedna próba `gpt-5.6-luna` jest dozwolona wyłącznie po niepoprawnym kontrakcie strukturalnym lub trudnym wyjątku; Luna nie działa automatycznie przy poprawnym wyniku.
 - Bezpłatny tryb awaryjny: lokalny `qwen3.5:4b` przez Ollama, uruchamiany tylko przy braku środków/niedostępności API albo po nieskutecznej walidacji odpowiedzi.
 - Brak AI nigdy nie jest udawanym sukcesem: deterministyczne reguły mogą zachować działanie strony, ale zapis/publikacja wymagają właściwego potwierdzenia backendu.
 
@@ -21,20 +21,20 @@ Oficjalny harmonogram wycofania: https://developers.openai.com/api/docs/deprecat
 
 | ID | Rola | Model codzienny | Rozumowanie | Fallback jakości | Prompt Platformy | Znaków instrukcji |
 |---|---|---|---|---|---|---:|
-| `product_content` | Redaktor sklepu | `gpt-5-nano` | medium | `gpt-5.4-nano` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6d279d208197b70e3f1edd41f01b040dd5083490e108&version=1) | 8869 |
-| `store_compliance` | Strażnik treści sklepu | `gpt-5-nano` | low | `gpt-5.4-nano` | serwerowy | 6702 |
-| `allegro_offer` | Redaktor oferty Allegro | `gpt-5-nano` | low | `gpt-5.4-nano` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7&version=1) | 7025 |
-| `allegro_compliance` | Strażnik zgodności Allegro | `gpt-5-nano` | medium | `gpt-5.4-nano` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7&version=1) | 5554 |
-| `allegro_publication` | Operator publikacji Allegro | `gpt-5-nano` | low | `gpt-5.4-nano` | serwerowy | 8516 |
-| `von_halsky_offer` | Redaktor Von Halsky | `gpt-5-nano` | low | `gpt-5.4-nano` | serwerowy | 7797 |
-| `von_halsky_compliance` | Strażnik treści Von Halsky | `gpt-5-nano` | low | `gpt-5.4-nano` | serwerowy | 5373 |
-| `customer_reply` | Opiekun klienta | `gpt-5-nano` | low | `gpt-5.4-nano` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e75890c81959ec99530abd0907c075f4f164e71b421&version=1) | 5536 |
-| `seo_promotion` | Specjalista SEO | `gpt-5-nano` | low | `gpt-5.4-nano` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e84122c81909f9ee773bebf35ea0a46ed1276dedcea&version=1) | 5466 |
-| `campaign_copy` | Strateg promocji | `gpt-5-nano` | low | `gpt-5.4-nano` | [otwórz v2](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6da900b48190b6e0833bd6d2582709f2081088e2ce3d&version=2) | 5195 |
-| `banner_copy` | Dyrektor bannera | `gpt-5-nano` | low | `gpt-5.4-nano` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e92eed48196b1689d1a1e2d39f60555a437e19e5b3a&version=1) | 5406 |
-| `supplier_message` | Koordynator producenta | `gpt-5-nano` | low | `gpt-5.4-nano` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6eccb4348193bc09427beb9d849b0d483c3686838266&version=1) | 5504 |
-| `catalog_quality` | Kontroler jakości | `gpt-5-nano` | medium | `gpt-5.4-nano` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6edf45508193ad0be5b8e3313dd307ca7bb991527083&version=1) | 5366 |
-| `operations_supervisor` | Koordynator operacyjny | `gpt-5-nano` | low | `gpt-5.4-nano` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6ef1e3ec8193911f0926497d78850dbce1efdf710076&version=1) | 5724 |
+| `product_content` | Redaktor sklepu | `gpt-5.4-nano` | medium | `gpt-5.6-luna` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6d279d208197b70e3f1edd41f01b040dd5083490e108&version=1) | 8869 |
+| `store_compliance` | Strażnik treści sklepu | `gpt-5.4-nano` | low | `gpt-5.6-luna` | serwerowy | 6702 |
+| `allegro_offer` | Redaktor oferty Allegro | `gpt-5.4-nano` | low | `gpt-5.6-luna` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7&version=1) | 7025 |
+| `allegro_compliance` | Strażnik zgodności Allegro | `gpt-5.4-nano` | medium | `gpt-5.6-luna` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7&version=1) | 5554 |
+| `allegro_publication` | Operator publikacji Allegro | `gpt-5.4-nano` | low | `gpt-5.6-luna` | serwerowy | 8516 |
+| `von_halsky_offer` | Redaktor Von Halsky | `gpt-5.4-nano` | low | `gpt-5.6-luna` | serwerowy | 7797 |
+| `von_halsky_compliance` | Strażnik treści Von Halsky | `gpt-5.4-nano` | low | `gpt-5.6-luna` | serwerowy | 5373 |
+| `customer_reply` | Opiekun klienta | `gpt-5.4-nano` | low | `gpt-5.6-luna` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e75890c81959ec99530abd0907c075f4f164e71b421&version=1) | 5536 |
+| `seo_promotion` | Specjalista SEO | `gpt-5.4-nano` | low | `gpt-5.6-luna` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e84122c81909f9ee773bebf35ea0a46ed1276dedcea&version=1) | 5466 |
+| `campaign_copy` | Strateg promocji | `gpt-5.4-nano` | low | `gpt-5.6-luna` | [otwórz v2](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6da900b48190b6e0833bd6d2582709f2081088e2ce3d&version=2) | 5195 |
+| `banner_copy` | Dyrektor bannera | `gpt-5.4-nano` | low | `gpt-5.6-luna` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e92eed48196b1689d1a1e2d39f60555a437e19e5b3a&version=1) | 5406 |
+| `supplier_message` | Koordynator producenta | `gpt-5.4-nano` | low | `gpt-5.6-luna` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6eccb4348193bc09427beb9d849b0d483c3686838266&version=1) | 5504 |
+| `catalog_quality` | Kontroler jakości | `gpt-5.4-nano` | medium | `gpt-5.6-luna` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6edf45508193ad0be5b8e3313dd307ca7bb991527083&version=1) | 5366 |
+| `operations_supervisor` | Koordynator operacyjny | `gpt-5.4-nano` | low | `gpt-5.6-luna` | [otwórz v1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6ef1e3ec8193911f0926497d78850dbce1efdf710076&version=1) | 5724 |
 
 ## Pełne prompty specjalistów
 
@@ -44,7 +44,7 @@ Obszar: Katalog i sklep. Pola wyniku: `title`, `short_description`, `long_descri
 
 Zapis: Po walidacji backend zapisuje pola do kanonicznego rekordu artway_products przez saveProductFields; potwierdzeniem są productId, mutationId, fingerprint i ponowny odczyt.
 
-Model: `gpt-5-nano` (medium); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (medium); fallback jakości: `gpt-5.6-luna`.
 
 Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6d279d208197b70e3f1edd41f01b040dd5083490e108, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6d279d208197b70e3f1edd41f01b040dd5083490e108&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
@@ -129,7 +129,7 @@ Obszar: Sklep • kontrola końcowa. Pola wyniku: `title`, `short_description`, 
 
 Zapis: Po ponownej bramce zgodności backend aktualizuje ten sam rekord artway_products; nie powstaje drugi katalog ani kopia localStorage.
 
-Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (low); fallback jakości: `gpt-5.6-luna`.
 
 Ta rola świadomie nie ma nowego obiektu promptu legacy w Platformie; obowiązuje wersja serwerowa poniżej.
 
@@ -202,7 +202,7 @@ Obszar: Allegro. Pola wyniku: `allegro_title`, `allegro_description`, `selling_p
 
 Zapis: Po bramce zgodności backend zapisuje pola allegro_* i stan kanału w tym samym rekordzie artway_products; publikacja jest osobną operacją API.
 
-Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (low); fallback jakości: `gpt-5.6-luna`.
 
 Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
@@ -285,7 +285,7 @@ Obszar: Allegro • kontrola końcowa. Pola wyniku: `allegro_title`, `allegro_de
 
 Zapis: Wynik wraca do bramki Allegro, a dopiero jej wynik może zaktualizować pola allegro_* w artway_products.
 
-Model: `gpt-5-nano` (medium); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (medium); fallback jakości: `gpt-5.6-luna`.
 
 Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e26d4048193adcd38bbaeca551d0d528a4339f081b7&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
@@ -361,7 +361,7 @@ Obszar: Allegro • wystawianie i naprawa API. Pola wyniku: `error_class`, `root
 
 Zapis: Diagnoza zostaje przy zadaniu publikacji konkretnego productId; korekta produktu przechodzi przez saveProductFields, a sukces oferty wymaga offerId i odczytu Allegro API.
 
-Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (low); fallback jakości: `gpt-5.6-luna`.
 
 Ta rola świadomie nie ma nowego obiektu promptu legacy w Platformie; obowiązuje wersja serwerowa poniżej.
 
@@ -447,7 +447,7 @@ Obszar: InPost Von Halsky. Pola wyniku: `von_halsky_title`, `von_halsky_short_de
 
 Zapis: Po bramce kanału backend zapisuje pola von_halsky_* w tym samym rekordzie artway_products; wysłanie do kanału jest osobną operacją.
 
-Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (low); fallback jakości: `gpt-5.6-luna`.
 
 Ta rola świadomie nie ma nowego obiektu promptu legacy w Platformie; obowiązuje wersja serwerowa poniżej.
 
@@ -537,7 +537,7 @@ Obszar: InPost Von Halsky • kontrola końcowa. Pola wyniku: `von_halsky_title`
 
 Zapis: Wynik wraca do bramki Von Halsky, a zapis dotyczy tylko pól von_halsky_* kanonicznego produktu.
 
-Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (low); fallback jakości: `gpt-5.6-luna`.
 
 Ta rola świadomie nie ma nowego obiektu promptu legacy w Platformie; obowiązuje wersja serwerowa poniżej.
 
@@ -609,7 +609,7 @@ Obszar: Wiadomości i dyskusje. Pola wyniku: `subject`, `reply`.
 
 Zapis: Szkic zapisuje się przy identyfikatorze rozmowy/dyskusji. Agent nigdy nie wysyła wiadomości bez dedykowanej operacji operatora.
 
-Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (low); fallback jakości: `gpt-5.6-luna`.
 
 Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6e75890c81959ec99530abd0907c075f4f164e71b421, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e75890c81959ec99530abd0907c075f4f164e71b421&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
@@ -684,7 +684,7 @@ Obszar: Pozycjonowanie. Pola wyniku: `seo_title`, `meta_description`, `keywords`
 
 Zapis: Pola produktu przechodzą przez saveProductFields do artway_products; plan promocji pozostaje w kolejce SEO i nie oznacza wykonania zewnętrznej publikacji.
 
-Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (low); fallback jakości: `gpt-5.6-luna`.
 
 Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6e84122c81909f9ee773bebf35ea0a46ed1276dedcea, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e84122c81909f9ee773bebf35ea0a46ed1276dedcea&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
@@ -759,7 +759,7 @@ Obszar: Promocje i kody rabatowe. Pola wyniku: `campaign_name`, `headline`, `sub
 
 Zapis: Wynik jest wersjonowanym szkicem kampanii powiązanym z istniejącym kodem rabatowym; aktywacja kampanii wymaga osobnej operacji.
 
-Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (low); fallback jakości: `gpt-5.6-luna`.
 
 Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6da900b48190b6e0833bd6d2582709f2081088e2ce3d, wersja 2](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6da900b48190b6e0833bd6d2582709f2081088e2ce3d&version=2). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
@@ -831,7 +831,7 @@ Obszar: Grafiki AI. Pola wyniku: `headline`, `subheadline`, `cta`, `image_brief`
 
 Zapis: Brief i teksty zapisują się w projekcie grafiki; wygenerowany plik obrazu oraz jego warianty mają osobne identyfikatory zasobów.
 
-Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (low); fallback jakości: `gpt-5.6-luna`.
 
 Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6e92eed48196b1689d1a1e2d39f60555a437e19e5b3a, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6e92eed48196b1689d1a1e2d39f60555a437e19e5b3a&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
@@ -906,7 +906,7 @@ Obszar: Plan zatowarowania. Pola wyniku: `subject`, `intro`, `closing`, `import_
 
 Zapis: Szkic jest przypisany do jednego kanonicznego dokumentu Planu zatowarowania; tabela pochodzi z dokumentu, a wysłanie e-maila wymaga osobnego potwierdzenia.
 
-Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (low); fallback jakości: `gpt-5.6-luna`.
 
 Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6eccb4348193bc09427beb9d849b0d483c3686838266, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6eccb4348193bc09427beb9d849b0d483c3686838266&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
@@ -981,7 +981,7 @@ Obszar: Audyt treści. Pola wyniku: `assessment`, `recommended_changes`, `compli
 
 Zapis: Ocena zapisuje się przy konkretnych productId jako wynik kontroli; nie usuwa, nie scala i nie nadpisuje produktu samodzielnie.
 
-Model: `gpt-5-nano` (medium); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (medium); fallback jakości: `gpt-5.6-luna`.
 
 Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6edf45508193ad0be5b8e3313dd307ca7bb991527083, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6edf45508193ad0be5b8e3313dd307ca7bb991527083&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
@@ -1056,7 +1056,7 @@ Obszar: Nadzór sklepu. Pola wyniku: `priority`, `problem`, `recommended_action`
 
 Zapis: Wynik trafia do wersjonowanej kolejki decyzji Agenta. Rozstrzygnięcie ma receipt i nie wraca bez nowych faktów lub jawnego ponownego otwarcia.
 
-Model: `gpt-5-nano` (low); fallback jakości: `gpt-5.4-nano`.
+Model: `gpt-5.4-nano` (low); fallback jakości: `gpt-5.6-luna`.
 
 Przejściowa referencja legacy do zapisanego promptu: [pmpt_6a5f6ef1e3ec8193911f0926497d78850dbce1efdf710076, wersja 1](https://platform.openai.com/chat/edit?prompt=pmpt_6a5f6ef1e3ec8193911f0926497d78850dbce1efdf710076&version=1). Kanoniczna instrukcja znajduje się poniżej i w kodzie.
 
@@ -1127,7 +1127,7 @@ Treść ma być konkretna, naturalna, uporządkowana i gotowa do sprawdzenia prz
 
 ## Agent diagnostyczny Agents SDK
 
-Model codzienny: `gpt-5-nano`; kontrolowany fallback: `gpt-5.4-nano`.
+Model codzienny: `gpt-5.4-nano`; kontrolowany fallback: `gpt-5.6-luna`.
 
 Kod: `src/backend/lib/domain/diagnostic-agent-workflow.mjs`. Trace: OpenAI Platform → Dzienniki/Traces.
 

@@ -1,7 +1,7 @@
 const MODEL_DEFAULTS = Object.freeze({
-  professionalEscalation: 'gpt-5.4-nano',
-  standard: 'gpt-5-nano',
-  economical: 'gpt-5-nano',
+  professionalEscalation: 'gpt-5.6-luna',
+  standard: 'gpt-5.4-nano',
+  economical: 'gpt-5.4-nano',
   localFallback: 'qwen3.5:4b',
 });
 
@@ -38,7 +38,7 @@ const OUTPUT_TOKEN_BUDGETS = Object.freeze({
 });
 
 export const OPENAI_MODEL_PRICE_SNAPSHOT = Object.freeze({
-  date: '2026-07-28',
+  date: '2026-07-30',
   currency: 'USD',
   unit: '1M tokens',
   models: Object.freeze({
@@ -47,8 +47,8 @@ export const OPENAI_MODEL_PRICE_SNAPSHOT = Object.freeze({
     'gpt-5.4-mini': Object.freeze({ input: 0.75, cachedInput: 0.075, cacheWrite: 0.75, output: 4.5 }),
     'gpt-5.4-nano': Object.freeze({ input: 0.2, cachedInput: 0.02, cacheWrite: 0.2, output: 1.25 }),
     'gpt-5.6-sol': Object.freeze({ input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30 }),
-    'gpt-5.6-terra': Object.freeze({ input: 2.5, cachedInput: 0.25, cacheWrite: 3.125, output: 15 }),
-    'gpt-5.6-luna': Object.freeze({ input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 6 }),
+    'gpt-5.6-terra': Object.freeze({ input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 }),
+    'gpt-5.6-luna': Object.freeze({ input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2 }),
   }),
 });
 
@@ -121,7 +121,7 @@ export function modelPolicySummary({ override = '', env = process.env } = {}) {
       endpoint: clean(env.OLLAMA_BASE_URL) || 'http://127.0.0.1:11434',
       activation: 'openai-unavailable-or-quota-exhausted',
     },
-    policy: 'gpt-5-nano-daily-gpt-5.4-nano-quality-fallback-local-qwen-emergency',
+    policy: 'gpt-5.4-nano-primary-gpt-5.6-luna-quality-fallback-local-qwen-emergency',
     pricing: OPENAI_MODEL_PRICE_SNAPSHOT,
   };
 }
