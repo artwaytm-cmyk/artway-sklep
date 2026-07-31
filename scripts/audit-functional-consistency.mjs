@@ -9,7 +9,7 @@ const frontendReloads = fs.readdirSync(path.join(root, 'src/frontend')).filter((
 });
 const allowedMaintenanceReloads = new Map([
   ['15d-publication-and-export.js', 1], // świadomy reset ustawień
-  ['16-diagnostics.js', 2], // aktualizacja pełnego wydania i przywrócenie kopii
+  ['16-diagnostics.js', 1], // przywrócenie kopii; aktualizację prowadzi wersjonowany mechanizm PWA
   ['18-pwa.js', 1], // bezpieczne uruchomienie kompletnego nowego wydania serwerowego
 ]);
 const reloadCounts = frontendReloads.reduce((map, name) => map.set(name, (map.get(name) || 0) + 1), new Map());

@@ -99,17 +99,9 @@ async function systemPobierzNajnowszaWersje(){
   if(!systemWersjaStan.release){toast("Najpierw serwer musi potwierdzić aktualne wydanie");return;}
   systemWersjaStan={...systemWersjaStan,wdrazanie:true,error:""};renderuj();
   try{
-    if("serviceWorker" in navigator){
-      const registration=await navigator.serviceWorker.getRegistration("/");
-      await registration?.update();
-      registration?.waiting?.postMessage({type:"SKIP_WAITING"});
-      registration?.active?.postMessage({type:"CLEAR_APP_CACHE"});
-    }
-    if("caches" in window){const keys=await caches.keys();await Promise.all(keys.filter(key=>key.startsWith("artway-")).map(key=>caches.delete(key)));}
-    sessionStorage.setItem("artway_oczekiwane_wydanie",systemWersjaStan.release.releaseId);
     loguj("info",`Pobrano wydanie ${systemWersjaStan.release.releaseId} do przeglądarki`);
-    toast("Aktualizacja pobrana — przeładowuję panel ✅");
-    setTimeout(()=>location.reload(),350);
+    toast("Aktualizacja gotowa — uruchamiam dokładne wydanie ✅");
+    await pwaUruchomDokladneWydanie(systemWersjaStan.release.releaseId);
   }catch(error){systemWersjaStan={...systemWersjaStan,wdrazanie:false,error:error.message};loguj("blad","Aktualizacja przeglądarki: "+error.message);toast("Nie udało się pobrać aktualizacji");renderuj();}
 }
 function rozmiarDanychLokalnych(){

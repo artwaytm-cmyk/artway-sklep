@@ -544,6 +544,10 @@ test('Oferty i publikacja rozdzielają brak towaru od szkiców i nie pokazują o
   const assertRuntime = observeRuntime(page);
   await loginAdmin(page);
   await page.goto('/#/admin/allegro/oferty');
+  await expect(page.locator('[data-allegro-offers-mode="sprzedaz"]')).toBeVisible();
+  await expect(page.locator('.allegro-channel-truth')).toContainText('Stan potwierdzony bezpośrednio przez API');
+  await expect(page.getByRole('columnheader', { name: 'Kanał sprzedaży' })).toBeVisible();
+  await page.getByRole('button', { name: /Wystawianie i aktualizacje/ }).click();
   await expect(page.locator('[data-allegro-offers-mode="publikacja"]')).toBeVisible();
   const queueFilter = page.getByLabel('Dokładny stan kolejki');
   await expect(queueFilter).toBeVisible();

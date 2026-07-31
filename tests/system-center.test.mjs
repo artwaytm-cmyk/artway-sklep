@@ -22,11 +22,13 @@ test('aktualizacja, publikacja i diagnostyka są jednym Centrum systemu',async()
 });
 
 test('przycisk przeglądarki pobiera pełne wydanie bez kasowania danych',async()=>{
-  const [system,worker,releaseManager]=await Promise.all([source('src/frontend/16-diagnostics.js'),source('sw.js'),source('scripts/lib/atomic-release-manager.mjs')]);
+  const [system,pwa,worker,releaseManager]=await Promise.all([source('src/frontend/16-diagnostics.js'),source('src/frontend/18-pwa.js'),source('sw.js'),source('scripts/lib/atomic-release-manager.mjs')]);
   assert.match(system,/fetch\(`\/release\.json\?ts=/);
-  assert.match(system,/registration\?\.update\(\)/);
-  assert.match(system,/keys\.filter\(key=>key\.startsWith\("artway-"\)\)/);
-  assert.match(system,/setTimeout\(\(\)=>location\.reload\(\),350\)/);
+  assert.match(system,/pwaUruchomDokladneWydanie\(systemWersjaStan\.release\.releaseId\)/);
+  assert.match(pwa,/serviceWorker\.register\(`\/sw\.js\?v=\$\{encodeURIComponent\(version\)\}`/);
+  assert.match(pwa,/pwaPoczekajNaKontroler/);
+  assert.match(pwa,/cacheKeys\.filter\(\(key\)=>key\.startsWith\("artway-"\)\)/);
+  assert.match(pwa,/location\.replace\(/);
   assert.doesNotMatch(system,/systemPobierzNajnowszaWersje[\s\S]{0,1800}localStorage\.clear\(/);
   assert.match(worker,/CLEAR_APP_CACHE/);
   assert.match(worker,/SKIP_WAITING/);

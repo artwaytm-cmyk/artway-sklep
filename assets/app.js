@@ -5960,6 +5960,89 @@ function pwaBezpiecznyReloadPoAktualizacji(){
   setTimeout(()=>{location.reload();},250);
 }
 
+function pwaPoczekajNaStanWorkera(worker,oczekiwane=[],timeout=8000){
+  if(!worker||oczekiwane.includes(worker.state))return Promise.resolve(worker?.state||"");
+  return new Promise(resolve=>{
+    let zakonczone=false,timer=0;
+    const koniec=()=>{if(zakonczone)return;zakonczone=true;clearTimeout(timer);worker.removeEventListener("statechange",zmiana);resolve(worker.state||"");};
+    const zmiana=()=>{if(oczekiwane.includes(worker.state))koniec();};
+    timer=setTimeout(koniec,timeout);worker.addEventListener("statechange",zmiana);
+  });
+}
+function pwaPoczekajNaKontroler(timeout=8000){
+  return new Promise(resolve=>{
+    let zakonczone=false,timer=0;
+    const koniec=()=>{if(zakonczone)return;zakonczone=true;clearTimeout(timer);navigator.serviceWorker?.removeEventListener("controllerchange",zmiana);resolve(navigator.serviceWorker?.controller||null);};
+    const zmiana=()=>koniec();
+    timer=setTimeout(koniec,timeout);navigator.serviceWorker?.addEventListener("controllerchange",zmiana,{once:true});
+  });
+}
+async function pwaPrzygotujWorkerWydania(releaseId){
+  if(!("serviceWorker" in navigator)||!window.isSecureContext)return null;
+  const version=String(releaseId||pwaBiezaceWydanie()||Date.now());
+  const targetUrl=new URL(`/sw.js?v=${encodeURIComponent(version)}`,location.origin).href;
+  const controllerBefore=navigator.serviceWorker.controller?.scriptURL||"";
+  const controllerChange=controllerBefore===targetUrl?null:pwaPoczekajNaKontroler();
+  const registration=await navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(version)}`,{scope:"/",updateViaCache:"none"});
+  await registration.update();
+  let worker=registration.waiting||registration.installing;
+  if(worker?.state==="installing")await pwaPoczekajNaStanWorkera(worker,["installed","activated","redundant"]);
+  worker=registration.waiting||registration.installing||worker;
+  if(worker&&worker.state!=="activated"&&worker.state!=="redundant"){
+    worker.postMessage({type:"SKIP_WAITING"});
+  }
+  if(controllerChange&&navigator.serviceWorker.controller?.scriptURL!==targetUrl)await controllerChange;
+  return registration;
+}
+async function pwaUruchomDokladneWydanie(releaseId){
+  if(pwaPrzeladowanieWTrakcie)return;
+  pwaPrzeladowanieWTrakcie=true;
+  const version=String(releaseId||pwaBiezaceWydanie()||Date.now());
+  try{
+    await pwaOczyscCacheKompletny();
+    await pwaPrzygotujWorkerWydania(version);
+    sessionStorage.setItem("artway_oczekiwane_wydanie",version);
+    const url=new URL(location.href);
+    url.searchParams.set("artway_release",version);
+    location.replace(`${url.pathname}${url.search}${url.hash}`);
+  }catch(error){
+    pwaPrzeladowanieWTrakcie=false;
+    throw error;
+  }
+}
+
+function pwaSprawdzOczekiwaneWydanie(){
+  let expected="",attempts=0;
+  try{
+    expected=String(sessionStorage.getItem("artway_oczekiwane_wydanie")||"");
+    attempts=Number(sessionStorage.getItem("artway_proby_wydania")||0);
+  }catch(error){}
+  if(!expected)return true;
+  if(expected===pwaBiezaceWydanie()){
+    try{
+      sessionStorage.removeItem("artway_oczekiwane_wydanie");
+      sessionStorage.removeItem("artway_proby_wydania");
+    }catch(error){}
+    const url=new URL(location.href);
+    if(url.searchParams.has("artway_release")){
+      url.searchParams.delete("artway_release");
+      history.replaceState(null,"",`${url.pathname}${url.search}${url.hash}`);
+    }
+    return true;
+  }
+  if(attempts>=2){
+    try{sessionStorage.removeItem("artway_proby_wydania");}catch(error){}
+    pwaPokazNoweWydanie(expected);
+    return true;
+  }
+  try{sessionStorage.setItem("artway_proby_wydania",String(attempts+1));}catch(error){}
+  const url=new URL(location.href);
+  url.searchParams.set("artway_release",expected);
+  url.searchParams.set("artway_retry",String(attempts+1));
+  location.replace(`${url.pathname}${url.search}${url.hash}`);
+  return false;
+}
+
 function pwaBiezaceWydanie(){return pwaNazwaWersji();}
 function pwaMoznaBezpieczniePrzeladowac(){
   const active=document.activeElement;
@@ -5967,24 +6050,15 @@ function pwaMoznaBezpieczniePrzeladowac(){
     && !document.querySelector("dialog[open],.modal.show,[aria-modal='true']")
     && !(active&&/^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName));
 }
-async function pwaAktywujNajnowszeWydanie(){
+async function pwaAktywujNajnowszeWydanie(releaseId=pwaWykryteWydanie){
   clearTimeout(pwaAutomatycznePrzeladowanie);
   try{
-    await pwaOczyscCacheKompletny();
-    if("serviceWorker" in navigator){
-      const registration=await navigator.serviceWorker.getRegistration("/");
-      await registration?.update();
-      registration?.waiting?.postMessage({type:"SKIP_WAITING"});
-      registration?.active?.postMessage({type:"CLEAR_APP_CACHE"});
-    }
-    pwaZapiszWersjeWPodsumowaniu(pwaBiezaceWydanie());
-    pwaBezpiecznyReloadPoAktualizacji();
+    await pwaUruchomDokladneWydanie(releaseId||pwaBiezaceWydanie());
   }catch(error){console.warn("Nie udało się wyczyścić starej powłoki aplikacji",error);}
 }
 
 async function pwaResetCache(){
-  await pwaOczyscCacheKompletny();
-  pwaBezpiecznyReloadPoAktualizacji();
+  await pwaUruchomDokladneWydanie(pwaBiezaceWydanie());
 }
 function pwaPokazNoweWydanie(releaseId){
   pwaWykryteWydanie=releaseId;
@@ -6072,7 +6146,7 @@ async function pwaWeryfikujWersjeServiceWorker(releaseId){
   const workerVer=params.get("v")||"";
   if(workerVer&&releaseId&&workerVer!==releaseId){
     pwaZapiszWersjeWPodsumowaniu(releaseId);
-    await pwaAktywujNajnowszeWydanie();
+    await pwaAktywujNajnowszeWydanie(releaseId);
   }
   pwaZapiszWersjeWPodsumowaniu(releaseId);
 }
@@ -6084,12 +6158,9 @@ window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();pwa
 window.addEventListener("appinstalled",()=>{pwaOdroczoneZaproszenie=null;pwaUstawTrybWyswietlania();pwaOdswiezPrzyciski();});
 window.matchMedia?.("(display-mode: standalone)")?.addEventListener?.("change",()=>{pwaUstawTrybWyswietlania();pwaOdswiezPrzyciski();});
 window.addEventListener("DOMContentLoaded",()=>{
+  if(!pwaSprawdzOczekiwaneWydanie())return;
   pwaUstawTrybWyswietlania();void pwaZarejestrujAplikacje();pwaUruchomSkrotSkanera();
   void pwaWeryfikujWersjeServiceWorker(pwaBiezaceWydanie());
-  const lokalnieZapisanaWersja=(() => {
-    try{return localStorage.getItem(PWA_CACHE_KEY_VERSION)||"";}catch(error){return "";}
-  })();
-  if(lokalnieZapisanaWersja&&lokalnieZapisanaWersja!==pwaBiezaceWydanie()) pwaPokazNoweWydanie(lokalnieZapisanaWersja);
   pwaZapiszWersjeWPodsumowaniu(pwaBiezaceWydanie());
   window.artwayPurgeCache=()=>void pwaResetCache();
   setTimeout(()=>void pwaSprawdzNajnowszeWydanie(),800);

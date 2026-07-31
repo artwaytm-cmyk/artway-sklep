@@ -1,6 +1,6 @@
 /* ═══════════ ALLEGRO — WSPÓLNY PROCES OFERT, POWIĄZAŃ I PUBLIKACJI ═══════════ */
 let allegroProgresywneKarty={generation:0,scope:"",items:[],renderer:null,index:0,observer:null};
-let allegroCentrumOfertTryb="publikacja";
+let allegroCentrumOfertTryb="sprzedaz";
 function allegroProgresywneKartyHTML(items=[],renderer,scope="lista"){
   allegroProgresywneKarty.observer?.disconnect?.();
   const generation=allegroProgresywneKarty.generation+1,batch=4,first=items.slice(0,batch);
@@ -227,8 +227,8 @@ function allegroOfertyIPublikacjaHTML(){
       <div class="allegro-unified-offers-switch">
         <div><span class="order-pro-label">Obszar roboczy</span><b>Publikacja oraz rzeczywisty stan sprzedaży</b><small>Powiązania pozostają trwałe w tle. W panelu pracujesz wyłącznie na ofertach i ich statusach kanału.</small></div>
         <nav aria-label="Widok ofert i publikacji">
-          <button type="button" class="${tryb==="publikacja"?"active":""}" aria-pressed="${tryb==="publikacja"}" onclick="allegroCentrumOfertUstawTryb('publikacja')"><span>🟠</span><div><b>Wystawianie i aktualizacje</b><small>${esc(st.zadaniaWystawiania)} zadań Agenta</small></div></button>
           <button type="button" class="${tryb==="sprzedaz"&&filtrStatusuAllegroOfert==="sprzedaz"?"active":""}" aria-pressed="${tryb==="sprzedaz"}" onclick="allegroCentrumOfertUstawTryb('sprzedaz','sprzedaz')"><span>●</span><div><b>W sprzedaży / aktywne</b><small>Stan potwierdzony przez Allegro</small></div></button>
+          <button type="button" class="${tryb==="publikacja"?"active":""}" aria-pressed="${tryb==="publikacja"}" onclick="allegroCentrumOfertUstawTryb('publikacja')"><span>🟠</span><div><b>Wystawianie i aktualizacje</b><small>${esc(st.zadaniaWystawiania)} zadań Agenta</small></div></button>
           <button type="button" class="${tryb==="sprzedaz"&&filtrStatusuAllegroOfert==="uwaga"?"active warning":""}" onclick="allegroCentrumOfertUstawTryb('sprzedaz','uwaga')"><span>⚠️</span><div><b>Wymaga uwagi</b><small>${esc(st.niepodpiete)} ofert do kontroli Agenta</small></div></button>
         </nav>
       </div>

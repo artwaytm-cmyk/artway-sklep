@@ -22,3 +22,13 @@ test('aktualizacja PWA nie kasuje danych konta ani magazynu z IndexedDB', async 
   assert.doesNotMatch(pwa, /registration\.unregister/);
   assert.match(pwa, /localStorage\.setItem\(PWA_CACHE_KEY_VERSION/);
 });
+
+test('ręczna aktualizacja czeka na przejęcie kontroli przez dokładne wydanie', async () => {
+  const pwa = await readFile('src/frontend/18-pwa.js', 'utf8');
+  assert.match(pwa, /serviceWorker\.register\(`\/sw\.js\?v=\$\{encodeURIComponent\(version\)\}`,\{scope:"\/",updateViaCache:"none"\}\)/);
+  assert.match(pwa, /pwaPoczekajNaKontroler/);
+  assert.match(pwa, /artway_oczekiwane_wydanie/);
+  assert.match(pwa, /url\.searchParams\.set\("artway_release",version\)/);
+  assert.match(pwa, /location\.replace\(/);
+  assert.doesNotMatch(pwa, /lokalnieZapisanaWersja[\s\S]{0,300}pwaPokazNoweWydanie/);
+});
