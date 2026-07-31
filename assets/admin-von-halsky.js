@@ -720,24 +720,22 @@ function vonHalskyStatystyki(){
 function vonHalskyEtapySprzedazyHTML(){
   const summary=vonHalskyStan.productQueue?.summary||{},counts=vonHalskyStan.productQueue?.loaded?{wszystkie:Number(summary.total)||0,sprzedaz:Number(summary.selling)||0,publikowanie:Number(summary.publishing)||0,wystawienie:Number(summary.publishable)||0,przygotowanie:Number(summary.preparation)||0,aktualizacja:Number(summary.update_required)||0,wstrzymane:Number(summary.paused)||0}:{wszystkie:0,sprzedaz:0,publikowanie:0,wystawienie:0,przygotowanie:0,aktualizacja:0,wstrzymane:0};
   if(!vonHalskyStan.productQueue?.loaded)for(const product of vonHalskyProdukty()){const quality=vonHalskyOcenaProduktu(product);counts.wszystkie+=1;counts[vonHalskyEtapOferty(product,quality)]+=1;}
-  const items=[["wszystkie","▦","Wszystkie"],["sprzedaz","✓","W sprzedaży"],["publikowanie","…","W publikacji"],["wystawienie","＋","Do wystawienia"],["przygotowanie","⚠","Do przygotowania"],["aktualizacja","↻","Do aktualizacji"],["wstrzymane","⏸","Wstrzymane"]];
-  return `<section class="von-halsky-stage-panel" data-vh-stage-filters aria-labelledby="vonHalskyStageTitle"><header><div><small>Wewnętrzna kolejka Artway-TM</small><h3 id="vonHalskyStageTitle">Etap przygotowania kartotek</h3></div><span>Stan ofert sprzedawanych pokazuje osobny pasek API powyżej.</span></header><div class="von-halsky-stage-filters" role="toolbar" aria-label="Filtry etapów kartotek Artway">${items.map(([value,icon,label])=>`<button class="${vonHalskyEtap===value?"active":""}" type="button" aria-pressed="${vonHalskyEtap===value?"true":"false"}" onclick="vonHalskyEtap=${jsArg(value)};vonHalskyZmienFiltr()"><span aria-hidden="true">${icon}</span><b>${counts[value]||0}</b><small>${esc(label)}</small></button>`).join("")}</div></section>`;
+  const items=[["wszystkie","▦","Wszystkie"],["sprzedaz","✓","W sprzedaży"],["publikowanie","…","W publikacji"],["wystawienie","＋","Do wystawienia"],["przygotowanie","⚠","Do przygotowania"],["aktualizacja","↻","Do aktualizacji"],["wstrzymane","⏸","Wstrzymane"]].map(([value,icon,label])=>({value,icon,label,count:counts[value]||0}));
+  return adminKanalEtapyHTML({id:"vonHalskyStageTitle",accent:"von-halsky",title:"Etap przygotowania kartotek",description:"Stan ofert sprzedawanych pokazuje osobny pasek API powyżej.",active:vonHalskyEtap,items,onSelect:"vonHalskyUstawEtap",dataAttribute:"data-vh-stage-filters",ariaLabel:"Filtry etapów kartotek Artway"});
 }
+function vonHalskyUstawEtap(value){vonHalskyEtap=value;vonHalskyZmienFiltr();}
 function vonHalskyKanalPrawdyHTML(){
   const truth=vonHalskyStan.truth||{},status=vonHalskyStan.channelStatus||{};
   const verifiedAt=status.verifiedAt||vonHalskyStan.sync?.lastCatalogVerifiedAt||vonHalskyStan.sync?.lastCatalogAt;
   const pendingCommands=Number(status.operations?.pendingCommands??vonHalskyStan.sync?.pendingCommandCount??0)||0;
   const consistent=status.consistent!==false;
-  return `<section class="von-halsky-channel-truth ${consistent?"is-consistent":"is-warning"}" data-vh-channel-truth>
-    <div class="von-halsky-channel-truth-head"><div><span>Stan potwierdzony bezpośrednio przez API</span><h3>InPost Von Halsky — faktyczny stan kanału</h3></div><div><span class="lvl ${consistent?"lvl-ok":"lvl-ostrzezenie"}">${consistent?"spójny":"wymaga uzgodnienia"}</span><small>Odczyt: ${esc(verifiedAt?allegroDataTxt(verifiedAt):"jeszcze nie wykonano")}</small></div></div>
-    <div class="von-halsky-channel-truth-grid">
-      <article><small>Oferty w API</small><b>${Number(truth.total)||0}</b><span>wszystkie stany z kanału</span></article>
-      <article class="success"><small>W sprzedaży</small><b>${Number(truth.published)||0}</b><span>wyłącznie PUBLISHED</span></article>
-      <article class="pending"><small>Po stronie API</small><b>${Number(truth.pending)||0}</b><span>PENDING / PROCESSING</span></article>
-      <article class="danger"><small>Odrzucone</small><b>${Number(truth.rejected)||0}</b><span>REJECTED / ERROR</span></article>
-      <article><small>Polecenia oczekujące</small><b>${pendingCommands}</b><span>osobno od liczby ofert</span></article>
-    </div>
-  </section>`;
+  return adminKanalStanApiHTML({channel:"InPost Von Halsky",accent:"von-halsky",connected:consistent,consistent,verifiedAt:verifiedAt?allegroDataTxt(verifiedAt):"",dataAttribute:"data-vh-channel-truth",metrics:[
+    {label:"Oferty w API",value:Number(truth.total)||0,detail:"wszystkie stany z kanału"},
+    {label:"W sprzedaży",value:Number(truth.published)||0,detail:"wyłącznie PUBLISHED",tone:"success"},
+    {label:"Po stronie API",value:Number(truth.pending)||0,detail:"PENDING / PROCESSING",tone:"pending"},
+    {label:"Odrzucone",value:Number(truth.rejected)||0,detail:"REJECTED / ERROR",tone:"danger"},
+    {label:"Polecenia oczekujące",value:pendingCommands,detail:"osobno od liczby ofert"},
+  ]});
 }
 
 function vonHalskySygnaturaProcesu(){

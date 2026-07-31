@@ -104,24 +104,28 @@ test("wynik przygotowania i publikacji aktualizuje widok bez pełnego renderu st
 });
 
 test("sprzedaż Von Halsky opiera się wyłącznie na potwierdzonym PUBLISHED z API",async()=>{
-  const [workspace,truthUi,quality,style]=await Promise.all([
+  const [workspace,truthUi,quality,style,sharedUi,sharedStyle]=await Promise.all([
     read("src/frontend/11b-von-halsky-workspace.js"),
     read("src/frontend/11b-von-halsky-channel-truth.js"),
     read("src/frontend/11b-von-halsky-product-quality.js"),
     read("src/styles/37-von-halsky-workspace.css"),
+    read("src/frontend/08a-admin-responsive-layout.js"),
+    read("src/styles/35-admin-unified-workspace.css"),
   ]);
   assert.match(workspace,/von-halsky-reconcile-catalog/);
   assert.match(workspace,/status==="PUBLISHED"&&quality\.offerVerified/);
   assert.match(workspace,/API potwierdza:/);
-  assert.match(truthUi,/Stan potwierdzony bezpośrednio przez API/);
+  assert.match(sharedUi,/Stan potwierdzony bezpośrednio przez API/);
   assert.match(truthUi,/osobno od liczby ofert/);
   assert.match(workspace,/truth:data\.truth\|\|vonHalskyStan\.truth/);
   assert.match(quality,/offerVerified:Boolean\(remote&&ofertaId\)/);
   assert.doesNotMatch(quality,/ofertaId:String\(product\.vonHalskyOfferId/);
   assert.match(truthUi,/Po stronie API/);
-  assert.match(truthUi,/Wewnętrzna kolejka Artway-TM/);
-  assert.match(truthUi,/aria-pressed=/);
-  assert.match(style,/\.von-halsky-stage-filters\{display:grid;grid-template-columns:repeat\(5,minmax\(0,1fr\)\)!important/);
+  assert.match(sharedUi,/Wewnętrzna kolejka Artway-TM/);
+  assert.match(sharedUi,/aria-pressed=/);
+  assert.match(truthUi,/adminKanalStanApiHTML\(\{channel:"InPost Von Halsky"/);
+  assert.match(truthUi,/adminKanalEtapyHTML\(\{id:"vonHalskyStageTitle"/);
+  assert.match(sharedStyle,/\.admin-channel-stage-filters\{display:grid/);
 });
 
 test("indeks ustawień Von Halsky ma działające przyciski i zielony stan aktywny",async()=>{

@@ -6044,6 +6044,16 @@ function pwaSprawdzOczekiwaneWydanie(){
 }
 
 function pwaBiezaceWydanie(){return pwaNazwaWersji();}
+function pwaWydanieWorkera(worker){
+  try{return String(new URL(worker?.scriptURL||"",location.href).searchParams.get("v")||"");}
+  catch(error){return "";}
+}
+function pwaSchowajKomunikatWydania(){
+  clearTimeout(pwaAutomatycznePrzeladowanie);
+  pwaAutomatycznePrzeladowanie=0;
+  pwaWykryteWydanie="";
+  document.getElementById("artwayReleaseUpdate")?.remove();
+}
 function pwaMoznaBezpieczniePrzeladowac(){
   const active=document.activeElement;
   return document.visibilityState==="visible"
@@ -6061,7 +6071,12 @@ async function pwaResetCache(){
   await pwaUruchomDokladneWydanie(pwaBiezaceWydanie());
 }
 function pwaPokazNoweWydanie(releaseId){
-  pwaWykryteWydanie=releaseId;
+  const nowe=String(releaseId||""),biezace=String(pwaBiezaceWydanie()||"");
+  if(!nowe||nowe===biezace){
+    pwaSchowajKomunikatWydania();
+    return;
+  }
+  pwaWykryteWydanie=nowe;
   let bar=document.getElementById("artwayReleaseUpdate");
   if(!bar){
     bar=document.createElement("aside");bar.id="artwayReleaseUpdate";bar.className="artway-release-update";bar.setAttribute("role","status");
@@ -6070,7 +6085,7 @@ function pwaPokazNoweWydanie(releaseId){
     document.body.appendChild(bar);
   }
   clearTimeout(pwaAutomatycznePrzeladowanie);
-  pwaAutomatycznePrzeladowanie=setTimeout(()=>{if(pwaWykryteWydanie===releaseId&&pwaMoznaBezpieczniePrzeladowac())void pwaAktywujNajnowszeWydanie();},12000);
+  pwaAutomatycznePrzeladowanie=setTimeout(()=>{if(pwaWykryteWydanie===nowe&&pwaMoznaBezpieczniePrzeladowac())void pwaAktywujNajnowszeWydanie();},12000);
 }
 async function pwaSprawdzNajnowszeWydanie(){
   if(pwaSprawdzanieWydania||document.visibilityState==="hidden")return;
@@ -6090,6 +6105,7 @@ async function pwaSprawdzNajnowszeWydanie(){
     if(!data)return;
     const releaseId=String(data.releaseId||data.version||"");
     if(releaseId&&releaseId!==pwaBiezaceWydanie())pwaPokazNoweWydanie(releaseId);
+    else pwaSchowajKomunikatWydania();
     pwaZapiszWersjeWPodsumowaniu(pwaBiezaceWydanie());
   }catch(error){}finally{pwaSprawdzanieWydania=false;}
 }
@@ -6129,9 +6145,14 @@ async function pwaZarejestrujAplikacje(){
     registration.addEventListener("updatefound",()=>{
       const worker=registration.installing;
       if(!worker)return;
-      worker.addEventListener("statechange",()=>{if(worker.state==="installed"&&navigator.serviceWorker.controller) pwaPokazNoweWydanie(pwaBiezaceWydanie());});
+      worker.addEventListener("statechange",()=>{
+        if(worker.state!=="installed"||!navigator.serviceWorker.controller)return;
+        const workerRelease=pwaWydanieWorkera(worker);
+        if(workerRelease&&workerRelease!==pwaBiezaceWydanie())pwaPokazNoweWydanie(workerRelease);
+      });
     });
-    if(registration.waiting)pwaPokazNoweWydanie(pwaBiezaceWydanie());
+    const waitingRelease=pwaWydanieWorkera(registration.waiting);
+    if(waitingRelease&&waitingRelease!==pwaBiezaceWydanie())pwaPokazNoweWydanie(waitingRelease);
     navigator.serviceWorker.addEventListener("controllerchange",()=>{pwaBezpiecznyReloadPoAktualizacji();});
   }
   catch(error){console.warn("Nie udało się zarejestrować aplikacji PWA",error);}

@@ -545,7 +545,7 @@ test('Oferty i publikacja rozdzielają brak towaru od szkiców i nie pokazują o
   await loginAdmin(page);
   await page.goto('/#/admin/allegro/oferty');
   await expect(page.locator('[data-allegro-offers-mode="sprzedaz"]')).toBeVisible();
-  await expect(page.locator('.allegro-channel-truth')).toContainText('Stan potwierdzony bezpośrednio przez API');
+  await expect(page.locator('.admin-channel-truth.is-allegro')).toContainText('Stan potwierdzony bezpośrednio przez API');
   await expect(page.getByRole('columnheader', { name: 'Kanał sprzedaży' })).toBeVisible();
   await page.getByRole('button', { name: /Wystawianie i aktualizacje/ }).click();
   await expect(page.locator('[data-allegro-offers-mode="publikacja"]')).toBeVisible();
@@ -560,7 +560,7 @@ test('Oferty i publikacja rozdzielają brak towaru od szkiców i nie pokazują o
   await expect(page.getByLabel('Stan magazynowy')).toBeVisible();
   await page.getByRole('button', { name: /W sprzedaży \/ aktywne/ }).click();
   await expect(page.locator('[data-allegro-offers-mode="sprzedaz"]')).toBeVisible();
-  await expect(page.locator('.allegro-channel-truth')).toContainText('Stan potwierdzony bezpośrednio przez API');
+  await expect(page.locator('.admin-channel-truth.is-allegro')).toContainText('Stan potwierdzony bezpośrednio przez API');
   await expect(page.getByRole('columnheader', { name: 'Kanał sprzedaży' })).toBeVisible();
   assertRuntime();
 });

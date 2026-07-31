@@ -32,3 +32,10 @@ test('ręczna aktualizacja czeka na przejęcie kontroli przez dokładne wydanie'
   assert.match(pwa, /location\.replace\(/);
   assert.doesNotMatch(pwa, /lokalnieZapisanaWersja[\s\S]{0,300}pwaPokazNoweWydanie/);
 });
+
+test('PWA nie pokazuje ponownie komunikatu dla już uruchomionego wydania', async () => {
+  const pwa = await readFile('src/frontend/18-pwa.js', 'utf8');
+  assert.match(pwa, /if\(!nowe\|\|nowe===biezace\)\{[\s\S]*?pwaSchowajKomunikatWydania\(\)/);
+  assert.match(pwa, /pwaWydanieWorkera\(registration\.waiting\)/);
+  assert.doesNotMatch(pwa, /pwaPokazNoweWydanie\(pwaBiezaceWydanie\(\)\)/);
+});

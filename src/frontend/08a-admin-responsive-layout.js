@@ -148,6 +148,43 @@
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
   window.addEventListener('resize',()=>zaplanuj(document),{passive:true});
 })();
+
+/* Wspólny szkielet kanału sprzedaży. Allegro i Von Halsky przekazują tylko
+   własne dane oraz akcję filtra; układ, dostępność i klasy pozostają identyczne. */
+function adminKanalStanApiHTML({
+  channel="Kanał sprzedaży",
+  accent="neutral",
+  connected=true,
+  consistent=true,
+  verifiedAt="",
+  metrics=[],
+  ariaLabel="Stan kanału potwierdzony przez API",
+  dataAttribute="",
+}={}){
+  const safeAccent=["allegro","von-halsky","neutral"].includes(accent)?accent:"neutral";
+  const attr=/^data-[a-z0-9-]+$/i.test(String(dataAttribute||""))?` ${dataAttribute}`:"";
+  return `<section class="admin-channel-truth is-${safeAccent} ${consistent?"is-consistent":"is-warning"}"${attr} aria-label="${esc(ariaLabel)}">
+    <div class="admin-channel-truth-head"><div><span>Stan potwierdzony bezpośrednio przez API</span><h3>${esc(channel)} — faktyczny stan kanału</h3></div><div><span class="lvl ${connected?"lvl-ok":"lvl-ostrzezenie"}">${connected?"połączono":"wymaga połączenia"}</span><small>Odczyt: ${esc(verifiedAt||"jeszcze nie wykonano")}</small></div></div>
+    <div class="admin-channel-truth-grid">${metrics.map(metric=>`<article class="${esc(metric.tone||"")}"><small>${esc(metric.label||"")}</small><b>${esc(metric.value??0)}</b><span>${esc(metric.detail||"")}</span></article>`).join("")}</div>
+  </section>`;
+}
+function adminKanalEtapyHTML({
+  id="adminChannelStages",
+  accent="neutral",
+  title="Etap obsługi ofert",
+  description="Stan sprzedaży potwierdza osobny pasek API powyżej.",
+  active="",
+  items=[],
+  onSelect="",
+  dataAttribute="",
+  ariaLabel="Filtry etapów kanału sprzedaży",
+}={}){
+  const safeId=String(id||"adminChannelStages").replace(/[^A-Za-z0-9_-]/g,""),safeAccent=["allegro","von-halsky","neutral"].includes(accent)?accent:"neutral";
+  const handler=/^[A-Za-z_$][\w$]*$/.test(String(onSelect||""))?String(onSelect):"";
+  const attr=/^data-[a-z0-9-]+$/i.test(String(dataAttribute||""))?` ${dataAttribute}`:"";
+  return `<section class="admin-channel-stage is-${safeAccent}"${attr} aria-labelledby="${safeId}"><header><div><small>Wewnętrzna kolejka Artway-TM</small><h3 id="${safeId}">${esc(title)}</h3></div><span>${esc(description)}</span></header><div class="admin-channel-stage-filters" role="toolbar" aria-label="${esc(ariaLabel)}">${items.map(item=>{const value=String(item.value??""),selected=value===String(active);return `<button class="${selected?"active":""}" type="button" aria-pressed="${selected?"true":"false"}" ${handler?`onclick="${handler}(${jsArg(value)})"`:"disabled"}><span aria-hidden="true">${esc(item.icon||"•")}</span><b>${esc(item.count??0)}</b><small>${esc(item.label||value)}</small></button>`;}).join("")}</div></section>`;
+}
+
 const adminWstepneLadowanieTras=new Set();
 let adminWstepneLadowaniePodlaczone=false,adminWstepneLadowanieTimer=0;
 function adminTrasaZOdnosnika(link){

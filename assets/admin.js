@@ -1851,6 +1851,43 @@ function panelWysylkiUslugowejInpost(){
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
   window.addEventListener('resize',()=>zaplanuj(document),{passive:true});
 })();
+
+/* Wspólny szkielet kanału sprzedaży. Allegro i Von Halsky przekazują tylko
+   własne dane oraz akcję filtra; układ, dostępność i klasy pozostają identyczne. */
+function adminKanalStanApiHTML({
+  channel="Kanał sprzedaży",
+  accent="neutral",
+  connected=true,
+  consistent=true,
+  verifiedAt="",
+  metrics=[],
+  ariaLabel="Stan kanału potwierdzony przez API",
+  dataAttribute="",
+}={}){
+  const safeAccent=["allegro","von-halsky","neutral"].includes(accent)?accent:"neutral";
+  const attr=/^data-[a-z0-9-]+$/i.test(String(dataAttribute||""))?` ${dataAttribute}`:"";
+  return `<section class="admin-channel-truth is-${safeAccent} ${consistent?"is-consistent":"is-warning"}"${attr} aria-label="${esc(ariaLabel)}">
+    <div class="admin-channel-truth-head"><div><span>Stan potwierdzony bezpośrednio przez API</span><h3>${esc(channel)} — faktyczny stan kanału</h3></div><div><span class="lvl ${connected?"lvl-ok":"lvl-ostrzezenie"}">${connected?"połączono":"wymaga połączenia"}</span><small>Odczyt: ${esc(verifiedAt||"jeszcze nie wykonano")}</small></div></div>
+    <div class="admin-channel-truth-grid">${metrics.map(metric=>`<article class="${esc(metric.tone||"")}"><small>${esc(metric.label||"")}</small><b>${esc(metric.value??0)}</b><span>${esc(metric.detail||"")}</span></article>`).join("")}</div>
+  </section>`;
+}
+function adminKanalEtapyHTML({
+  id="adminChannelStages",
+  accent="neutral",
+  title="Etap obsługi ofert",
+  description="Stan sprzedaży potwierdza osobny pasek API powyżej.",
+  active="",
+  items=[],
+  onSelect="",
+  dataAttribute="",
+  ariaLabel="Filtry etapów kanału sprzedaży",
+}={}){
+  const safeId=String(id||"adminChannelStages").replace(/[^A-Za-z0-9_-]/g,""),safeAccent=["allegro","von-halsky","neutral"].includes(accent)?accent:"neutral";
+  const handler=/^[A-Za-z_$][\w$]*$/.test(String(onSelect||""))?String(onSelect):"";
+  const attr=/^data-[a-z0-9-]+$/i.test(String(dataAttribute||""))?` ${dataAttribute}`:"";
+  return `<section class="admin-channel-stage is-${safeAccent}"${attr} aria-labelledby="${safeId}"><header><div><small>Wewnętrzna kolejka Artway-TM</small><h3 id="${safeId}">${esc(title)}</h3></div><span>${esc(description)}</span></header><div class="admin-channel-stage-filters" role="toolbar" aria-label="${esc(ariaLabel)}">${items.map(item=>{const value=String(item.value??""),selected=value===String(active);return `<button class="${selected?"active":""}" type="button" aria-pressed="${selected?"true":"false"}" ${handler?`onclick="${handler}(${jsArg(value)})"`:"disabled"}><span aria-hidden="true">${esc(item.icon||"•")}</span><b>${esc(item.count??0)}</b><small>${esc(item.label||value)}</small></button>`;}).join("")}</div></section>`;
+}
+
 const adminWstepneLadowanieTras=new Set();
 let adminWstepneLadowaniePodlaczone=false,adminWstepneLadowanieTimer=0;
 function adminTrasaZOdnosnika(link){
@@ -7393,24 +7430,22 @@ function vonHalskyStatystyki(){
 function vonHalskyEtapySprzedazyHTML(){
   const summary=vonHalskyStan.productQueue?.summary||{},counts=vonHalskyStan.productQueue?.loaded?{wszystkie:Number(summary.total)||0,sprzedaz:Number(summary.selling)||0,publikowanie:Number(summary.publishing)||0,wystawienie:Number(summary.publishable)||0,przygotowanie:Number(summary.preparation)||0,aktualizacja:Number(summary.update_required)||0,wstrzymane:Number(summary.paused)||0}:{wszystkie:0,sprzedaz:0,publikowanie:0,wystawienie:0,przygotowanie:0,aktualizacja:0,wstrzymane:0};
   if(!vonHalskyStan.productQueue?.loaded)for(const product of vonHalskyProdukty()){const quality=vonHalskyOcenaProduktu(product);counts.wszystkie+=1;counts[vonHalskyEtapOferty(product,quality)]+=1;}
-  const items=[["wszystkie","▦","Wszystkie"],["sprzedaz","✓","W sprzedaży"],["publikowanie","…","W publikacji"],["wystawienie","＋","Do wystawienia"],["przygotowanie","⚠","Do przygotowania"],["aktualizacja","↻","Do aktualizacji"],["wstrzymane","⏸","Wstrzymane"]];
-  return `<section class="von-halsky-stage-panel" data-vh-stage-filters aria-labelledby="vonHalskyStageTitle"><header><div><small>Wewnętrzna kolejka Artway-TM</small><h3 id="vonHalskyStageTitle">Etap przygotowania kartotek</h3></div><span>Stan ofert sprzedawanych pokazuje osobny pasek API powyżej.</span></header><div class="von-halsky-stage-filters" role="toolbar" aria-label="Filtry etapów kartotek Artway">${items.map(([value,icon,label])=>`<button class="${vonHalskyEtap===value?"active":""}" type="button" aria-pressed="${vonHalskyEtap===value?"true":"false"}" onclick="vonHalskyEtap=${jsArg(value)};vonHalskyZmienFiltr()"><span aria-hidden="true">${icon}</span><b>${counts[value]||0}</b><small>${esc(label)}</small></button>`).join("")}</div></section>`;
+  const items=[["wszystkie","▦","Wszystkie"],["sprzedaz","✓","W sprzedaży"],["publikowanie","…","W publikacji"],["wystawienie","＋","Do wystawienia"],["przygotowanie","⚠","Do przygotowania"],["aktualizacja","↻","Do aktualizacji"],["wstrzymane","⏸","Wstrzymane"]].map(([value,icon,label])=>({value,icon,label,count:counts[value]||0}));
+  return adminKanalEtapyHTML({id:"vonHalskyStageTitle",accent:"von-halsky",title:"Etap przygotowania kartotek",description:"Stan ofert sprzedawanych pokazuje osobny pasek API powyżej.",active:vonHalskyEtap,items,onSelect:"vonHalskyUstawEtap",dataAttribute:"data-vh-stage-filters",ariaLabel:"Filtry etapów kartotek Artway"});
 }
+function vonHalskyUstawEtap(value){vonHalskyEtap=value;vonHalskyZmienFiltr();}
 function vonHalskyKanalPrawdyHTML(){
   const truth=vonHalskyStan.truth||{},status=vonHalskyStan.channelStatus||{};
   const verifiedAt=status.verifiedAt||vonHalskyStan.sync?.lastCatalogVerifiedAt||vonHalskyStan.sync?.lastCatalogAt;
   const pendingCommands=Number(status.operations?.pendingCommands??vonHalskyStan.sync?.pendingCommandCount??0)||0;
   const consistent=status.consistent!==false;
-  return `<section class="von-halsky-channel-truth ${consistent?"is-consistent":"is-warning"}" data-vh-channel-truth>
-    <div class="von-halsky-channel-truth-head"><div><span>Stan potwierdzony bezpośrednio przez API</span><h3>InPost Von Halsky — faktyczny stan kanału</h3></div><div><span class="lvl ${consistent?"lvl-ok":"lvl-ostrzezenie"}">${consistent?"spójny":"wymaga uzgodnienia"}</span><small>Odczyt: ${esc(verifiedAt?allegroDataTxt(verifiedAt):"jeszcze nie wykonano")}</small></div></div>
-    <div class="von-halsky-channel-truth-grid">
-      <article><small>Oferty w API</small><b>${Number(truth.total)||0}</b><span>wszystkie stany z kanału</span></article>
-      <article class="success"><small>W sprzedaży</small><b>${Number(truth.published)||0}</b><span>wyłącznie PUBLISHED</span></article>
-      <article class="pending"><small>Po stronie API</small><b>${Number(truth.pending)||0}</b><span>PENDING / PROCESSING</span></article>
-      <article class="danger"><small>Odrzucone</small><b>${Number(truth.rejected)||0}</b><span>REJECTED / ERROR</span></article>
-      <article><small>Polecenia oczekujące</small><b>${pendingCommands}</b><span>osobno od liczby ofert</span></article>
-    </div>
-  </section>`;
+  return adminKanalStanApiHTML({channel:"InPost Von Halsky",accent:"von-halsky",connected:consistent,consistent,verifiedAt:verifiedAt?allegroDataTxt(verifiedAt):"",dataAttribute:"data-vh-channel-truth",metrics:[
+    {label:"Oferty w API",value:Number(truth.total)||0,detail:"wszystkie stany z kanału"},
+    {label:"W sprzedaży",value:Number(truth.published)||0,detail:"wyłącznie PUBLISHED",tone:"success"},
+    {label:"Po stronie API",value:Number(truth.pending)||0,detail:"PENDING / PROCESSING",tone:"pending"},
+    {label:"Odrzucone",value:Number(truth.rejected)||0,detail:"REJECTED / ERROR",tone:"danger"},
+    {label:"Polecenia oczekujące",value:pendingCommands,detail:"osobno od liczby ofert"},
+  ]});
 }
 
 function vonHalskySygnaturaProcesu(){
@@ -12322,17 +12357,15 @@ function allegroOfertyEksportujZakres(scope="filtr"){
 function allegroKanalPrawdyHTML(analizy=[],counts={}){
   const offers=analizy.map(item=>item.oferta).filter(Boolean),active=offers.filter(offer=>allegroStatusOfertyMeta(offer).status==="ACTIVE").length,inactive=offers.filter(offer=>allegroStatusOfertyMeta(offer).group==="szkice").length,ended=offers.filter(offer=>allegroStatusOfertyMeta(offer).group==="zakonczone").length;
   const verifiedAt=allegroPodsumowanie?.offers?.updated_at||allegroStan.offerSyncState?.lastLightSyncAt||allegroStan.updated_at;
-  return `<section class="von-halsky-channel-truth is-consistent allegro-channel-truth" aria-label="Stan ofert potwierdzony przez API Allegro">
-    <div class="von-halsky-channel-truth-head"><div><span>Stan potwierdzony bezpośrednio przez API</span><h3>Allegro — faktyczny stan kanału</h3></div><div><span class="lvl ${allegroStan.connected?"lvl-ok":"lvl-ostrzezenie"}">${allegroStan.connected?"połączono":"wymaga połączenia"}</span><small>Odczyt: ${esc(verifiedAt?allegroDataTxt(verifiedAt):"jeszcze nie wykonano")}</small></div></div>
-    <div class="von-halsky-channel-truth-grid">
-      <article><small>Oferty w API</small><b>${offers.length}</b><span>wszystkie pobrane statusy</span></article>
-      <article class="success"><small>W sprzedaży</small><b>${active}</b><span>wyłącznie ACTIVE</span></article>
-      <article class="pending"><small>Szkice / nieaktywne</small><b>${inactive}</b><span>INACTIVE i inne robocze</span></article>
-      <article><small>Zakończone</small><b>${ended}</b><span>ENDED / ARCHIVED</span></article>
-      <article class="${Number(counts.uwaga)||0?"danger":""}"><small>Wymaga uwagi</small><b>${Number(counts.uwaga)||0}</b><span>osobno od stanu sprzedaży</span></article>
-    </div>
-  </section>`;
+  return adminKanalStanApiHTML({channel:"Allegro",accent:"allegro",connected:!!allegroStan.connected,consistent:!!allegroStan.connected,verifiedAt:verifiedAt?allegroDataTxt(verifiedAt):"",ariaLabel:"Stan ofert potwierdzony przez API Allegro",metrics:[
+    {label:"Oferty w API",value:offers.length,detail:"wszystkie pobrane statusy"},
+    {label:"W sprzedaży",value:active,detail:"wyłącznie ACTIVE",tone:"success"},
+    {label:"Szkice / nieaktywne",value:inactive,detail:"INACTIVE i inne robocze",tone:"pending"},
+    {label:"Zakończone",value:ended,detail:"ENDED / ARCHIVED"},
+    {label:"Wymaga uwagi",value:Number(counts.uwaga)||0,detail:"osobno od stanu sprzedaży",tone:Number(counts.uwaga)||0?"danger":""},
+  ]});
 }
+function allegroOfertyUstawEtap(value){allegroOfertyUstawFiltr("publikacja",value);}
 
 allegroOfertyTabelaHTML=function(){
   const q=String(szukajAllegroOfert||"").toLowerCase().trim(),all=(Array.isArray(allegroOferty)?allegroOferty:[]).map(allegroAnalizaMapowaniaOferty);
@@ -12351,8 +12384,20 @@ allegroOfertyTabelaHTML=function(){
   const extra=`<button class="btn danger" ${withdrawSelected.length&&!allegroWycofywanieOfert.busy?"":"disabled"} onclick='allegroPrzygotujWycofanieOfert(${JSON.stringify(withdrawSelected)})'>Zakończ zaznaczone (${withdrawSelected.length})</button>`;
   const operations=adminOperacjeWynikowHTML({id:"allegro-offers",selected:selectedIds.length,pageCount:rows.length,resultCount:filtered.length,selectPage:"allegroOfertyZaznaczZakres('strona')",selectAll:"allegroOfertyZaznaczZakres('filtr')",clear:"zaznaczoneMapowaniaAllegro.clear();renderuj()",exportSelected:"allegroOfertyEksportujZakres('zaznaczone')",exportAll:"allegroOfertyEksportujZakres('filtr')",extra});
   const tableRows=rows.map(a=>{const o=a.oferta,p=a.mapped,pub=allegroStatusOfertyMeta(o),checked=zaznaczoneMapowaniaAllegro.has(String(o.id)),attention=wymagaUwagi(a),channelActive=pub.status==="ACTIVE";return `<tr data-stable-key="${esc(o.id)}"><td><input type="checkbox" ${checked?"checked":""} onchange="allegroPrzelaczOferteDoCeny(${jsArg(o.id)},this.checked)"></td><td data-label="Oferta"><div class="allegro-offer-title-cell">${o.mainImage?`<img src="${esc(o.mainImage)}" alt="" loading="lazy">`:`<span>🏷️</span>`}<div><b>${esc(o.name||"Oferta Allegro")}</b><small>ID ${esc(o.id)} • ${esc(o.externalId||"brak EXTERNAL_ID")}</small></div></div></td><td data-label="Etap oferty"><span class="allegro-publication-status ${pub.cls}">${pub.ico} ${esc(pub.label)}</span>${attention?'<small class="lvl lvl-ostrzezenie">Agent sprawdza powiązanie</small>':""}</td><td data-label="Produkt sklepu">${p?`<b>${esc(p.nazwa||"Produkt")}</b><small>ID ${esc(p.id)} • ${esc(p.externalId||p.sku||"—")}</small>`:'<span class="lvl lvl-ostrzezenie">Agent nie potwierdził produktu</span>'}</td><td data-label="Cena i stan"><b>${esc(o.priceText||"cena —")}</b><small>Stan ${esc(o.stockAvailable??"—")}</small></td><td data-label="Kanał sprzedaży"><div class="channel-sales-state"><b>Allegro</b><span class="lvl ${channelActive?"lvl-ok":pub.group==="zakonczone"?"lvl-ostrzezenie":"lvl-info"}">${channelActive?"● Aktywna sprzedaż":esc(pub.label)}</span><small>API: ${esc(pub.status)}</small></div></td><td data-label="Akcje"><div class="warehouse-worktable-actions">${p?`<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">Produkt</a>`:""}<a class="btn ghost" href="https://allegro.pl/oferta/${encodeURIComponent(o.id)}" target="_blank" rel="noopener">Allegro ↗</a>${pub.withdrawable?`<button class="btn danger" onclick='allegroPrzygotujWycofanieOfert([${jsArg(String(o.id))}])'>Zakończ</button>`:""}</div></td></tr>`;}).join("");
-  const stageItems=[["sprzedaz","●","W sprzedaży / aktywne",counts.sprzedaz],["szkice","○","Szkice / nieaktywne",counts.szkice],["zakonczone","■","Wstrzymane / zakończone",counts.zakonczone],["uwaga","⚠","Wymaga uwagi",counts.uwaga],["wszystkie","▦","Wszystkie",counts.wszystkie]];
-  return `<div class="allegro-listing-workspace allegro-offers-workspace"><section class="panel allegro-listing-hero"><div><span class="order-pro-label">RZECZYWISTY STAN KANAŁU • API ALLEGRO</span><h2>🏷️ Sprzedaż Allegro</h2><p>Domyślnie widzisz wyłącznie aktywne oferty potwierdzone przez Allegro. Powiązania z produktami pozostają trwałe i są utrzymywane automatycznie poza tym widokiem.</p></div><div class="allegro-listing-hero-actions"><a class="btn ghost" href="#/admin/allegro/ustawienia">⚙️ Ustawienia synchronizacji</a></div></section>${allegroKanalPrawdyHTML(all,counts)}<section class="von-halsky-stage-panel allegro-stage-panel"><header><div><small>Wewnętrzna kolejka Artway-TM</small><h3>Etap obsługi ofert</h3></div><span>Aktywność sprzedaży potwierdza osobny pasek API powyżej.</span></header><div class="von-halsky-stage-filters">${stageItems.map(([id,icon,label,value])=>`<button class="${filtrStatusuAllegroOfert===id?"active":""}" onclick="allegroOfertyUstawFiltr('publikacja','${id}')"><span>${icon}</span><b>${value}</b><small>${label}</small></button>`).join("")}</div></section>${adminWyszukiwaniePanelHTML({id:"allegro-offers",description:"Status oferty pochodzi z Allegro. Techniczne mapowanie działa w tle i nie wymaga ręcznej obsługi.",results:filtered.length,active:activeFilters>0,open:true,fields,actions:operations})}${allegroWycofaniePanelHTML()}<section class="panel allegro-listing-catalog"><div class="allegro-listing-results-head"><div><b>${filtered.length} ofert</b><small>Pokazano ${rows.length} • strona ${allegroOfertyStrona} z ${pages}</small></div><span>${selectedIds.length} zaznaczonych</span></div><div class="warehouse-worktable-wrap"><table class="admin-standard-table admin-responsive-table allegro-channel-offers-table"><thead><tr><th></th><th>Oferta</th><th>Etap oferty</th><th>Produkt sklepu</th><th>Cena i stan</th><th>Kanał sprzedaży</th><th>Akcje</th></tr></thead><tbody>${tableRows||'<tr><td colspan="7"><div class="allegro-listing-empty"><span>⌕</span><b>Brak ofert w tym widoku</b><small>Zmień albo wyczyść aktywne filtry.</small></div></td></tr>'}</tbody></table></div>${pages>1?`<nav class="allegro-listing-pagination"><button class="btn ghost" onclick="allegroOfertyUstawStrone(${allegroOfertyStrona-1})" ${allegroOfertyStrona===1?"disabled":""}>← Poprzednia</button><span>Strona <b>${allegroOfertyStrona}</b> z <b>${pages}</b></span><button class="btn ghost" onclick="allegroOfertyUstawStrone(${allegroOfertyStrona+1})" ${allegroOfertyStrona===pages?"disabled":""}>Następna →</button></nav>`:""}</section></div>`;
+  const stageItems=[["sprzedaz","●","W sprzedaży / aktywne",counts.sprzedaz],["szkice","○","Szkice / nieaktywne",counts.szkice],["zakonczone","■","Wstrzymane / zakończone",counts.zakonczone],["uwaga","⚠","Wymaga uwagi",counts.uwaga],["wszystkie","▦","Wszystkie",counts.wszystkie]].map(([value,icon,label,count])=>({value,icon,label,count}));
+  const stages=adminKanalEtapyHTML({id:"allegroOffersStageTitle",accent:"allegro",title:"Etap obsługi ofert",description:"Aktywność sprzedaży potwierdza osobny pasek API powyżej.",active:filtrStatusuAllegroOfert,items:stageItems,onSelect:"allegroOfertyUstawEtap",ariaLabel:"Filtry etapów ofert Allegro"});
+  return `<div class="allegro-listing-workspace allegro-offers-workspace">
+    <section class="panel allegro-listing-hero"><div><span class="order-pro-label">RZECZYWISTY STAN KANAŁU • API ALLEGRO</span><h2>🏷️ Sprzedaż Allegro</h2><p>Domyślnie widzisz wyłącznie aktywne oferty potwierdzone przez Allegro. Powiązania z produktami pozostają trwałe i są utrzymywane automatycznie poza tym widokiem.</p></div><div class="allegro-listing-hero-actions"><a class="btn ghost" href="#/admin/allegro/ustawienia">⚙️ Ustawienia synchronizacji</a></div></section>
+    ${allegroKanalPrawdyHTML(all,counts)}
+    ${stages}
+    ${adminWyszukiwaniePanelHTML({id:"allegro-offers",title:"Wyszukiwanie i filtry ofert",description:"Status oferty pochodzi z Allegro. Techniczne mapowanie działa w tle i nie wymaga ręcznej obsługi.",results:filtered.length,active:activeFilters>0,open:true,fields,actions:operations})}
+    ${allegroWycofaniePanelHTML()}
+    <section class="panel allegro-listing-catalog">
+      <div class="allegro-listing-results-head"><div><b>${filtered.length} ofert w aktywnym widoku</b><small>Pokazano ${rows.length} • strona ${allegroOfertyStrona} z ${pages} • paginacja kanału</small></div><span><b>${selectedIds.length}</b> zaznaczonych</span></div>
+      <div class="admin-standard-table-wrap"><table class="admin-standard-table admin-responsive-table allegro-channel-offers-table"><colgroup><col class="allegro-channel-col-select"><col class="allegro-channel-col-offer"><col class="allegro-channel-col-stage"><col class="allegro-channel-col-product"><col class="allegro-channel-col-price"><col class="allegro-channel-col-status"><col class="allegro-channel-col-actions"></colgroup><thead><tr><th></th><th>Oferta</th><th>Etap oferty</th><th>Produkt sklepu</th><th>Cena i stan</th><th>Kanał sprzedaży</th><th>Akcje</th></tr></thead><tbody>${tableRows||'<tr><td colspan="7"><div class="allegro-listing-empty"><span>⌕</span><b>Brak ofert w tym widoku</b><small>Zmień albo wyczyść aktywne filtry.</small></div></td></tr>'}</tbody></table></div>
+      ${pages>1?`<nav class="allegro-listing-pagination"><button class="btn ghost" onclick="allegroOfertyUstawStrone(${allegroOfertyStrona-1})" ${allegroOfertyStrona===1?"disabled":""}>← Poprzednia</button><span>Strona <b>${allegroOfertyStrona}</b> z <b>${pages}</b></span><button class="btn ghost" onclick="allegroOfertyUstawStrone(${allegroOfertyStrona+1})" ${allegroOfertyStrona===pages?"disabled":""}>Następna →</button></nav>`:""}
+    </section>
+  </div>`;
 };
 
 allegroZgodnoscPozycje=function(){
