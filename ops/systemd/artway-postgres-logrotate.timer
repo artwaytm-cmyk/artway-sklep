@@ -1,0 +1,12 @@
+[Unit]
+Description=Artway-TM cogodzinna kontrola logów PostgreSQL
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5min
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
+

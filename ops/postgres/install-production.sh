@@ -26,10 +26,17 @@ command -v pgbackrest >/dev/null 2>&1 || {
 }
 install -d -o postgres -g postgres -m 0750 \
   /srv/artway/backups/pgbackrest /var/spool/pgbackrest /var/log/pgbackrest
-setfacl -m u:postgres:x /srv/artway/backups
+setfacl -m u:postgres:--x,m::x /srv/artway/backups
 install -o postgres -g postgres -m 0640 \
   "$ROOT/ops/postgres/pgbackrest.conf" \
   /etc/pgbackrest.conf
+install -o root -g root -m 0644 \
+  "$ROOT/ops/postgres/postgresql-common.logrotate" \
+  /etc/logrotate.d/postgresql-common
+install -d -o root -g root -m 0755 /etc/systemd/journald.conf.d
+install -o root -g root -m 0644 \
+  "$ROOT/ops/systemd/20-artway-journal-retention.conf" \
+  /etc/systemd/journald.conf.d/20-artway-journal-retention.conf
 
 if ! grep -q '^artway_roles[[:space:]]' "$PG_ETC/pg_ident.conf"; then
   sed -i '1i artway_roles artway-migrator artway_migrator\nartway_roles artway artway_app' "$PG_ETC/pg_ident.conf"
@@ -67,6 +74,12 @@ install -o root -g root -m 0644 \
 install -o root -g root -m 0644 \
   "$ROOT/ops/systemd/artway-postgres-maintain.timer" \
   /etc/systemd/system/artway-postgres-maintain.timer
+install -o root -g root -m 0644 \
+  "$ROOT/ops/systemd/artway-postgres-logrotate.service" \
+  /etc/systemd/system/artway-postgres-logrotate.service
+install -o root -g root -m 0644 \
+  "$ROOT/ops/systemd/artway-postgres-logrotate.timer" \
+  /etc/systemd/system/artway-postgres-logrotate.timer
 for unit in \
   artway-pgbackrest-full.service artway-pgbackrest-full.timer \
   artway-pgbackrest-diff.service artway-pgbackrest-diff.timer \
@@ -85,5 +98,6 @@ runuser -u postgres -- pgbackrest --stanza=artway check
 runuser -u postgres -- pgbackrest --stanza=artway --type=full backup
 systemctl enable --now \
   artway-postgres-observe.timer artway-postgres-maintain.timer \
+  artway-postgres-logrotate.timer \
   artway-pgbackrest-full.timer artway-pgbackrest-diff.timer \
   artway-pgbackrest-incr.timer

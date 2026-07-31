@@ -20,6 +20,17 @@ readonly ACTIVE_RELEASE_LINK="/srv/artway/releases/current"
 mkdir -p "$BACKUP_ROOT" "$DAILY_ROOT" "$MONTHLY_ROOT"
 chmod 700 "$BACKUP_ROOT" "$DAILY_ROOT" "$MONTHLY_ROOT"
 
+# BACKUP_ROOT jest współdzielonym katalogiem nadrzędnym dla prywatnych kopii
+# aplikacji i repozytorium pgBackRest. chmod powyżej celowo zamyka katalog dla
+# grupy i pozostałych użytkowników, ale równocześnie zeruje maskę istniejących
+# ACL. Przywróć wyłącznie prawo przejścia dla postgres, aby archive-push i
+# kopie PITR nie przestawały działać po każdej codziennej kopii aplikacji.
+command -v setfacl >/dev/null || {
+  echo "Brak wymaganego polecenia: setfacl" >&2
+  exit 1
+}
+setfacl -m u:postgres:--x,m::x "$BACKUP_ROOT"
+
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
   echo "Kopia Artway jest już wykonywana; pomijam równoległe uruchomienie." >&2
@@ -35,6 +46,33 @@ write_status() {
     "$state" "$finished_at" "$detail" "$FINAL_DIR" >"$STATUS_FILE.tmp"
   chmod 600 "$STATUS_FILE.tmp"
   mv -f "$STATUS_FILE.tmp" "$STATUS_FILE"
+}
+
+prune_redundant_daily_backups() {
+  local backup_path backup_name backup_day
+  declare -A newest_backup_for_day=()
+
+  # Zachowujemy najnowszą, atomowo opublikowaną kopię z każdego dnia UTC.
+  # Wcześniejsze kopie z tego samego dnia są zbędne, ponieważ pgBackRest
+  # zapewnia dodatkowo odtwarzanie do punktu w czasie. Katalog bez kompletu
+  # plików kontrolnych nigdy nie staje się podstawą do usuwania starszej kopii.
+  while IFS= read -r backup_path; do
+    backup_name="${backup_path##*/}"
+    backup_day="${backup_name:0:10}"
+    if [[ -z "${newest_backup_for_day[$backup_day]+x}" ]]; then
+      if [[ -f "$backup_path/SHA256SUMS" \
+        && -f "$backup_path/database.dump" \
+        && -f "$backup_path/application.tar.zst" ]]; then
+        newest_backup_for_day[$backup_day]="$backup_path"
+      fi
+      continue
+    fi
+    printf 'Usuwam nadmiarową kopię z dnia %s: %s\n' "$backup_day" "$backup_path"
+    rm -rf -- "$backup_path"
+  done < <(
+    find "$DAILY_ROOT" -mindepth 1 -maxdepth 1 -type d \
+      -name '20??-??-??T??????Z' -print | sort -r
+  )
 }
 
 cleanup() {
@@ -198,6 +236,7 @@ fi
 
 find "$DAILY_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime "+$RETENTION_DAYS" -print -exec rm -rf -- {} +
 find "$MONTHLY_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime "+$RETENTION_MONTHS_DAYS" -print -exec rm -rf -- {} +
+prune_redundant_daily_backups
 
 write_status "ok" "backup-verified"
 trap - EXIT INT TERM

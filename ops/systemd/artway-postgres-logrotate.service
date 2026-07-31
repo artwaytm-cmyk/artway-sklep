@@ -1,0 +1,11 @@
+[Unit]
+Description=Artway-TM kontrola rozmiaru logów PostgreSQL
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/logrotate /etc/logrotate.d/postgresql-common
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
