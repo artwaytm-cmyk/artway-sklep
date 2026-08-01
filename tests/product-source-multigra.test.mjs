@@ -83,3 +83,32 @@ test('krótki opis produktu Alexander ma pierwszeństwo przed koszykiem, logowan
     globalThis.fetch = previousFetch;
   }
 });
+
+test('import WordPress pobiera oficjalne zdjęcie produktu z primaryImageOfPage JSON-LD', async () => {
+  const html = `<!doctype html><html><head>
+    <title>Śrubka po śrubce – Multigra</title>
+    <script type="application/ld+json">${JSON.stringify({
+      '@context': 'https://schema.org',
+      '@graph': [
+        { '@type': 'WebPage', '@id': 'https://multigra.com.pl/produkty/srubka-po-srubce/#webpage', name: 'Śrubka po śrubce', thumbnailUrl: 'https://multigra.com.pl/wp-content/uploads/sites/5/2026/05/3002.jpg', primaryImageOfPage: { '@id': 'https://multigra.com.pl/produkty/srubka-po-srubce/#primaryimage' } },
+        { '@type': 'ImageObject', '@id': 'https://multigra.com.pl/produkty/srubka-po-srubce/#primaryimage', url: 'https://multigra.com.pl/wp-content/uploads/sites/5/2026/05/3002.jpg', contentUrl: 'https://multigra.com.pl/wp-content/uploads/sites/5/2026/05/3002.jpg' },
+        { '@type': 'Organization', logo: { url: 'https://multigra.com.pl/logo.png' } },
+      ],
+    })}</script>
+  </head><body><h1>Śrubka po śrubce</h1><p>Gra edukacyjna rozwijająca sprawność manualną dzieci.</p>${' '.repeat(1800)}</body></html>`;
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(html, { status: 200, headers: { 'content-type': 'text/html' } });
+  try {
+    const service = createProductSourceInspectionService({
+      read: async (_key, fallback) => fallback,
+      write: async () => {},
+      normalizeKey: (value) => String(value || '').toLowerCase().replace(/\W+/g, ''),
+      nameSimilarity: () => 0,
+    });
+    const result = await service.inspectProductUrl('https://multigra.com.pl/produkty/srubka-po-srubce/');
+    assert.equal(result.product.zdjecie, 'https://multigra.com.pl/wp-content/uploads/sites/5/2026/05/3002.jpg');
+    assert.deepEqual(result.product.sourceEvidence.imageUrls, ['https://multigra.com.pl/wp-content/uploads/sites/5/2026/05/3002.jpg']);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});

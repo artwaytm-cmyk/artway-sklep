@@ -4,6 +4,7 @@ import { isValidGtin, synchronizeProductIdentifierAliases } from './domain/produ
 import { SOURCE_IMAGE_POLICY_VERSION } from './domain/source-product-images.mjs';
 import { responsibleProducerFromSourceText } from './domain/von-halsky-responsible-producer.mjs';
 import { createProductSourceResultCache, productSourceCacheKey } from './product-source-result-cache.mjs';
+import { jsonLdPrimaryImageUrls } from './domain/product-source-jsonld-images.mjs';
 
 export function createProductSourceInspectionService({ read, write, normalizeKey, nameSimilarity }) {
   const czytaj = read;
@@ -195,6 +196,11 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
       const images = Array.isArray(product?.image) ? product.image : [product?.image];
       for (const image of images) dodaj(typeof image === 'object' ? image?.url || image?.contentUrl : image);
     }
+    // WordPress/Yoast często nie tworzy osobnego obiektu Product. Oficjalne
+    // zdjęcie produktu znajduje się wtedy w WebPage.primaryImageOfPage,
+    // thumbnailUrl albo w powiązanym ImageObject. Czytamy wyłącznie obraz
+    // główny strony, nigdy wszystkie grafiki z JSON-LD (np. logo firmy).
+    for (const image of jsonLdPrimaryImageUrls(html)) dodaj(image);
     const gallery = (String(html || '').match(/<section\b[^>]*id=["']projector_photos["'][^>]*>([\s\S]*?)<\/section>/i) || [])[1] || '';
     for (const m of gallery.matchAll(/<img\b[^>]*\bdata-img_high_res=["']([^"']+)["'][^>]*>/gi)) dodaj(m[1]);
     for (const m of gallery.matchAll(/<img\b[^>]*class=["'][^"']*\bphotos__photo\b(?![^"']*\b--nav\b)[^"']*["'][^>]*>/gi)) dodaj(attrHtml(m[0], 'data-img_high_res') || attrHtml(m[0], 'src'));

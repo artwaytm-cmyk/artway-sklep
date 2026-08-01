@@ -12,6 +12,7 @@ import {
 } from './allegro-preparation-queue.mjs';
 import { enrichProductFromAuxiliarySources } from './product-auxiliary-source-enrichment.mjs';
 import { deterministicProductEditorialFallback } from './product-editorial-fallback.mjs';
+import { trustedSourceIdentifierPatch } from './product-source-identifier-repair.mjs';
 
 const asArray = (value) => Array.isArray(value) ? value : [];
 const asObject = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -189,6 +190,7 @@ export function createAllegroPreparationWorker({
       for (const [field, value] of Object.entries(fill)) {
         if ((product[field] === undefined || product[field] === null || String(product[field]).trim() === '') && value !== undefined && value !== null && value !== '') product[field] = value;
       }
+      Object.assign(product, trustedSourceIdentifierPatch(product, incoming));
       const inspectedImages = sourceImages(product, inspected || {});
       if (inspectedImages.ok) product = { ...product, ...inspectedImages.patch };
       product.sourceUrl = incoming.sourceUrl || incoming.producentUrl || sourceUrl;
