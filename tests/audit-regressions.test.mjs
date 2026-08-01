@@ -59,6 +59,9 @@ test('katalog produktów pamięta tylko ograniczone strony PostgreSQL i nie pobi
   assert.match(catalog, /chmuraRuntimeCacheOdczytaj\(SKLEP_KATALOG_CACHE_KEY\)/);
   assert.match(catalog, /product-catalog-query/);
   assert.match(catalog, /Centralny katalog nie zwrócił prawidłowej strony produktów/);
+  assert.match(catalog, /sklepKatalogCentralnyZapytania=new Map\(\)/);
+  assert.match(catalog, /const aktywne=sklepKatalogCentralnyZapytania\.get\(signature\);if\(aktywne\)return aktywne/);
+  assert.doesNotMatch(catalog, /sklepKatalogCentralnyStan\.loading&&sklepKatalogCentralnyStan\.signature===signature\)return null/);
 });
 
 test('szablon GoDan wyłącznie dopisuje katalogi i nie usuwa produktów', () => {

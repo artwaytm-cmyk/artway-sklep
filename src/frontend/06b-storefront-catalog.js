@@ -1,5 +1,5 @@
 const SKLEP_KATALOG_CACHE_KEY="public-catalog-pages-v1",SKLEP_KATALOG_CACHE_FRESH_MS=5*60*1000,SKLEP_KATALOG_CACHE_STALE_MS=24*60*60*1000,SKLEP_KATALOG_CACHE_LIMIT=24;
-let sklepKatalogCentralnyCache=new Map(),sklepKatalogCentralnyStan={signature:"",loading:false,data:null,error:""},sklepKatalogCentralnyFacety={categories:[],producers:[]},sklepKatalogCentralnyPodsumowanie={},sklepKatalogCentralnyTimer=null,sklepProduktCentralnyWToku=new Map(),sklepProduktCentralnyBledy=new Map(),sklepKatalogTrwaly={loaded:false,promise:null,entries:{}};
+let sklepKatalogCentralnyCache=new Map(),sklepKatalogCentralnyStan={signature:"",loading:false,data:null,error:""},sklepKatalogCentralnyFacety={categories:[],producers:[]},sklepKatalogCentralnyPodsumowanie={},sklepKatalogCentralnyTimer=null,sklepKatalogCentralnyZapytania=new Map(),sklepProduktCentralnyWToku=new Map(),sklepProduktCentralnyBledy=new Map(),sklepKatalogTrwaly={loaded:false,promise:null,entries:{}};
 function sklepKatalogCentralnySort(value="default"){return ({"price-asc":"cena-rosnaco","price-desc":"cena-malejaco",name:"nazwa",rating:"ocena",newest:"najnowsze"})[value]||"external";}
 function sklepKatalogCentralnyOfertaParams(){
   const oferta=ustawieniaOfertyGlownej(),params={};
@@ -36,18 +36,22 @@ function sklepKatalogZastosujStrone(signature,data,at=Date.now()){
 async function sklepKatalogCentralnyPobierz(params,force=false){
   const signature=sklepKatalogCentralnySygnatura(params),cached=!force?sklepKatalogCentralnyCache.get(signature):null;
   if(cached&&Date.now()-cached.at<SKLEP_KATALOG_CACHE_FRESH_MS)return cached.data;
-  if(sklepKatalogCentralnyStan.loading&&sklepKatalogCentralnyStan.signature===signature)return null;
-  sklepKatalogCentralnyStan={signature,loading:true,data:null,error:""};
-  const trwale=await sklepKatalogTrwalyWczytaj(),trwaly=!force?trwale[signature]:null;
-  if(trwaly&&Date.now()-Number(trwaly.at||0)<SKLEP_KATALOG_CACHE_FRESH_MS)return sklepKatalogZastosujStrone(signature,trwaly.data,Number(trwaly.at)||Date.now());
-  try{
-    const data=await chmura("product-catalog-query",{params:{...params,audience:"public"},timeout:30000});
-    if(!data?.available||!Array.isArray(data.items))throw new Error("Centralny katalog nie zwrócił prawidłowej strony produktów.");
-    sklepKatalogTrwalyZapisz(signature,data).catch(()=>false);return sklepKatalogZastosujStrone(signature,data);
-  }catch(error){
-    if(trwaly?.data){loguj("ostrzezenie","Katalog PostgreSQL chwilowo niedostępny — pokazano ostatnią małą stronę z pamięci urządzenia.");return sklepKatalogZastosujStrone(signature,{...trwaly.data,cacheStale:true},Date.now());}
-    sklepKatalogCentralnyStan={signature,loading:false,data:null,error:String(error?.message||error)};return null;
-  }
+  const aktywne=sklepKatalogCentralnyZapytania.get(signature);if(aktywne)return aktywne;
+  const request=(async()=>{
+    sklepKatalogCentralnyStan={signature,loading:true,data:null,error:""};
+    const trwale=await sklepKatalogTrwalyWczytaj(),trwaly=!force?trwale[signature]:null;
+    if(trwaly&&Date.now()-Number(trwaly.at||0)<SKLEP_KATALOG_CACHE_FRESH_MS)return sklepKatalogZastosujStrone(signature,trwaly.data,Number(trwaly.at)||Date.now());
+    try{
+      const data=await chmura("product-catalog-query",{params:{...params,audience:"public"},timeout:30000});
+      if(!data?.available||!Array.isArray(data.items))throw new Error("Centralny katalog nie zwrócił prawidłowej strony produktów.");
+      sklepKatalogTrwalyZapisz(signature,data).catch(()=>false);return sklepKatalogZastosujStrone(signature,data);
+    }catch(error){
+      if(trwaly?.data){loguj("ostrzezenie","Katalog PostgreSQL chwilowo niedostępny — pokazano ostatnią małą stronę z pamięci urządzenia.");return sklepKatalogZastosujStrone(signature,{...trwaly.data,cacheStale:true},Date.now());}
+      sklepKatalogCentralnyStan={signature,loading:false,data:null,error:String(error?.message||error)};return null;
+    }
+  })();
+  sklepKatalogCentralnyZapytania.set(signature,request);
+  try{return await request;}finally{if(sklepKatalogCentralnyZapytania.get(signature)===request)sklepKatalogCentralnyZapytania.delete(signature);}
 }
 function sklepKatalogCentralnyWidok(params){
   const signature=sklepKatalogCentralnySygnatura(params),cached=sklepKatalogCentralnyCache.get(signature);if(cached&&Date.now()-cached.at<SKLEP_KATALOG_CACHE_FRESH_MS)return {ready:true,data:cached.data};
