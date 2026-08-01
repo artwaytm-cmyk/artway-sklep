@@ -113,6 +113,26 @@ test('przygotowanie korzysta z potwierdzonego producenta GPSR zapisanego w karto
   assert.deepEqual(result.draft.productSet[0].responsibleProducer, { type: 'ID', id: 'producer-confirmed' });
 });
 
+test('przygotowanie odrzuca stary GPSR obcej firmy po zmianie producenta produktu', () => {
+  const result = allegroApplyProductSetSafety({
+    draft: { productSet: [{ product: { id: 'catalog-1' } }] },
+    product: {
+      producent: 'Multigra',
+      marka: 'Multigra',
+      allegroResponsibleProducer: { id: 'producer-old', name: 'Alexander.', score: 100 },
+      allegroSafetyInformation: { type: 'TEXT', description: 'Używać zgodnie z instrukcją.' },
+    },
+    catalog: {},
+    responsibleProducers: [
+      { id: 'producer-old', name: 'Alexander.' },
+      { id: 'producer-current', name: 'Multigra', tradeName: 'MultiGra Sp. z o.o.' },
+    ],
+  });
+  assert.equal(result.ready, true);
+  assert.deepEqual(result.draft.productSet[0].responsibleProducer, { type: 'ID', id: 'producer-current' });
+  assert.equal(result.responsibleProducer.name, 'Multigra');
+});
+
 test('ponowna kontrola GPSR usuwa stary brak, gdy pole zostało już uzupełnione', () => {
   assert.deepEqual(allegroMergeGpsrMissing(
     ['odpowiedzialny producent GPSR', 'informacja o bezpieczeństwie GPSR', 'wymagany parametr: Wysokość produktu'],

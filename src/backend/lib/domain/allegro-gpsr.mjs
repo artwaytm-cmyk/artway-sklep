@@ -51,12 +51,19 @@ export function allegroApplyProductSetSafety({
   const safety = catalog?.productSafety && typeof catalog.productSafety === 'object' ? catalog.productSafety : {};
   const catalogProducers = Array.isArray(safety.responsibleProducers) ? safety.responsibleProducers : [];
   const directory = catalogProducers.length ? catalogProducers : responsibleProducers;
-  const storedResponsibleProducer = text(product?.allegroResponsibleProducer?.id, 120)
+  const storedResponsibleProducerCandidate = text(product?.allegroResponsibleProducer?.id, 120)
     ? {
         id: text(product.allegroResponsibleProducer.id, 120),
         name: text(product.allegroResponsibleProducer.name, 200),
         score: Number(product.allegroResponsibleProducer.score) || 100,
       }
+    : null;
+  // Producent lub marka mogą zostać poprawione po wcześniejszym przygotowaniu.
+  // Nie wolno wtedy bezwarunkowo wysłać starego identyfikatora GPSR innej
+  // firmy. Zapisany wybór jest ważny tylko, gdy nadal pasuje do bieżącej
+  // tożsamości produktu; w przeciwnym razie wybieramy wpis z katalogu API.
+  const storedResponsibleProducer = storedResponsibleProducerCandidate
+    ? allegroSelectResponsibleProducer(product, [storedResponsibleProducerCandidate])
     : null;
   const responsibleProducer = storedResponsibleProducer
     || allegroSelectResponsibleProducer(product, directory)
