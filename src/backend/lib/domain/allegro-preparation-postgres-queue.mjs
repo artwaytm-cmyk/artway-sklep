@@ -221,10 +221,24 @@ export function createPostgresAllegroPreparationQueue({
     try {
       await client.query('BEGIN');
       const occupiedRows = await client.query(
-        "SELECT * FROM artway_allegro_preparation_tasks WHERE namespace=$1 AND product_id=ANY($2::text[]) AND status IN ('pending','running') FOR UPDATE",
+        "SELECT * FROM artway_allegro_preparation_tasks WHERE namespace=$1 AND product_id=ANY($2::text[]) AND status IN ('pending','running','attention','waiting_provider','decision_required','failed') FOR UPDATE",
         [ns, ids],
       );
-      const occupied = new Map(occupiedRows.rows.map((row) => [String(row.product_id), taskFromRow(row)]));
+      const occupied = new Map(occupiedRows.rows
+        .filter((row) => ['pending', 'running'].includes(String(row.status)))
+        .map((row) => [String(row.product_id), taskFromRow(row)]));
+      const replaceableIds = occupiedRows.rows
+        .filter((row) => !['pending', 'running'].includes(String(row.status)))
+        .map((row) => String(row.task_id));
+      if (replaceableIds.length) {
+        await client.query(`
+          UPDATE artway_allegro_preparation_tasks
+          SET status='superseded',completed_at=COALESCE(completed_at,NOW()),lease_until=NULL,worker_id='',
+              result=result || jsonb_build_object('supersededReason','new_preparation_attempt','supersededAt',NOW()),
+              updated_at=NOW()
+          WHERE namespace=$1 AND task_id=ANY($2::text[])
+        `, [ns, replaceableIds]);
+      }
       const fingerprints = Object.values(inputFingerprintByProduct || {}).filter(Boolean);
       const completedByFingerprint = new Map();
       if (fingerprints.length) {
@@ -233,7 +247,7 @@ export function createPostgresAllegroPreparationQueue({
           FROM artway_allegro_preparation_tasks
           WHERE namespace=$1 AND product_id=ANY($2::text[])
             AND input_fingerprint<>'' AND input_fingerprint=ANY($3::text[])
-            AND status IN ('completed','decision_required','waiting_provider')
+            AND status='completed'
           ORDER BY product_id,updated_at DESC
         `, [ns, ids, fingerprints]);
         for (const row of previous.rows) {
