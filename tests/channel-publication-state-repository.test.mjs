@@ -54,3 +54,30 @@ test('cache kategorii zwraca wyłącznie ważny schemat, a po awarii może udost
   assert.equal(await repository.getCategorySchema('allegro', '123'), null);
   assert.equal((await repository.getCategorySchema('allegro', '123', { allowExpired: true })).expired, true);
 });
+
+test('repozytorium domyka wszystkie oczekujące potwierdzenia produktu po odczycie kanału', async () => {
+  let executed = null;
+  const pool = {
+    query: async (sql, params) => {
+      executed = { sql, params };
+      return { rowCount: 3, rows: [] };
+    },
+  };
+  const repository = createChannelPublicationStateRepository({
+    pool,
+    now: () => new Date('2026-08-01T11:30:00.000Z'),
+  });
+  const updated = await repository.reconcilePendingReceiptsForProduct({
+    productId: 'P-1',
+    channel: 'von_halsky',
+    targetId: 'VH-1',
+    status: 'readback_confirmed',
+    responseSummary: { remoteStatus: 'PUBLISHED' },
+  });
+  assert.equal(updated, 3);
+  assert.match(executed.sql, /status IN \('requested','queued','publishing','pending','processing'\)/);
+  assert.deepEqual(executed.params.slice(0, 5), [
+    'artway-sklep', 'von_halsky', 'P-1', 'VH-1', 'readback_confirmed',
+  ]);
+  assert.equal(executed.params[8].toISOString(), '2026-08-01T11:30:00.000Z');
+});

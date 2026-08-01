@@ -160,12 +160,43 @@ export function createChannelPublicationStateRepository({
     return result.rows[0] || null;
   }
 
+  async function reconcilePendingReceiptsForProduct(input = {}) {
+    if (!enabled) return 0;
+    const channel = validChannel(input.channel, true);
+    const productId = text(input.productId, 160);
+    if (!productId) throw new TypeError('Uzgodnienie potwierdzeń wymaga identyfikatora produktu.');
+    const status = text(input.status, 80);
+    if (!['publishing', 'readback_confirmed', 'failed'].includes(status)) {
+      throw new TypeError(`Nieobsługiwany stan uzgodnienia potwierdzeń: ${status || '(brak)'}`);
+    }
+    const confirmedAt = status === 'readback_confirmed' ? (input.confirmedAt || now()) : null;
+    const responseSummary = object(input.responseSummary);
+    const result = await pool.query(`
+      UPDATE artway_channel_publication_receipts
+      SET target_id=CASE WHEN $4<>'' THEN $4 ELSE target_id END,
+          status=$5,
+          error_code=$6,
+          error_text=$7,
+          response_summary=response_summary || $8::jsonb,
+          updated_at=NOW(),
+          confirmed_at=COALESCE($9,confirmed_at)
+      WHERE namespace=$1 AND channel=$2 AND product_id=$3
+        AND status IN ('requested','queued','publishing','pending','processing')
+    `, [
+      ns, channel, productId, text(input.targetId, 200), status,
+      text(input.errorCode, 160), text(input.errorText, 2000),
+      JSON.stringify(responseSummary), confirmedAt,
+    ]);
+    return Number(result.rowCount || 0);
+  }
+
   return Object.freeze({
     enabled,
     getCategorySchema,
     putCategorySchema,
     upsertState,
     recordReceipt,
+    reconcilePendingReceiptsForProduct,
   });
 }
 

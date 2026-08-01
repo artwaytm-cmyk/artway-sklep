@@ -42,6 +42,19 @@ export async function persistVonHalskyReconciliationState({
       metadata: { remoteStatus, source },
     });
     observed += 1;
+    const receiptStatus = confirmed ? 'readback_confirmed' : failed ? 'failed' : 'publishing';
+    if (channelState?.reconcilePendingReceiptsForProduct) {
+      receipts += await channelState.reconcilePendingReceiptsForProduct({
+        productId,
+        channel: 'von_halsky',
+        targetId,
+        status: receiptStatus,
+        errorCode: failed ? `von_halsky_${remoteStatus.toLowerCase()}` : '',
+        errorText,
+        responseSummary: { readbackConfirmed: confirmed, remoteStatus, source },
+        confirmedAt: confirmed ? timestamp : null,
+      });
+    }
     if (!receiptId || !channelState?.recordReceipt) continue;
     await channelState.recordReceipt({
       productId,
@@ -50,13 +63,12 @@ export async function persistVonHalskyReconciliationState({
       idempotencyKey: receiptId,
       providerRequestId: receiptId,
       targetId,
-      status: confirmed ? 'readback_confirmed' : failed ? 'failed' : 'publishing',
+      status: receiptStatus,
       errorCode: failed ? `von_halsky_${remoteStatus.toLowerCase()}` : '',
       errorText,
       responseSummary: { readbackConfirmed: confirmed, remoteStatus, source },
       confirmedAt: confirmed ? timestamp : null,
     });
-    receipts += 1;
   }
   return { observed, receipts };
 }
