@@ -31,6 +31,7 @@ test('schemat PostgreSQL powstaje wyłącznie przez numerowane migracje', async 
     '0017_diagnostics_postgres_read_model.sql',
     '0018_retire_legacy_allegro_agent_tasks.sql',
     '0019_one_current_allegro_preparation_task.sql',
+    '0020_supersede_obsolete_preparation_results.sql',
   ]);
   const runtimeFiles = [
     'src/backend/lib/core/postgres-store-repository.mjs',
