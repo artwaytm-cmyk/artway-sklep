@@ -1269,7 +1269,7 @@ function widokAdminProdukty(){
 let asortymentAgentKolejka={busy:false,operation:"pelna",ids:[],done:0,total:0,ok:0,warnings:0,failed:0,cancel:false,current:"",results:[],startedAt:"",finishedAt:""};
 let asortymentAllegroDecyzja={step:"idle",busy:false,operation:"update",ids:[],skipped:0,done:0,total:0,ok:0,failed:0,error:"",results:[]};
 let asortymentPelneProduktyCache=new Map();
-let asortymentSerwerowaKolejka={batchId:"",checking:false,timer:null,lastCheck:0};
+let asortymentSerwerowaKolejka={batchId:"",checking:false,timer:null,lastCheck:0,state:null};
 const ASORTYMENT_PELNY_PRODUKT_CACHE_MS=15*60*1000;
 
 function asortymentProduktPoId(rawId){return pobierzProduktAdmin(rawId)||produktyDoAdministracji().find(p=>String(p.id)===String(rawId))||null;}
@@ -1293,6 +1293,8 @@ function asortymentProduktyZId(ids=[]){return [...new Set(ids.map(String))].map(
 function asortymentOdswiezCentrumDzialan(){
   const listing=document.querySelector("[data-allegro-publication-center]");
   if(listing&&typeof allegroPublikacjaCentrumOperacjiHTML==="function")listing.innerHTML=allegroPublikacjaCentrumOperacjiHTML();
+  const queue=document.querySelector("[data-allegro-agent-queue]");
+  if(queue&&typeof allegroZadaniaAgentaOfertHTML==="function")queue.outerHTML=allegroZadaniaAgentaOfertHTML();
   const el=document.querySelector("[data-product-agent-center]");if(el)el.innerHTML=asortymentCentrumDzialanHTML();
 }
 function asortymentOdswiezStanZaznaczenia(){
@@ -1308,6 +1310,7 @@ function asortymentUstawOperacjeAgenta(value){asortymentAgentKolejka.operation=S
 function asortymentUstawOperacjeZewnetrzna(value){asortymentAllegroDecyzja.operation=String(value||"update");}
 
 function asortymentZastosujStanKolejkiSerwera(queue={},preferredBatchId=""){
+  asortymentSerwerowaKolejka.state=queue&&typeof queue==="object"?queue:null;
   const batches=Array.isArray(queue.batches)?queue.batches:[],preferred=batches.find(item=>String(item.id)===String(preferredBatchId||asortymentSerwerowaKolejka.batchId)),working=batches.find(item=>Number(item.pending||0)+Number(item.running||0)>0),newest=batches[0]||null;
   const batch=working||(newest&&preferred&&Date.parse(newest.requestedAt||0)>Date.parse(preferred.requestedAt||0)?newest:preferred)||newest||null;
   if(!batch)return false;

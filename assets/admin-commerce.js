@@ -1458,7 +1458,16 @@ function allegroRozniceOfertyProduktu(p={},o=null){
   if(p.allegroProductId&&String(o.productId||"")!==String(p.allegroProductId))roznice.push("produkt katalogowy");
   return [...new Set(roznice)];
 }
-function allegroAktywneZadaniaAgentaOfert(){return (agentAIAllegroZadania||[]).filter(x=>!["wykonane","anulowane"].includes(String(x.status||"").toLowerCase()));}
+function allegroStanKolejkiPrzygotowania(){
+  const direct=typeof asortymentSerwerowaKolejka!=="undefined"?asortymentSerwerowaKolejka.state:null;
+  const runtime=typeof agentAIRuntime!=="undefined"?agentAIRuntime.preparationQueue:null;
+  return direct||runtime||null;
+}
+function allegroAktywneZadaniaAgentaOfert(){
+  const queue=allegroStanKolejkiPrzygotowania(),current=Array.isArray(queue?.current)?queue.current:[];
+  const active=new Set(["pending","running","attention","waiting_provider","decision_required","failed"]);
+  return current.filter(task=>active.has(String(task?.status||"").toLowerCase()));
+}
 const ALLEGRO_PROCEDURA_AGENTA_OFERT=[
   "Sprawdź ID oferty i zapisane mapowanie, następnie UUID katalogu, external.id/SKU, EAN, kod producenta i identyczną nazwę.",
   "Jeżeli oferta istnieje — połącz ją z produktem i aktualizuj; nigdy nie twórz duplikatu.",
@@ -1472,22 +1481,26 @@ function allegroProceduraAgentaOfertHTML(){
   return `<details class="backend-note allegro-info-bottom"><summary><b>🤖 Stała procedura Agenta przy dodawaniu oferty</b></summary><ol>${ALLEGRO_PROCEDURA_AGENTA_OFERT.map(x=>`<li>${esc(x)}</li>`).join("")}</ol></details>`;
 }
 async function allegroAgentUzupelnijZadanieOferty(taskId){
-  const task=(agentAIAllegroZadania||[]).find(x=>String(x.id)===String(taskId));if(!task){toast("Nie znaleziono zadania Agenta AI");return;}
+  const task=allegroAktywneZadaniaAgentaOfert().find(x=>String(x.id)===String(taskId));
+  if(!task){toast("To zadanie zostało już zakończone albo zastąpione nowszym wynikiem");return;}
   const p=pobierzProduktAdmin(task.productId);if(!p){toast("Produkt z zadania nie istnieje");return;}
-  const s=task.suggestions||{},next={};
-  for(const key of ["producent","marka","gtin","ean","kodProducenta","mpn","zdjecie","allegroCategoryId","allegroProductId"]){
-    if(s[key]&&!p[key])next[key]=String(s[key]);
-  }
-  if(Array.isArray(s.zdjecia)&&s.zdjecia.length&&!(p.zdjecia||[]).length)next.zdjecia=s.zdjecia.slice(0,15);
-  if(Array.isArray(s.allegroParameters)&&s.allegroParameters.length&&!Array.isArray(p.allegroParameters))next.allegroParameters=s.allegroParameters;
-  if(Object.keys(next).length)await chmuraZapiszProduktyCentralnie([{productId:p.id,fields:next}],"agent-allegro-task");
-  zbudujProdukty();
-  toast("Agent uzupełnił dostępne dane i ponownie sprawdza szkic…");
-  await allegroPrzygotujSzkicProduktZListy(p.id);
+  toast(`Agent ponownie analizuje i zapisuje kartotekę: ${p.nazwa||p.id}`);
+  await asortymentUruchomAgenta([p.id],"allegro");
+}
+function allegroAgentStatusZadania(task={}){
+  const status=String(task.status||"").toLowerCase();
+  if(status==="running")return {label:"Agent pracuje",className:"working",icon:"⋯"};
+  if(status==="pending"||status==="attention")return {label:"Automatyczna korekta",className:"queued",icon:"↻"};
+  if(status==="waiting_provider")return {label:"Oczekuje na dostęp AI",className:"waiting",icon:"◷"};
+  if(status==="decision_required")return {label:"Brakuje pewnego faktu",className:"decision",icon:"!"};
+  return {label:"Ponowna naprawa",className:"failed",icon:"×"};
 }
 function allegroZadaniaAgentaOfertHTML(){
-  const tasks=allegroAktywneZadaniaAgentaOfert();if(!tasks.length)return `<div class="duplicate-audit-ok"><b>✅ Agent AI:</b> brak otwartych zadań dotyczących ofert Allegro.</div>`;
-  return `<section class="allegro-agent-tasks"><div class="order-section-head"><div><b>🤖 Zadania przekazane Agentowi AI</b><small>Agent najpierw szuka istniejącej oferty, blokuje duplikat, uzupełnia dane katalogowe i ponawia operację. Zgadywanie brakujących danych jest zabronione.</small></div><a class="btn ghost" href="#/admin/agent-ai">Otwórz Agenta AI</a></div><div class="allegro-agent-task-list">${tasks.slice(0,30).map(t=>`<article><div><b>${esc(t.productName||"Produkt")}</b><small>ID ${esc(t.productId)} • ${esc(t.status||"oczekuje")} • próby: ${esc(t.attempts||1)}</small><p>${[...(t.missing||[]),...(t.errors||[]).map(e=>e.message||e.code)].map(esc).join(" • ")||"Weryfikacja danych"}</p></div><div class="warehouse-worktable-actions"><button class="btn" onclick="allegroAgentUzupelnijZadanieOferty(${jsArg(t.id)})">🤖 Uzupełnij i sprawdź</button><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(t.productId)}">✏️ Edytuj produkt</a></div></article>`).join("")}</div></section>`;
+  const queue=allegroStanKolejkiPrzygotowania(),tasks=allegroAktywneZadaniaAgentaOfert();
+  if(!queue){return `<section class="allegro-agent-tasks is-loading" data-allegro-agent-queue><div><b>Łączę z kolejką Agenta…</b><small>Pobieram wyłącznie aktualny stan zapisany w PostgreSQL.</small></div></section>`;}
+  if(!tasks.length)return `<section class="allegro-agent-tasks is-empty" data-allegro-agent-queue><div><b>✓ Brak otwartych napraw Allegro</b><small>Wykonane zadania nie wracają do tego widoku. Nowy wpis pojawi się dopiero po rzeczywistym błędzie lub zmianie produktu.</small></div><a class="btn ghost" href="#/admin/agent-ai/praca">Historia pracy</a></section>`;
+  const rows=tasks.slice(0,10),counts=tasks.reduce((acc,task)=>{const key=String(task.status||"");acc[key]=(acc[key]||0)+1;return acc;},{});
+  return `<section class="allegro-agent-tasks" data-allegro-agent-queue><div class="order-section-head"><div><span class="order-pro-label">JEDNA KOLEJKA • POSTGRESQL</span><h3>Naprawy ofert wykonywane przez Agenta</h3><small>Każdy produkt występuje raz. Wykonany zapis znika po kontrolnym odczycie kartoteki.</small></div><div class="allegro-agent-task-summary"><span><b>${tasks.length}</b><small>otwarte</small></span><span><b>${Number(counts.running||0)+Number(counts.pending||0)+Number(counts.attention||0)}</b><small>w pracy</small></span><span><b>${Number(counts.decision_required||0)+Number(counts.failed||0)}</b><small>konkretne braki</small></span><a class="btn ghost" href="#/admin/agent-ai/praca">Pełna praca Agenta</a></div></div><div class="allegro-agent-task-table-wrap"><table class="allegro-agent-task-table"><thead><tr><th>Produkt</th><th>Stan</th><th>Co pozostało</th><th>Ostatni wynik</th><th>Akcje</th></tr></thead><tbody>${rows.map(t=>{const meta=allegroAgentStatusZadania(t),missing=[...(t.missing||[]),...(t.errors||[]).map(e=>e.message||e.code)].filter(Boolean),working=["running","pending","attention"].includes(String(t.status||"").toLowerCase());return `<tr><td><b>${esc(t.name||t.productName||`Produkt ${t.productId}`)}</b><small>ID ${esc(t.productId)}</small></td><td><span class="allegro-agent-task-status ${meta.className}"><i>${meta.icon}</i>${esc(meta.label)}</span></td><td><p>${missing.slice(0,3).map(esc).join(" • ")||"Kontrola pełnej kartoteki"}${missing.length>3?` <b>+${missing.length-3}</b>`:""}</p></td><td><small>${t.completedAt?new Date(t.completedAt).toLocaleString("pl-PL"):t.requestedAt?new Date(t.requestedAt).toLocaleString("pl-PL"):"w kolejce"}</small></td><td><div class="warehouse-worktable-actions"><button class="btn" onclick="allegroAgentUzupelnijZadanieOferty(${jsArg(t.id)})" ${working?"disabled":""}>${working?"Agent pracuje":"Ponów naprawę"}</button><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(t.productId)}">Edytuj</a></div></td></tr>`;}).join("")}</tbody></table></div>${tasks.length>rows.length?`<div class="allegro-agent-task-footer"><span>Pokazano ${rows.length} z ${tasks.length} aktualnych spraw.</span><a class="btn ghost" href="#/admin/agent-ai/praca">Otwórz wszystkie</a></div>`:""}</section>`;
 }
 async function allegroPrzygotujSzkicProduktZListy(id){
   const p=pobierzProduktAdmin(id);
@@ -1710,7 +1723,7 @@ function allegroZgodnoscPanelHTML(){
 }
 let allegroPanelStatyCache={oferty:null,zamowienia:null,mapowania:null,produkty:null,komunikacja:null,compliance:null,zadania:null,sync:null,result:null};
 function allegroPanelOperacyjnyStaty(){
-  const oferty=Array.isArray(allegroOferty)?allegroOferty:[],zamowienia=Array.isArray(allegroZamowienia)?allegroZamowienia:[],produktyZrodlo=produktyDoAdministracji(),compliance=allegroStan.complianceAudit?.items||[],zadania=agentAIAllegroZadania||[];
+  const oferty=Array.isArray(allegroOferty)?allegroOferty:[],zamowienia=Array.isArray(allegroZamowienia)?allegroZamowienia:[],produktyZrodlo=produktyDoAdministracji(),compliance=allegroStan.complianceAudit?.items||[],zadania=typeof allegroAktywneZadaniaAgentaOfert==="function"?allegroAktywneZadaniaAgentaOfert():[];
   const cache=allegroPanelStatyCache;
   if(cache.oferty===oferty&&cache.zamowienia===zamowienia&&cache.mapowania===allegroMapowania&&cache.produkty===produktyZrodlo&&cache.komunikacja===allegroKomunikacja&&cache.compliance===compliance&&cache.zadania===zadania&&cache.sync===allegroStan.offerSyncState&&cache.result)return cache.result;
   const komunikacja=allegroKomunikacjaStaty(),produkty=produktyZrodlo.filter(p=>!czyProduktAdminWKoszu(p)),produktIds=new Set(produkty.map(p=>String(p.id)));

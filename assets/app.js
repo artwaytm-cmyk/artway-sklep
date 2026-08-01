@@ -625,7 +625,10 @@ let producenciKartoteka = wczytajLS("artway_producenci", [
 ]);
 let agentAILinkiProducentow = wczytajLS("artway_agent_ai_linki_producentow", []); // kolejka URL-i produktów producentów do pobrania/sprawdzenia przez agenta
 let agentAIImportUrlStan={busy:false,data:null,selected:0,error:""};
-let agentAIAllegroZadania = wczytajLS("artway_agent_ai_allegro_zadania", []); // braki i błędy wystawiania przekazane agentowi
+// Stan przygotowania Allegro pochodzi wyłącznie z serwerowej kolejki
+// PostgreSQL. Stara kopia przeglądarkowa powodowała powrót wykonanych zadań.
+let agentAIAllegroZadania = [];
+try{localStorage.removeItem("artway_agent_ai_allegro_zadania");}catch(e){}
 let koszDodanych = []; // nietrwały cache widoku centralnego kosza
 let koszMeta = {};     // metadane widoku; retencję wykonuje PostgreSQL
 let produktyDefinitywne = []; // nietrwały cache widoku
@@ -705,8 +708,8 @@ let agentAISpecjalistaDecyzjeWToku=new Set();
 const CHMURA_URL = "/api/store";
 const CHMURA_AUTO_SYNC_MS = 15*60*1000;
 const CHMURA_FOCUS_SYNC_MIN_MS = 5*60*1000;
-const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_producenci","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_opinie","artway_seo_ustawienia","artway_seo_historia"];
-const CHMURA_DOMENOWE_KLUCZE = new Set(["artway_ustawienia","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_niedobory_wydan","artway_magazyn_produkty","artway_magazyn_ustawienia","artway_magazyn_lokalizacje","artway_magazyn_lokalizacje_usuniete","artway_dokumenty_magazynowe","artway_dokumenty_magazynowe_usuniete","artway_dokumenty_magazynowe_seq","artway_faktury_szkice","artway_producenci","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_agent_ai_pamiec","artway_agent_ai_historia","artway_agent_ai_linki_producentow","artway_agent_ai_allegro_zadania","artway_seo_historia","artway_seo_ustawienia","artway_opinie"]);
+const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_producenci","artway_agent_ai_linki_producentow","artway_opinie","artway_seo_ustawienia","artway_seo_historia"];
+const CHMURA_DOMENOWE_KLUCZE = new Set(["artway_ustawienia","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_niedobory_wydan","artway_magazyn_produkty","artway_magazyn_ustawienia","artway_magazyn_lokalizacje","artway_magazyn_lokalizacje_usuniete","artway_dokumenty_magazynowe","artway_dokumenty_magazynowe_usuniete","artway_dokumenty_magazynowe_seq","artway_faktury_szkice","artway_producenci","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_agent_ai_pamiec","artway_agent_ai_historia","artway_agent_ai_linki_producentow","artway_seo_historia","artway_seo_ustawienia","artway_opinie"]);
 // Produkty mają jedno źródło prawdy: rekordy artway_products w PostgreSQL.
 // Stare karty mogą pozostawić wielomegabajtowe snapshoty w localStorage, ale
 // nie wolno ich już scalać ani odsyłać na serwer.
@@ -917,7 +920,6 @@ function zbierzWspolneUstawienia(){
     artway_agent_ai_plan_cykl: agentAIPlanCykl,
     artway_producenci: producenciKartoteka,
     artway_agent_ai_linki_producentow: agentAILinkiProducentow,
-    artway_agent_ai_allegro_zadania: agentAIAllegroZadania,
     artway_opinie: opinie,
     artway_seo_ustawienia: seoUstawienia,
     artway_seo_historia: seoHistoria,
@@ -946,7 +948,6 @@ function nalozWspolneUstawienia(dane){
       artway_agent_ai_plan_cykl:(v)=>{agentAIPlanCykl=(v&&typeof v==="object"&&!Array.isArray(v))?v:{};},
       artway_producenci:(v)=>{producenciKartoteka=Array.isArray(v)?v:[];},
       artway_agent_ai_linki_producentow:(v)=>{agentAILinkiProducentow=Array.isArray(v)?v:[];},
-      artway_agent_ai_allegro_zadania:(v)=>{agentAIAllegroZadania=Array.isArray(v)?v:[];},
       artway_opinie:(v)=>{opinie=v;},
       artway_seo_ustawienia:(v)=>{seoUstawienia={...SEO_USTAWIENIA_DOMYSLNE,...((v&&typeof v==="object")?v:{})};},
       artway_seo_historia:(v)=>{seoHistoria=Array.isArray(v)?v:[];},

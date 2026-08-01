@@ -139,7 +139,10 @@ let producenciKartoteka = wczytajLS("artway_producenci", [
 ]);
 let agentAILinkiProducentow = wczytajLS("artway_agent_ai_linki_producentow", []); // kolejka URL-i produktów producentów do pobrania/sprawdzenia przez agenta
 let agentAIImportUrlStan={busy:false,data:null,selected:0,error:""};
-let agentAIAllegroZadania = wczytajLS("artway_agent_ai_allegro_zadania", []); // braki i błędy wystawiania przekazane agentowi
+// Stan przygotowania Allegro pochodzi wyłącznie z serwerowej kolejki
+// PostgreSQL. Stara kopia przeglądarkowa powodowała powrót wykonanych zadań.
+let agentAIAllegroZadania = [];
+try{localStorage.removeItem("artway_agent_ai_allegro_zadania");}catch(e){}
 let koszDodanych = []; // nietrwały cache widoku centralnego kosza
 let koszMeta = {};     // metadane widoku; retencję wykonuje PostgreSQL
 let produktyDefinitywne = []; // nietrwały cache widoku

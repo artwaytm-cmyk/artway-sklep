@@ -14,6 +14,7 @@ export function createAgentRuntimeRoute({
   queue,
   events = null,
   runtime,
+  integrationStatus = null,
   productReport = null,
   isAdmin,
   respond,
@@ -26,18 +27,21 @@ export function createAgentRuntimeRoute({
       return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
     }
     if (action === 'agent-runtime-status') {
-      const [queueStatus, eventStatus] = await Promise.all([
+      const [queueStatus, eventStatus, integrations] = await Promise.all([
         queue && typeof queue.status === 'function'
           ? queue.status()
           : { workerOnline: false, workerLastSeenAt: '', counts: {}, active: 0 },
         events && typeof events.status === 'function'
           ? events.status()
           : Promise.resolve({ mode: 'event_driven', scheduledCycles: false, active: 0, queued: 0, running: 0, recent: [] }),
+        typeof integrationStatus === 'function'
+          ? Promise.resolve().then(() => integrationStatus(req)).catch(() => ({}))
+          : Promise.resolve({}),
       ]);
       return respond({
         ok: true,
         runtime: {
-          ...(await runtime.status(queueStatus, eventStatus)),
+          ...(await runtime.status(queueStatus, eventStatus, integrations)),
           eventQueue: eventStatus,
           automationMode: 'event_driven',
         },

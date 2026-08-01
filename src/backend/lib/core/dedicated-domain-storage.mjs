@@ -13,7 +13,6 @@ const DOMAIN_TABLES = Object.freeze({
   'settings:artway_agent_ai_historia': 'artway_agent_records',
   'settings:artway_agent_ai_pamiec': 'artway_agent_records',
   'settings:artway_agent_ai_zlecenia': 'artway_agent_records',
-  'settings:artway_agent_ai_allegro_zadania': 'artway_agent_records',
   'kv:agent_specialists_state': 'artway_agent_records',
   'kv:agent_action_runs': 'artway_agent_records',
   'kv:agent_runtime': 'artway_agent_records',

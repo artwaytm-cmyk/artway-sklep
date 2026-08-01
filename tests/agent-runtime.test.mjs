@@ -75,6 +75,28 @@ test('udany etap GPT potwierdza realne połączenie OpenAI i oddziela ostrzeżen
   assert.equal(state.integrationWarnings[0].kind, 'allegro');
 });
 
+test('aktualnie zdrowe połączenie Allegro usuwa historyczne ostrzeżenie poprzedniego przebiegu', async () => {
+  const store = memoryStore();
+  const current = new Date('2026-08-01T08:00:00.000Z');
+  const runtime = createAgentRuntime({ ...store, now: () => current });
+  await runtime.report({ event: 'cycle_start', runId: 'old-run', steps: [{ id: 'zamowienia', label: 'Zamówienia Allegro' }] });
+  await runtime.report({ event: 'cycle_step', runId: 'old-run', step: { id: 'zamowienia', status: 'warning', error: 'Stary błąd OAuth.' } });
+  await runtime.report({ event: 'cycle_finish', runId: 'old-run', status: 'degraded' });
+  const state = await runtime.status({}, {}, { allegro: { configured: true, connected: true, requiresReauth: false } });
+  assert.equal(state.integrationWarnings.length, 0);
+  assert.equal(state.state, 'ready');
+});
+
+test('aktualny stan Allegro zgłasza jedno konkretne ostrzeżenie zamiast duplikowania historii', async () => {
+  const store = memoryStore();
+  const current = new Date('2026-08-01T08:05:00.000Z');
+  const runtime = createAgentRuntime({ ...store, now: () => current });
+  const state = await runtime.status({}, {}, { allegro: { configured: true, connected: false, requiresReauth: true, authError: { message: 'Odśwież autoryzację.' } } });
+  assert.equal(state.integrationWarnings.length, 1);
+  assert.equal(state.integrationWarnings[0].kind, 'allegro');
+  assert.match(state.integrationWarnings[0].error, /Odśwież autoryzację/);
+});
+
 test('rejestr rozróżnia fizyczną czynność, zapis oczekujący i publikację potwierdzoną przez kanał', async () => {
   const store = memoryStore();
   let current = new Date('2026-07-24T10:00:00.000Z');

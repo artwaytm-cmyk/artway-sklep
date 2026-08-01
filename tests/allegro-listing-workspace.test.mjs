@@ -95,6 +95,17 @@ test("centrum wystawiania skaluje katalog przez filtry, limit, paginację i eksp
   assert.ok(baseCss.sources.includes("src/styles/29-commerce-catalog-actions.css"));
 });
 
+test("naprawy Allegro pokazują jedną aktualną kolejkę PostgreSQL zamiast starej ściany kart",async()=>{
+  const legacy=await read("src/frontend/11-allegro-operations.js"),actions=await read("src/frontend/12a-product-actions.js"),sync=await read("src/frontend/03-cloud-sync.js"),styles=await read("src/styles/07-admin-domains.css");
+  assert.match(legacy,/allegroStanKolejkiPrzygotowania/);
+  assert.match(legacy,/data-allegro-agent-queue/);
+  assert.match(legacy,/allegro-agent-task-table/);
+  assert.match(legacy,/Każdy produkt występuje raz/);
+  assert.match(actions,/asortymentSerwerowaKolejka\.state=queue/);
+  assert.doesNotMatch(sync,/artway_agent_ai_allegro_zadania/);
+  assert.doesNotMatch(styles,/repeat\(auto-fit,minmax\(300px,1fr\)\)/);
+});
+
 test("domyślny filtr pokazuje tylko produkty naprawdę bez oferty Allegro",async()=>{
   const runtime=await read("src/frontend/02-runtime-state.js"),listing=await read("src/frontend/12b-allegro-listing-workspace.js"),workspace=await read("src/frontend/12c-commerce-catalog-actions.js");
   assert.match(runtime,/filtrAllegroWystawiania="bez_oferty"/);

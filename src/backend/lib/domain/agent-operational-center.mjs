@@ -91,9 +91,10 @@ export function createAgentOperationalCenter(deps = {}) {
     mergeProducts,
     orderNumber,
     integrationStatus,
+    preparationStatus = null,
   } = deps;
   return async function agentOperationalCenter() {
-    const [settingsRec, ordersRec, allegroOrdersRec, communicationRec, offerErrorRec, infaktLinksRec, catalogQualityRec, diagnosticsRec] = await Promise.all([
+    const [settingsRec, ordersRec, allegroOrdersRec, communicationRec, offerErrorRec, infaktLinksRec, catalogQualityRec, diagnosticsRec, preparationRec] = await Promise.all([
       read('settings', { data: {}, updated_at: null }),
       read('orders', { items: [] }),
       read('allegro_orders', { items: [] }),
@@ -102,6 +103,7 @@ export function createAgentOperationalCenter(deps = {}) {
       read('infakt_invoice_links', { items: {} }),
       read('catalog_quality_audit', { report: null, updated_at: null }),
       read('system_diagnostics', { items: [], updatedAt: null }),
+      typeof preparationStatus === 'function' ? preparationStatus().catch(() => null) : null,
     ]);
     const data = settingsRec.data && typeof settingsRec.data === 'object' ? settingsRec.data : {};
     const orders = Array.isArray(ordersRec.items) ? ordersRec.items : [];
@@ -157,7 +159,10 @@ export function createAgentOperationalCenter(deps = {}) {
     });
     const producerLinks = (Array.isArray(data.artway_agent_ai_linki_producentow) ? data.artway_agent_ai_linki_producentow : [])
       .filter((item) => !['pobrano', 'zamkniete', 'zamknięte', 'usunieto', 'usunięto'].includes(String(item?.status || '').toLowerCase()));
-    const offerTasks = activeAllegroOfferTasks(data.artway_agent_ai_allegro_zadania);
+    const preparationCurrent = Array.isArray(preparationRec?.current) ? preparationRec.current : null;
+    const offerTasks = preparationCurrent
+      ? preparationCurrent.filter((task) => ['pending', 'running', 'attention', 'waiting_provider', 'decision_required', 'failed'].includes(String(task?.status || '').toLowerCase()))
+      : activeAllegroOfferTasks(data.artway_agent_ai_allegro_zadania);
     const supplierOrders = (Array.isArray(data.artway_agent_ai_zlecenia) ? data.artway_agent_ai_zlecenia : [])
       .filter((item) => supplierOrderHasActiveContent(item)
         && !['wysłane do producenta', 'wysłane do dostawcy'].includes(String(item?.status || '').toLowerCase()));

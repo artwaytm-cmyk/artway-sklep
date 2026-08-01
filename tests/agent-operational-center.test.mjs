@@ -47,3 +47,27 @@ test('zbiorcza kolejka przygotowania produktów jest pracą Agenta, a nie fałsz
   assert.equal(priority.actionLabel, 'Pokaż produkty');
   assert.equal(result.summary.offerTasks, 1);
 });
+
+test('centrum operacyjne używa bieżącej kolejki PostgreSQL zamiast starej kopii ustawień', async () => {
+  const center = createAgentOperationalCenter({
+    read: async (name, fallback) => name === 'settings'
+      ? { data: { artway_agent_ai_allegro_zadania: [{ productId: 'stary', status: 'oczekuje' }] } }
+      : fallback,
+    text: (value, max = 1000) => String(value ?? '').slice(0, max),
+    allegroOrderIsActive: () => false,
+    communicationNeedsReply: () => false,
+    mergeProducts: () => ({ products: [] }),
+    orderNumber: (value) => String(value || ''),
+    integrationStatus: () => ({ database: true, allegro: true, inpost: true, email: true }),
+    preparationStatus: async () => ({
+      current: [
+        { productId: 'gotowy', status: 'completed' },
+        { productId: 'aktualny', status: 'decision_required', missing: ['EAN'] },
+      ],
+    }),
+  });
+  const result = await center();
+  assert.equal(result.summary.offerTasks, 1);
+  const priority = result.priorities.find((item) => item.actionId === 'allegro_offer_prepare');
+  assert.equal(priority?.count, 1);
+});

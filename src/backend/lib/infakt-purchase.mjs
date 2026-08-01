@@ -59,7 +59,6 @@ const PRYWATNE_KLUCZE_ADMINA = new Set([
   'artway_agent_ai_zlecenia',
   'artway_producenci',
   'artway_agent_ai_linki_producentow',
-  'artway_agent_ai_allegro_zadania',
 ]);
 
 function tekst(value, max = 400) {

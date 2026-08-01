@@ -55,9 +55,21 @@ test("Praca Agenta i raport kanałów odświeżają dane co 10 sekund bez urucha
   assert.match(runtime,/allegro-preparation-queue-status/);
   assert.match(runtime,/currentWork/);
   assert.match(runtime,/preparationCounts/);
+  assert.match(runtime,/Każda zielona karta oznacza udany test API/);
+  assert.match(runtime,/xAI jest pomijane, a zadanie przejmuje kolejny dostępny dostawca/);
   assert.match(styles,/\.agent-live-truth/);
   assert.match(styles,/\.agent-runtime-exact-work/);
   assert.match(styles,/\.agent-publication-proof/);
+});
+
+test("ustawienia Allegro pokazują bieżący stan OAuth zamiast stale proponować ponowne łączenie",async()=>{
+  const source=await read("src/frontend/11-allegro-settings.js"),styles=await read("src/styles/07-admin-domains.css");
+  assert.match(source,/RZECZYWISTY STAN POŁĄCZENIA/);
+  assert.match(source,/connectionReady/);
+  assert.match(source,/Brakujące zakresy/);
+  assert.match(source,/Sprawdź teraz/);
+  assert.match(source,/Zmień lub odnów konto/);
+  assert.match(styles,/\.allegro-connection-truth/);
 });
 
 test("raport produktów ma serwerowe filtry, trzy kanały i gotowość do wystawienia",async()=>{

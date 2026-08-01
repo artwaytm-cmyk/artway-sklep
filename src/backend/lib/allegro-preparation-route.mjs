@@ -200,5 +200,6 @@ export function createAllegroPreparationRoute(deps = {}) {
   allegroPreparationRoute.prepareProducts = prepareProducts;
   allegroPreparationRoute.startBacklog = startBacklog;
   allegroPreparationRoute.status = () => queue.status();
+  allegroPreparationRoute.resolveProduct = (productId, details = {}) => queue.resolveProduct(productId, details);
   return allegroPreparationRoute;
 }

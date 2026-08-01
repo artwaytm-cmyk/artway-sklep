@@ -22,14 +22,18 @@ function allegroUstawieniaPanelHTML(){
   const settings={autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,autonomousAgent:true,autoResolveDuplicates:true,autoResolveDuplicateMinScore:97,...(allegroStan.offerSettings||{})};
   const sync=allegroStan.offerSyncState||{},maintenance=allegroStan.catalogMaintenance||{},agent=allegroStan.autonomousAgent||{};
   const dataLabel=value=>value&&Number.isFinite(Date.parse(value))?esc(new Date(value).toLocaleString("pl-PL")):"jeszcze nie wykonano";
+  const connectionReady=allegroStan.configured===true&&allegroStan.connected===true&&allegroStan.requiresReauth!==true;
+  const missingScopes=Array.isArray(allegroStan.missingAuthorizedScopes)?allegroStan.missingAuthorizedScopes:[];
+  const connectionMessage=connectionReady?`Konto ${esc(allegroStan.account||"sprzedawcy")} jest autoryzowane i gotowe do operacji.`:esc(allegroStan.authError?.message||(missingScopes.length?`Brakuje ${missingScopes.length} zakresów OAuth.`:"Połączenie wymaga dokończenia lub naprawy."));
   const option=(value,current,label)=>`<option value="${value}" ${Number(current)===Number(value)?"selected":""}>${label}</option>`;
   setTimeout(()=>void allegroPobierzWarunkiDoEdytora(),0);
   return `<div class="panel allegro-section-panel allegro-integration-settings">
     <div class="order-section-head">
       <div><span class="order-pro-label">Allegro API</span><h2>⚙️ Ustawienia integracji</h2><p class="order-detail-lead">Jedno miejsce do ustawienia automatycznego mapowania, rytmu synchronizacji, aktualizacji ofert i domyślnych danych.</p></div>
-      <div class="diag-actions"><button class="btn" type="button" onclick="allegroPolacz()">🔐 Połącz ponownie</button><button class="btn ghost" type="button" onclick="allegroWczytajDane(true)">Sprawdź połączenie</button></div>
+      <div class="diag-actions"><button class="btn" type="button" onclick="allegroWczytajDane(true)">↻ Sprawdź teraz</button>${connectionReady?`<button class="btn ghost" type="button" onclick="allegroPolacz()">Zmień lub odnów konto</button>`:`<button class="btn" type="button" onclick="allegroPolacz()">🔐 Napraw połączenie</button>`}</div>
     </div>
     ${allegroNaprawaDanychAplikacjiHTML()}
+    <section class="allegro-connection-truth ${connectionReady?"ready":"attention"}"><span>${connectionReady?"✓":"!"}</span><div><small>RZECZYWISTY STAN POŁĄCZENIA</small><h3>${connectionReady?"Allegro API działa":"Allegro wymaga działania"}</h3><p>${connectionMessage}</p>${missingScopes.length?`<em>Brakujące zakresy: ${missingScopes.map(x=>esc(x)).join(", ")}</em>`:""}</div><dl><div><dt>Środowisko</dt><dd>${esc(allegroStan.env||"production")}</dd></div><div><dt>OAuth</dt><dd>${allegroStan.connected?"aktywny":"nieaktywny"}</dd></div><div><dt>Uprawnienia</dt><dd>${missingScopes.length?`${missingScopes.length} braków`:"kompletne"}</dd></div><div><dt>Ostatni zapis</dt><dd>${dataLabel(allegroStan.updated_at)}</dd></div></dl></section>
     <div class="orders-stat-grid">
       <div class="order-stat-card ${allegroStan.configured?"money":"hot"}"><span>🔧</span><b>${allegroStan.configured?"OK":"BRAK"}</b><small>konfiguracja aplikacji</small></div>
       <div class="order-stat-card ${allegroStan.connected?"money":"hot"}"><span>🔐</span><b>${allegroStan.connected?"TAK":"NIE"}</b><small>autoryzacja OAuth</small></div>

@@ -531,6 +531,30 @@ export function createPostgresAllegroPreparationQueue({
     return status();
   };
 
+  const resolveProduct = async (productId, {
+    reason = 'confirmed_outside_preparation_queue',
+    offerId = '',
+  } = {}) => {
+    await migrateLegacy();
+    const id = clean(productId, 100);
+    if (!id) return { modified: 0 };
+    const result = await pool.query(`
+      UPDATE artway_allegro_preparation_tasks
+      SET status='superseded',completed_at=COALESCE(completed_at,NOW()),
+          lease_until=NULL,worker_id='',
+          result=result || jsonb_build_object(
+            'reason',$3::text,
+            'resolvedAt',NOW(),
+            'offerId',$4::text,
+            'replacedBy','confirmed_product_record'
+          ),
+          updated_at=NOW()
+      WHERE namespace=$1 AND product_id=$2
+        AND status IN ('pending','running','attention','waiting_provider','decision_required','failed')
+    `, [ns, id, clean(reason, 160), clean(offerId, 120)]);
+    return { modified: result.rowCount };
+  };
+
   const status = async () => publicState(await readState());
-  return Object.freeze({ enqueue, status, resume, kick });
+  return Object.freeze({ enqueue, status, resume, kick, resolveProduct });
 }

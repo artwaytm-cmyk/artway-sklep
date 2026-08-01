@@ -67,7 +67,7 @@ function allegroZgodnoscPanelHTML(){
 }
 let allegroPanelStatyCache={oferty:null,zamowienia:null,mapowania:null,produkty:null,komunikacja:null,compliance:null,zadania:null,sync:null,result:null};
 function allegroPanelOperacyjnyStaty(){
-  const oferty=Array.isArray(allegroOferty)?allegroOferty:[],zamowienia=Array.isArray(allegroZamowienia)?allegroZamowienia:[],produktyZrodlo=produktyDoAdministracji(),compliance=allegroStan.complianceAudit?.items||[],zadania=agentAIAllegroZadania||[];
+  const oferty=Array.isArray(allegroOferty)?allegroOferty:[],zamowienia=Array.isArray(allegroZamowienia)?allegroZamowienia:[],produktyZrodlo=produktyDoAdministracji(),compliance=allegroStan.complianceAudit?.items||[],zadania=typeof allegroAktywneZadaniaAgentaOfert==="function"?allegroAktywneZadaniaAgentaOfert():[];
   const cache=allegroPanelStatyCache;
   if(cache.oferty===oferty&&cache.zamowienia===zamowienia&&cache.mapowania===allegroMapowania&&cache.produkty===produktyZrodlo&&cache.komunikacja===allegroKomunikacja&&cache.compliance===compliance&&cache.zadania===zadania&&cache.sync===allegroStan.offerSyncState&&cache.result)return cache.result;
   const komunikacja=allegroKomunikacjaStaty(),produkty=produktyZrodlo.filter(p=>!czyProduktAdminWKoszu(p)),produktIds=new Set(produkty.map(p=>String(p.id)));

@@ -25,7 +25,6 @@ export const SETTINGS_DOMAIN_CONFIGS = Object.freeze({
   artway_agent_ai_pamiec: arrayConfig(['id']),
   artway_agent_ai_historia: arrayConfig(['id']),
   artway_agent_ai_linki_producentow: arrayConfig(['id', 'url']),
-  artway_agent_ai_allegro_zadania: arrayConfig(['id']),
   artway_seo_historia: arrayConfig(['id', 'at', 'data']),
   artway_seo_ustawienia: valueConfig(),
   artway_opinie: arrayConfig(['id']),

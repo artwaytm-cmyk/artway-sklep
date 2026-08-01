@@ -362,7 +362,7 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
     });
   }
 
-  async function status(queue = {}, events = {}) {
+  async function status(queue = {}, events = {}, integrations = {}) {
     const version = await readVersioned(KEY, {}), record = asRecord(version.value), current = now(), currentMs = current.getTime();
     const runtimeSeen = Date.parse(record.worker.lastSeenAt || '') || 0;
     const queueSeen = Date.parse(queue.workerLastSeenAt || '') || 0;
@@ -372,12 +372,23 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
       || queue.workerOnline === true
       || (lastSeenMs > 0 && currentMs - lastSeenMs <= WORKER_ONLINE_MS);
     const lastRun = record.history[0] || null;
-    const integrationWarnings = (lastRun?.steps || []).filter((step) => ['warning', 'failed'].includes(step.status)).map((step) => ({
+    const allegro = integrations?.allegro && typeof integrations.allegro === 'object' ? integrations.allegro : null;
+    const allegroHealthy = allegro?.configured === true && allegro?.connected === true && allegro?.requiresReauth !== true;
+    const historicalWarnings = (lastRun?.steps || []).filter((step) => ['warning', 'failed'].includes(step.status)).map((step) => ({
       id: step.id,
       label: step.label,
       error: step.error || step.detail,
       kind: ['oferty-lekkie', 'oferty-pelne', 'zamowienia', 'komunikacja'].includes(step.id) ? 'allegro' : step.id === 'tresci-gpt-nano' ? 'ai' : 'system',
-    }));
+    })).filter((warning) => warning.kind !== 'allegro' || !allegroHealthy);
+    const liveAllegroWarning = allegro && !allegroHealthy ? {
+      id: 'allegro-live-connection',
+      label: 'Aktualne połączenie Allegro',
+      error: clean(allegro.authError?.message
+        || (Array.isArray(allegro.missingAuthorizedScopes) && allegro.missingAuthorizedScopes.length ? `Brak zakresów OAuth: ${allegro.missingAuthorizedScopes.join(', ')}` : '')
+        || (!allegro.configured ? 'Integracja Allegro nie ma pełnej konfiguracji.' : 'Konto Allegro wymaga ponownego połączenia.'), 300),
+      kind: 'allegro',
+    } : null;
+    const integrationWarnings = [...historicalWarnings.filter((warning) => warning.kind !== 'allegro' || !liveAllegroWarning), ...(liveAllegroWarning ? [liveAllegroWarning] : [])];
     const eventActive = number(events.active, 0, 1_000_000);
     const state = record.currentRun || record.currentWork || eventActive > 0
       ? 'working'

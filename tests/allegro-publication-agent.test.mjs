@@ -21,7 +21,7 @@ test('potwierdzona oferta tworzy komplet pól zamykających przygotowanie i publ
 });
 
 test('Operator publikacji zapisuje raport w zadaniu i bezpośrednio w kartotece produktu', async () => {
-  const data = {}, savedProducts = [], specialistCalls = [];
+  const data = {}, savedProducts = [], specialistCalls = [], queuedRepairs = [];
   const service = createAllegroPublicationAgent({
     text: (value, limit = 1000) => String(value ?? '').slice(0, limit).trim(),
     canonicalGtin: (value) => String(value || '').replace(/\D/g, ''),
@@ -32,6 +32,7 @@ test('Operator publikacji zapisuje raport w zadaniu i bezpośrednio w kartotece 
     },
     mutateSettings: async (mutator) => { await mutator(data); return { modified: true }; },
     saveProductFields: async (payload) => { savedProducts.push(payload); return { confirmed: true }; },
+    onRepairRequired: async (productId, details) => { queuedRepairs.push({ productId, details }); return { queued: true }; },
     now: () => new Date('2026-07-24T14:00:00.000Z'),
   });
   const task = await service.recordFailure(
@@ -45,9 +46,11 @@ test('Operator publikacji zapisuje raport w zadaniu i bezpośrednio w kartotece 
   assert.equal(task.specialist, 'allegro_publication');
   assert.equal(task.specialistRunId, 'gpt-publication-1');
   assert.equal(task.operationId, 'operation-1');
-  assert.equal(data.artway_agent_ai_allegro_zadania[0].errors[0].code, 'CATEGORY_MISMATCH');
+  assert.equal(data.artway_agent_ai_allegro_zadania, undefined);
   assert.equal(specialistCalls[0].specialist, 'allegro_publication');
   assert.equal(savedProducts[0].fields.allegroPublicationAgentTaskId, task.id);
   assert.equal(savedProducts[0].fields.allegroPublicationLastErrorCode, 'CATEGORY_MISMATCH');
   assert.equal(savedProducts[0].fields.allegroPublicationFailureCount, 1);
+  assert.equal(queuedRepairs[0].productId, '1000253');
+  assert.equal(task.queue.queued, true);
 });

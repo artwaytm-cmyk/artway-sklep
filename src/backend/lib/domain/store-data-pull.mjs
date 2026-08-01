@@ -12,7 +12,7 @@ const PUBLIC_CENTRAL_ADMIN_KEYS = [
   'artway_dokumenty_magazynowe', 'artway_dokumenty_magazynowe_usuniete', 'artway_dokumenty_magazynowe_seq',
   'artway_faktury_szkice', 'artway_producenci', 'artway_agent_ai_zlecenia', 'artway_agent_ai_plan_cykl',
   'artway_agent_ai_pamiec', 'artway_agent_ai_historia', 'artway_agent_ai_linki_producentow',
-  'artway_agent_ai_allegro_zadania', 'artway_seo_historia',
+  'artway_seo_historia',
 ];
 const PUBLIC_CENTRAL_EXCLUDED_KEYS = [...PUBLIC_CENTRAL_CATALOG_KEYS, ...PUBLIC_CENTRAL_ADMIN_KEYS];
 

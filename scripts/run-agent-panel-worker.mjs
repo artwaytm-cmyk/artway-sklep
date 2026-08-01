@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { AGENT_PANEL_INSTRUCTIONS } from '../src/backend/lib/domain/agent-panel-instructions.mjs';
+import { createAgentProviderRouter } from '../src/backend/lib/domain/agent-provider-router.mjs';
 
 const origin = String(process.env.ARTWAY_LOCAL_API_ORIGIN || process.env.ARTWAY_API_URL || 'http://127.0.0.1:3000').replace(/\/api\/store.*$/i, '').replace(/\/+$/, '');
 const token = String(process.env.ARTWAY_ADMIN_TOKEN || '').trim();
 const workerId = `artway-panel-${process.pid}-${randomUUID().slice(0, 8)}`;
 const waitMs = Math.max(15_000, Math.min(55_000, Number(process.env.CODEX_AGENT_WAIT_MS) || 50_000));
+const providerRouter = createAgentProviderRouter();
 
 if (!token) throw new Error('Brak ARTWAY_ADMIN_TOKEN dla procesu Agenta panelu.');
 
@@ -60,29 +62,12 @@ function summaryText(operations = {}, runtimeState = {}) {
 }
 
 async function aiAnswer(text, context) {
-  const apiKey = String(process.env.OPENAI_API_KEY || '').trim();
-  const model = String(process.env.OPENAI_AGENT_MODEL_OVERRIDE || 'gpt-5-nano').trim();
   const input = `POLECENIE ADMINISTRATORA:\n${String(text).slice(0, 4_000)}\n\nPOTWIERDZONY STAN SERWERA:\n${context}`;
-  if (apiKey) {
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        store: false,
-        max_output_tokens: 900,
-        instructions: AGENT_PANEL_INSTRUCTIONS,
-        input,
-      }),
-      signal: AbortSignal.timeout(45_000),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (response.ok) return String(data.output_text || data.output?.flatMap((item) => item?.content || []).find((item) => item?.type === 'output_text')?.text || '').trim();
-    const fallbackAllowed = process.env.OLLAMA_FALLBACK_ENABLED !== 'false'
-      && [402, 408, 429, 500, 502, 503, 504].includes(response.status);
-    if (!fallbackAllowed) throw new Error(data?.error?.message || `OpenAI HTTP ${response.status}`);
+  try {
+    return await providerRouter.answer({ input, instructions: AGENT_PANEL_INSTRUCTIONS, maxOutputTokens: 900 });
+  } catch (providerError) {
+    if (process.env.OLLAMA_FALLBACK_ENABLED === 'false') throw providerError;
   }
-  if (process.env.OLLAMA_FALLBACK_ENABLED === 'false') return '';
   const baseUrl = String(process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/+$/, '');
   const localModel = String(process.env.OLLAMA_FALLBACK_MODEL || 'qwen3.5:4b').trim();
   const local = await fetch(`${baseUrl}/api/chat`, {
@@ -103,7 +88,7 @@ async function aiAnswer(text, context) {
   });
   const localData = await local.json().catch(() => ({}));
   if (!local.ok) throw new Error(localData?.error || `Lokalny model HTTP ${local.status}`);
-  return String(localData?.message?.content || '').trim();
+  return { text: String(localData?.message?.content || '').trim(), provider: 'ollama', model: localModel };
 }
 
 async function execute(job = {}) {
@@ -126,11 +111,11 @@ async function execute(job = {}) {
   ].join('');
   try {
     const answer = await aiAnswer(text, context);
-    if (answer) return answer;
+    if (answer?.text) return { response: answer.text, provider: answer.provider, model: answer.model };
   } catch (error) {
-    return `${context}\n\nModel językowy nie odpowiedział: ${safeError(error)}. Kontrola serwerowa została jednak rozliczona powyżej.`;
+    return { response: `${context}\n\nModel językowy nie odpowiedział: ${safeError(error)}. Kontrola serwerowa została jednak rozliczona powyżej.`, provider: 'rules', model: 'server-rules' };
   }
-  return `${context}\n\nBrak aktywnego modelu językowego. Dane zostały odczytane bezpośrednio z serwera.`;
+  return { response: `${context}\n\nBrak aktywnego modelu językowego. Dane zostały odczytane bezpośrednio z serwera.`, provider: 'rules', model: 'server-rules' };
 }
 
 async function processJob(job) {
@@ -143,13 +128,13 @@ async function processJob(job) {
   }, 30_000);
   heartbeat.unref?.();
   try {
-    const response = await execute(job);
+    const result = await execute(job);
     await api('codex-agent-complete', {
       method: 'POST',
-      body: { id, claimToken, response },
+      body: { id, claimToken, response: result.response },
       timeout: 30_000,
     });
-    await runtime('job_finish', { title: 'Polecenie z panelu administratora', ok: true, detail: 'Wynik zapisano w serwerowej kolejce panelu.' });
+    await runtime('job_finish', { title: 'Polecenie z panelu administratora', ok: true, detail: `Wynik zapisano w serwerowej kolejce panelu • ${result.provider}/${result.model}` });
   } catch (error) {
     await api('codex-agent-fail', {
       method: 'POST',
@@ -164,6 +149,7 @@ async function processJob(job) {
 
 async function main() {
   process.stdout.write(`Agent panelu uruchomiony: ${workerId}\n`);
+  await runtime('worker_heartbeat', { providers: await providerRouter.status({ force: true }) });
   while (true) {
     try {
       const claimed = await api('codex-agent-claim', {
@@ -172,7 +158,7 @@ async function main() {
         timeout: waitMs + 10_000,
       });
       if (claimed.job) await processJob(claimed.job);
-      else await runtime('worker_heartbeat');
+      else await runtime('worker_heartbeat', { providers: await providerRouter.status() });
     } catch (error) {
       process.stderr.write(`Agent panelu: ${safeError(error)}\n`);
       await sleep(5_000);

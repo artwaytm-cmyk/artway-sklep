@@ -49,10 +49,11 @@ export function buildAllegroPublicationSuccessFields({
 }
 
 export function createAllegroPublicationAgent({
-  text, canonicalGtin, linkFromPreparation, runSpecialist, mutateSettings, saveProductFields,
+  text, canonicalGtin, linkFromPreparation, runSpecialist, saveProductFields,
+  onRepairRequired = null,
   now = () => new Date(),
 } = {}) {
-  if (![text, canonicalGtin, linkFromPreparation, runSpecialist, mutateSettings, saveProductFields].every((fn) => typeof fn === 'function')) {
+  if (![text, canonicalGtin, linkFromPreparation, runSpecialist, saveProductFields].every((fn) => typeof fn === 'function')) {
     throw new Error('Operator publikacji Allegro wymaga pełnego zestawu zależności.');
   }
   async function recordFailure(product = {}, details = {}) {
@@ -84,35 +85,26 @@ export function createAllegroPublicationAgent({
       }
     }
     const timestamp = now().toISOString();
-    let task = null;
-    await mutateSettings((data) => {
-      const tasks = Array.isArray(data.artway_agent_ai_allegro_zadania) ? [...data.artway_agent_ai_allegro_zadania] : [];
-      const index = tasks.findIndex((item) => String(item.productId) === productId && !['wykonane', 'anulowane'].includes(String(item.status || '').toLowerCase()));
-      const previous = index >= 0 ? tasks[index] : {};
-      task = {
-        ...previous,
-        id: previous.id || `AA-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-        typ: 'allegro-oferta', specialist: 'allegro_publication', status: errors.length ? 'błąd API' : 'oczekuje', productId,
-        productName: text(product.nazwa || product.name || `Produkt ${productId}`, 300), producent: link.producent, missing, errors,
-        suggestions: {
-          allegroCategoryId: auto.allegroCategoryId || link.categoryId, allegroProductId: auto.allegroProductId || link.catalogProductId,
-          producent: auto.producent || link.producent, marka: auto.marka || '', gtin: auto.gtin || auto.ean || '', ean: auto.ean || auto.gtin || '',
-          kodProducenta: auto.kodProducenta || auto.mpn || '', mpn: auto.mpn || auto.kodProducenta || '', zdjecie: auto.zdjecie || '',
-          zdjecia: Array.isArray(auto.zdjecia) ? auto.zdjecia.slice(0, 15) : [], allegroParameters: Array.isArray(auto.allegroParameters) ? auto.allegroParameters : [],
-        },
-        operationId: text(details.operationId || previous.operationId, 160), catalogIdentity: catalog?.identity || null,
-        specialistRunId: specialistRun?.id || '', agentDiagnosis: specialistRun?.result || null, specialistError,
-        procedure: ALLEGRO_AGENT_OFFER_PROCEDURE, decision: details.prepared?.agentDecision || null,
-        sourceUrl: text(product.sourceUrl || product.producentUrl || '', 800),
-        attempts: (Number(previous.attempts) || 0) + 1, createdAt: previous.createdAt || timestamp, updatedAt: timestamp,
-      };
-      if (index >= 0) tasks[index] = task; else tasks.unshift(task);
-      data.artway_agent_ai_allegro_zadania = tasks.slice(0, 500);
-      const history = Array.isArray(data.artway_agent_ai_historia) ? data.artway_agent_ai_historia : [];
-      history.unshift({ id: `AI-${Date.now().toString(36)}`, typ: 'allegro-oferta', opis: `Oferta produktu ${task.productName} wymaga pracy agenta: ${[...missing, ...errors.map((item) => item.message)].join(', ') || 'weryfikacja danych'}.`, data: timestamp, dataTxt: now().toLocaleString('pl-PL'), operator: 'Operator publikacji Allegro', dane: { productId, taskId: task.id, operationId: task.operationId, specialistRunId: task.specialistRunId } });
-      data.artway_agent_ai_historia = history.slice(0, 500);
-      return true;
-    }, { updatedAt: timestamp });
+    // Nie twórz drugiej, przeglądarkowej kolejki. Źródłem prawdy jest
+    // artway_allegro_preparation_tasks, a w kartotece produktu zapisujemy
+    // wyłącznie bieżący stan i identyfikator konkretnej próby.
+    const task = {
+      id: `allegro-publication:${productId}:${Date.now().toString(36)}`,
+      typ: 'allegro-oferta', specialist: 'allegro_publication', status: errors.length ? 'failed' : 'attention', productId,
+      productName: text(product.nazwa || product.name || `Produkt ${productId}`, 300), producent: link.producent, missing, errors,
+      suggestions: {
+        allegroCategoryId: auto.allegroCategoryId || link.categoryId, allegroProductId: auto.allegroProductId || link.catalogProductId,
+        producent: auto.producent || link.producent, marka: auto.marka || '', gtin: auto.gtin || auto.ean || '', ean: auto.ean || auto.gtin || '',
+        kodProducenta: auto.kodProducenta || auto.mpn || '', mpn: auto.mpn || auto.kodProducenta || '', zdjecie: auto.zdjecie || '',
+        zdjecia: Array.isArray(auto.zdjecia) ? auto.zdjecia.slice(0, 15) : [], allegroParameters: Array.isArray(auto.allegroParameters) ? auto.allegroParameters : [],
+      },
+      operationId: text(details.operationId, 160), catalogIdentity: catalog?.identity || null,
+      specialistRunId: specialistRun?.id || '', agentDiagnosis: specialistRun?.result || null, specialistError,
+      procedure: ALLEGRO_AGENT_OFFER_PROCEDURE, decision: details.prepared?.agentDecision || null,
+      sourceUrl: text(product.sourceUrl || product.producentUrl || '', 800),
+      attempts: Math.max(0, Number(product.allegroPublicationFailureCount) || 0) + 1,
+      createdAt: timestamp, updatedAt: timestamp,
+    };
     try {
       await saveProductFields({
         productId,
@@ -127,6 +119,18 @@ export function createAllegroPublicationAgent({
       });
     } catch (error) {
       task.productRecordError = text(error?.message || error, 700);
+    }
+    if (typeof onRepairRequired === 'function') {
+      try {
+        task.queue = await onRepairRequired(productId, {
+          operationId: task.operationId,
+          taskId: task.id,
+          missing,
+          errors,
+        });
+      } catch (error) {
+        task.queueError = text(error?.message || error, 700);
+      }
     }
     return task;
   }

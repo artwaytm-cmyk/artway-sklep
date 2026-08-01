@@ -482,5 +482,42 @@ export function createAllegroPreparationQueue({
     return publicState(await read());
   }
 
-  return Object.freeze({ enqueue, status, resume, kick });
+  async function resolveProduct(productId, {
+    reason = 'confirmed_outside_preparation_queue',
+    offerId = '',
+  } = {}) {
+    const id = clean(productId, 100);
+    if (!id) return { modified: 0 };
+    let modified = 0;
+    await mutate((state) => {
+      const pending = state.pending.filter((task) => {
+        const keep = String(task.productId) !== id;
+        if (!keep) modified++;
+        return keep;
+      });
+      const activeMatches = String(state.active?.productId || '') === id;
+      if (activeMatches) modified++;
+      const existing = state.results.filter((item) => String(item.productId) !== id);
+      const resolved = {
+        id: `resolved:${id}:${Date.now().toString(36)}`,
+        productId: id,
+        status: 'completed',
+        ready: true,
+        completedAt: now().toISOString(),
+        missing: [],
+        error: '',
+        reason: clean(reason, 160),
+        offerId: clean(offerId, 120),
+      };
+      return {
+        ...state,
+        pending,
+        active: activeMatches ? null : state.active,
+        results: [resolved, ...existing].slice(0, MAX_RESULTS),
+      };
+    });
+    return { modified };
+  }
+
+  return Object.freeze({ enqueue, status, resume, kick, resolveProduct });
 }
