@@ -103,6 +103,10 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
     }
     return '';
   }
+  function kodReferencyjnyZHtml(html = '') {
+    const block = (String(html || '').match(/<div\b[^>]*class=["'][^"']*\bref__nr\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/i) || [])[1] || '';
+    return tekst(stripHtml(block), 120).trim();
+  }
   function liczbaZTekstu(v) {
     if (v === null || v === undefined || v === '') return 0;
     const m = String(v).replace(/\s+/g, '').match(/(\d{1,6}(?:[,.]\d{1,2})?)/);
@@ -260,7 +264,7 @@ export function createProductSourceInspectionService({ read, write, normalizeKey
     const marka = parametr(dict, ['Marka', 'Brand']) || tekst(ldProduct.brand?.name || ldProduct.brand, 160).trim() || hostProducer || (/alexander/i.test(url + text) ? 'Alexander' : '');
     const producent = hostProducer || parametr(dict, ['Producent', 'Manufacturer']) || marka;
     const symbol = parametr(dict, ['Symbol', 'Kod', 'SKU']) || tekst(ldProduct.sku, 120).trim();
-    const kodProducentaRaw = parametr(dict, ['Kod producenta', 'Numer referencyjny', 'Numer katalogowy', 'Reference number', 'MPN', 'Kod katalogowy']) || tekst(ldProduct.mpn, 120).trim();
+    const kodProducentaRaw = parametr(dict, ['Kod producenta', 'Numer referencyjny', 'Numer katalogowy', 'Reference number', 'MPN', 'Kod katalogowy']) || tekst(ldProduct.mpn, 120).trim() || kodReferencyjnyZHtml(html);
     const eanRaw = parametr(dict, ['EAN', 'GTIN', 'Kod EAN']) || tekst(ldProduct.gtin13 || ldProduct.gtin || ldProduct.gtin12 || ldProduct.gtin14, 80).trim() || kodProducentaRaw;
     const eanCandidate = (String(eanRaw).match(/\b\d{8,14}\b/) || [])[0] || '';
     const ean = isValidGtin(eanCandidate) ? eanCandidate : '';

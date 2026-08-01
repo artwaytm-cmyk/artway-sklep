@@ -95,7 +95,7 @@ test('import WordPress pobiera oficjalne zdjęcie produktu z primaryImageOfPage 
         { '@type': 'Organization', logo: { url: 'https://multigra.com.pl/logo.png' } },
       ],
     })}</script>
-  </head><body><h1>Śrubka po śrubce</h1><p>Gra edukacyjna rozwijająca sprawność manualną dzieci.</p>${' '.repeat(1800)}</body></html>`;
+  </head><body><h1>Śrubka po śrubce</h1><div class="gallery__section"><div class="ref__nr"><span>3002</span></div></div><p>Gra edukacyjna rozwijająca sprawność manualną dzieci.</p>${' '.repeat(1800)}</body></html>`;
   const previousFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(html, { status: 200, headers: { 'content-type': 'text/html' } });
   try {
@@ -107,6 +107,10 @@ test('import WordPress pobiera oficjalne zdjęcie produktu z primaryImageOfPage 
     });
     const result = await service.inspectProductUrl('https://multigra.com.pl/produkty/srubka-po-srubce/');
     assert.equal(result.product.zdjecie, 'https://multigra.com.pl/wp-content/uploads/sites/5/2026/05/3002.jpg');
+    assert.equal(result.product.kodProducenta, '3002');
+    assert.equal(result.product.mpn, '3002');
+    assert.equal(result.product.externalId, '3002');
+    assert.equal(result.product.sku, '3002');
     assert.deepEqual(result.product.sourceEvidence.imageUrls, ['https://multigra.com.pl/wp-content/uploads/sites/5/2026/05/3002.jpg']);
   } finally {
     globalThis.fetch = previousFetch;
