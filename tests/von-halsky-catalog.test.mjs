@@ -14,6 +14,7 @@ import {
 import { createVonHalskyApiClient } from '../src/backend/lib/domain/von-halsky-api-client.mjs';
 import { createVonHalskyRoute } from '../src/backend/lib/von-halsky-route.mjs';
 import {
+  persistVonHalskyReconciliationState,
   reconcileVonHalskyCommands,
   vonHalskyCreateReceipts,
 } from '../src/backend/lib/domain/von-halsky-catalog-route.mjs';
@@ -34,6 +35,32 @@ import {
   resolveVonHalskyRemoteOffer,
   vonHalskyCatalogTruthSummary,
 } from '../src/backend/lib/domain/von-halsky-catalog-reconciliation.mjs';
+
+test('odczyt katalogu Von Halsky domyka potwierdzenie publikacji nawet bez zmiany kartoteki', async () => {
+  const states = [], receipts = [];
+  const result = await persistVonHalskyReconciliationState({
+    channelState: {
+      upsertState: async (value) => states.push(value),
+      recordReceipt: async (value) => receipts.push(value),
+    },
+    products: [{
+      id: 'P-STATE-1',
+      vonHalskyOfferId: 'OFFER-1',
+      vonHalskyCommandId: 'COMMAND-1',
+      vonHalskyRemoteStatus: 'PENDING',
+      vonHalskyCategoryId: 'CATEGORY-1',
+    }],
+    productUpdates: [{ productId: 'P-STATE-1', fields: { vonHalskyRemoteStatus: 'PUBLISHED' } }],
+    timestamp: '2026-08-01T10:00:00.000Z',
+    source: 'test-reconciliation',
+  });
+  assert.deepEqual(result, { observed: 1, receipts: 1 });
+  assert.equal(states[0].publicationStatus, 'confirmed');
+  assert.equal(states[0].readbackConfirmedAt, '2026-08-01T10:00:00.000Z');
+  assert.equal(receipts[0].idempotencyKey, 'COMMAND-1');
+  assert.equal(receipts[0].status, 'readback_confirmed');
+  assert.equal(receipts[0].targetId, 'OFFER-1');
+});
 
 test('oferta Von Halsky jest odnajdywana po EAN albo kodzie producenta z marką', () => {
   const index = preferredVonHalskyOffers([{

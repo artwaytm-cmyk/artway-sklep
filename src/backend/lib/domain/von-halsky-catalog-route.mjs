@@ -4,6 +4,63 @@ import {
   resolveVonHalskyRemoteOffer,
 } from './von-halsky-catalog-reconciliation.mjs';
 
+export async function persistVonHalskyReconciliationState({
+  channelState,
+  products = [],
+  productUpdates = [],
+  timestamp = new Date().toISOString(),
+  source = 'background-worker',
+} = {}) {
+  if (!channelState?.upsertState) return { observed: 0, receipts: 0 };
+  const updates = new Map((Array.isArray(productUpdates) ? productUpdates : [])
+    .map((update) => [String(update?.productId || ''), update?.fields || {}])
+    .filter(([productId]) => productId));
+  let observed = 0, receipts = 0;
+  for (const stored of Array.isArray(products) ? products : []) {
+    const productId = String(stored?.id ?? '').trim();
+    if (!productId) continue;
+    const product = { ...stored, ...(updates.get(productId) || {}) };
+    const remoteStatus = String(product.vonHalskyRemoteStatus || '').trim().toUpperCase();
+    const targetId = String(product.vonHalskyOfferId || product.inpostVonHalskyOfferId || '').trim();
+    const receiptId = String(product.vonHalskyCommandId || '').trim();
+    if (!remoteStatus && !targetId && !receiptId) continue;
+    const confirmed = ['PUBLISHED', 'CLOSED', 'SOLDOUT', 'INACTIVE'].includes(remoteStatus);
+    const failed = ['REJECTED', 'ERROR', 'DUPLICATE_MAPPING', 'NOT_FOUND'].includes(remoteStatus);
+    const publicationStatus = confirmed ? (remoteStatus === 'PUBLISHED' ? 'confirmed' : 'blocked') : failed ? 'failed' : 'publishing';
+    const errorText = failed ? String(product.vonHalskyEditorialSyncError || 'Kanał odrzucił albo nie odnalazł oferty.').slice(0, 2000) : '';
+    await channelState.upsertState({
+      productId,
+      channel: 'von_halsky',
+      preparationStatus: failed ? 'needs_data' : 'ready',
+      publicationStatus,
+      categoryId: product.vonHalskyCategoryId || '',
+      targetId,
+      errorCode: failed ? `von_halsky_${remoteStatus.toLowerCase()}` : '',
+      errorText,
+      providerConfirmedAt: confirmed ? timestamp : null,
+      readbackConfirmedAt: confirmed ? timestamp : null,
+      metadata: { remoteStatus, source },
+    });
+    observed += 1;
+    if (!receiptId || !channelState?.recordReceipt) continue;
+    await channelState.recordReceipt({
+      productId,
+      channel: 'von_halsky',
+      operation: 'publish',
+      idempotencyKey: receiptId,
+      providerRequestId: receiptId,
+      targetId,
+      status: confirmed ? 'readback_confirmed' : failed ? 'failed' : 'publishing',
+      errorCode: failed ? `von_halsky_${remoteStatus.toLowerCase()}` : '',
+      errorText,
+      responseSummary: { readbackConfirmed: confirmed, remoteStatus, source },
+      confirmedAt: confirmed ? timestamp : null,
+    });
+    receipts += 1;
+  }
+  return { observed, receipts };
+}
+
 export function vonHalskyCreateReceipts(payload = {}) {
   const direct = Array.isArray(payload) ? payload : null;
   const nested = [
@@ -141,32 +198,13 @@ export function createVonHalskyCatalogRoute(context = {}) {
           saveProductFields,
           timestamp,
         });
-        if (channelState?.upsertState && reconciliation.productUpdates.length) {
-          await Promise.all(reconciliation.productUpdates.map((update) => {
-            const fields = update.fields || {};
-            const remoteStatus = String(fields.vonHalskyRemoteStatus || '').toUpperCase();
-            const publicationStatus = remoteStatus === 'PUBLISHED'
-              ? 'confirmed'
-              : ['REJECTED', 'ERROR', 'DUPLICATE_MAPPING', 'NOT_FOUND'].includes(remoteStatus)
-                ? 'failed'
-                : ['PENDING', 'PROCESSING', 'VERIFYING'].includes(remoteStatus)
-                  ? 'publishing'
-                  : 'blocked';
-            return channelState.upsertState({
-              productId: update.productId,
-              channel: 'von_halsky',
-              preparationStatus: publicationStatus === 'failed' ? 'needs_data' : 'ready',
-              publicationStatus,
-              categoryId: fields.vonHalskyCategoryId || update.product?.vonHalskyCategoryId || '',
-              targetId: fields.vonHalskyOfferId || update.product?.vonHalskyOfferId || '',
-              errorCode: publicationStatus === 'failed' ? `von_halsky_${remoteStatus.toLowerCase()}` : '',
-              errorText: fields.vonHalskyEditorialSyncError || '',
-              providerConfirmedAt: publicationStatus === 'confirmed' ? timestamp : null,
-              readbackConfirmedAt: publicationStatus === 'confirmed' ? timestamp : null,
-              metadata: { remoteStatus, source },
-            });
-          }));
-        }
+        const publicationState = await persistVonHalskyReconciliationState({
+          channelState,
+          products: list,
+          productUpdates: reconciliation.productUpdates,
+          timestamp,
+          source,
+        });
         const changedProductIds = [...new Set(
           (Array.isArray(reconciliation.productUpdates) ? reconciliation.productUpdates : [])
             .map((item) => String(item?.productId || ''))
@@ -205,6 +243,8 @@ export function createVonHalskyCatalogRoute(context = {}) {
               : current.sync.reconciliationRevision || timestamp,
             lastReconciliationSource: source,
             lastChangedProductIds: changedProductIds,
+            lastPublicationStateCount: publicationState.observed,
+            lastPublicationReceiptCount: publicationState.receipts,
             reconciliationMode: config.webhookConfigured ? 'webhook_with_polling_fallback' : 'background_polling',
           };
           return current;
