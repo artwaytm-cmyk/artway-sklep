@@ -7,6 +7,7 @@ const { Client } = pg;
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error('Brakuje DATABASE_URL do izolowanej bazy testowej.');
 const baselineSchema = await readFile(new URL('../db/migrations/0000_runtime_schema_baseline.sql', import.meta.url), 'utf8');
+const diagnosticsSchema = await readFile(new URL('../db/migrations/0017_diagnostics_postgres_read_model.sql', import.meta.url), 'utf8');
 const seed = new Client({ connectionString });
 await seed.connect();
 
@@ -24,6 +25,7 @@ try {
   assert.equal(identity.rows[0]?.username, 'artway_benchmark', 'Test wymaga izolowanej roli artway_benchmark.');
   await seed.query(`DROP TABLE IF EXISTS ${tables.join(',')} CASCADE`);
   await seed.query(baselineSchema);
+  await seed.query(diagnosticsSchema);
   await seed.query(`CREATE TABLE artway_warehouse_records(
     namespace text NOT NULL,domain text NOT NULL,collection text NOT NULL,record_id text NOT NULL,
     ordinal bigint NOT NULL DEFAULT 0,data jsonb NOT NULL,updated_at timestamptz NOT NULL DEFAULT now(),

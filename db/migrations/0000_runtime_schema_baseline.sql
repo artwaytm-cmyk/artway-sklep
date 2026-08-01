@@ -211,31 +211,6 @@ CREATE INDEX IF NOT EXISTS artway_agent_records_time_idx
 CREATE INDEX IF NOT EXISTS artway_agent_records_data_idx
   ON artway_agent_records USING GIN(data jsonb_path_ops);
 
--- Rejestr diagnostyczny ma osobny, indeksowany model odczytowy. Każda grupa
--- problemu jest osobnym rekordem PostgreSQL; przeglądarka nigdy nie wylicza
--- liczników z lokalnego dziennika ani z niepełnej strony wyników.
-CREATE TABLE IF NOT EXISTS artway_diagnostic_issues (
-  namespace TEXT NOT NULL,
-  domain TEXT NOT NULL,
-  collection TEXT NOT NULL,
-  record_id TEXT NOT NULL,
-  ordinal BIGINT NOT NULL DEFAULT 0,
-  data JSONB NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  status TEXT GENERATED ALWAYS AS (COALESCE(data->>'status', 'open')) STORED,
-  level TEXT GENERATED ALWAYS AS (COALESCE(data->>'level', 'blad')) STORED,
-  last_seen_at TEXT GENERATED ALWAYS AS (COALESCE(data->>'lastSeenAt', '')) STORED,
-  PRIMARY KEY(namespace, domain, collection, record_id),
-  FOREIGN KEY(namespace, domain)
-    REFERENCES artway_domain_snapshots(namespace, domain) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS artway_diagnostic_issues_open_idx
-  ON artway_diagnostic_issues(namespace, domain, status, level, last_seen_at DESC);
-CREATE INDEX IF NOT EXISTS artway_diagnostic_issues_recent_idx
-  ON artway_diagnostic_issues(namespace, domain, last_seen_at DESC);
-CREATE INDEX IF NOT EXISTS artway_diagnostic_issues_data_idx
-  ON artway_diagnostic_issues USING GIN(data jsonb_path_ops);
-
 CREATE TABLE IF NOT EXISTS artway_domain_records_archive_v2 (
   migration_id TEXT NOT NULL,
   namespace TEXT NOT NULL,
