@@ -374,7 +374,10 @@ export function createAgentRuntime({ readVersioned, writeIfVersion, now = () => 
     const lastRun = record.history[0] || null;
     const allegro = integrations?.allegro && typeof integrations.allegro === 'object' ? integrations.allegro : null;
     const allegroHealthy = allegro?.configured === true && allegro?.connected === true && allegro?.requiresReauth !== true;
-    const historicalWarnings = (lastRun?.steps || []).filter((step) => ['warning', 'failed'].includes(step.status)).map((step) => ({
+    // Zakończony przebieg pozostaje w historii, ale jego dawne ostrzeżenia nie
+    // mogą utrzymywać stanu „degraded” bez końca. Bieżący pasek pokazuje tylko
+    // aktualnie wykonywany przebieg oraz żywy stan integracji poniżej.
+    const historicalWarnings = (record.currentRun?.steps || []).filter((step) => ['warning', 'failed'].includes(step.status)).map((step) => ({
       id: step.id,
       label: step.label,
       error: step.error || step.detail,

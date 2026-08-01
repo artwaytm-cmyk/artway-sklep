@@ -32,10 +32,10 @@ test('rejestr Agenta pokazuje realny cykl, etapy i ostrzeżenie integracji bez o
   await runtime.report({ event: 'cycle_finish', runId: 'cycle-1', status: 'degraded', summary: 'Agent działa; integracja wymaga uwagi.', durationMs: 5000 });
 
   const state = await runtime.status({ workerOnline: true, workerLastSeenAt: current.toISOString(), counts: { queued: 1 }, active: 1 });
-  assert.equal(state.state, 'degraded');
+  assert.equal(state.state, 'ready');
   assert.equal(state.worker.online, true);
   assert.equal(state.lastRun.status, 'degraded');
-  assert.equal(state.integrationWarnings.length, 1);
+  assert.equal(state.integrationWarnings.length, 0);
   assert.equal(state.providers.openai.model, 'gpt-5-nano');
   assert.equal(state.providers.xai.model, 'grok-4.20-0309-non-reasoning');
   assert.equal(state.providers.xai.connected, true);
@@ -69,7 +69,9 @@ test('udany etap GPT potwierdza realne połączenie OpenAI i oddziela ostrzeżen
   await runtime.report({ event: 'cycle_step', runId: 'cycle-ai', step: { id: 'tresci-gpt-nano', status: 'completed', count: 3 } });
   await runtime.report({ event: 'cycle_step', runId: 'cycle-ai', step: { id: 'zamowienia', status: 'warning', error: 'Autoryzacja Allegro wygasła.' } });
   await runtime.report({ event: 'cycle_finish', runId: 'cycle-ai', status: 'degraded' });
-  const state = await runtime.status({ workerOnline: true, workerLastSeenAt: current.toISOString() });
+  const state = await runtime.status({ workerOnline: true, workerLastSeenAt: current.toISOString() }, {}, {
+    allegro: { configured: true, connected: false, requiresReauth: true, authError: { message: 'Autoryzacja Allegro wygasła.' } },
+  });
   assert.equal(state.providers.openai.connected, true);
   assert.equal(state.providers.openai.lastSuccessAt, current.toISOString());
   assert.equal(state.integrationWarnings[0].kind, 'allegro');
