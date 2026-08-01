@@ -52,10 +52,12 @@ export function createAllegroPreparationRoute(deps = {}) {
         inputFingerprintByProduct: Object.fromEntries(candidates.map((item) => [item.id, item.inputFingerprint || ''])),
         defaultPriority: 100,
       });
+      const enqueued = Number(state.batches?.find((batch) => batch.id === state.batchId)?.enqueued ?? 0);
+      if (enqueued <= 0) backlogEnabled = false;
       return {
         skipped: false,
         candidates,
-        enqueued: Number(state.batches?.[0]?.enqueued || candidates.length),
+        enqueued,
         queue: state,
       };
     })();
@@ -117,15 +119,20 @@ export function createAllegroPreparationRoute(deps = {}) {
     requestedBy = 'agent-zdarzeniowy',
     wait = false,
   } = {}) {
-    if (operation === 'product-full-review') backlogEnabled = true;
     const state = await queue.enqueue(productIds, { operation, requestedBy });
     if (wait) await queue.kick();
     return state;
   }
 
   async function startBacklog() {
-    backlogEnabled = true;
-    return runAutomaticPreparation({ batchSize: 1000 });
+    backlogEnabled = false;
+    return {
+      skipped: true,
+      reason: 'automatic_backlog_disabled',
+      candidates: [],
+      enqueued: 0,
+      queue: await queue.status(),
+    };
   }
 
   const allegroPreparationRoute = async function allegroPreparationRoute(req, url, action) {
