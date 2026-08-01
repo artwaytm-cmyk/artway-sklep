@@ -5,6 +5,7 @@ const STATE_KEY = 'allegro_preparation_queue';
 
 export function createPostgresAllegroPreparationQueue({
   pool,
+  listenerPool = pool,
   namespace = 'artway-sklep',
   readVersioned,
   prepare,
@@ -64,7 +65,7 @@ export function createPostgresAllegroPreparationQueue({
     if (listenerClient) return;
     if (!listenerPromise) {
       listenerPromise = (async () => {
-        const client = await pool.connect();
+        const client = await listenerPool.connect();
         let released = false;
         const release = () => {
           if (released) return;

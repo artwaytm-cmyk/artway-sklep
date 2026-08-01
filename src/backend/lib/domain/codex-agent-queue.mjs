@@ -89,11 +89,12 @@ export function createCodexAgentQueue({
   readVersioned,
   writeIfVersion,
   pool = null,
+  listenerPool = pool,
   namespace = 'artway-sklep',
   now = () => new Date(),
   token = () => crypto.randomBytes(24).toString('base64url'),
 } = {}) {
-  if (pool) return createPostgresCodexAgentQueue({ pool, namespace, now, token });
+  if (pool) return createPostgresCodexAgentQueue({ pool, listenerPool, namespace, now, token });
   if (typeof readVersioned !== 'function' || typeof writeIfVersion !== 'function') {
     throw new Error('Kolejka Agenta wymaga wersjonowanego repozytorium.');
   }

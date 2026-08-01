@@ -4,6 +4,7 @@ import { assertPostgresRelations } from './postgres-schema-contract.mjs';
 
 const { Pool } = pg;
 const pools = new Map();
+const listenerPools = new Map();
 
 export function postgresPoolFor(connectionString) {
   if (!pools.has(connectionString)) {
@@ -31,6 +32,27 @@ export function postgresPoolFor(connectionString) {
     pools.set(connectionString, pool);
   }
   return pools.get(connectionString);
+}
+
+// LISTEN utrzymuje połączenie przez cały czas życia procesu. Osobna mała pula
+// zapobiega zajmowaniu miejsc przeznaczonych dla zapytań HTTP i synchronizacji.
+export function postgresListenerPoolFor(connectionString) {
+  if (!listenerPools.has(connectionString)) {
+    const pool = new Pool({
+      connectionString,
+      application_name: 'artway-listeners',
+      max: Math.max(4, Math.min(10, Number(process.env.ARTWAY_DB_LISTENER_POOL_MAX || 5) || 5)),
+      idleTimeoutMillis: 0,
+      connectionTimeoutMillis: 15_000,
+    });
+    pool.on('error', (error) => console.error(JSON.stringify({
+      at: new Date().toISOString(), component: 'artway-postgres-listeners',
+      event: 'connection_error', code: String(error?.code || '').slice(0, 40),
+      message: String(error?.message || error || 'Błąd PostgreSQL').slice(0, 500),
+    })));
+    listenerPools.set(connectionString, pool);
+  }
+  return listenerPools.get(connectionString);
 }
 
 export function postgresVersionFromEtag(etag = '') {

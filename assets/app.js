@@ -832,14 +832,15 @@ function chmuraNaglowki(json){
   if(sesja?.token) h.Authorization=`Bearer ${sesja.token}`;
   return h;
 }
-async function chmura(action, {method="GET", body=null, params={}, timeout=9000}={}){
+async function chmura(action, {method="GET", body=null, params={}, timeout=9000, headers={}, allowNotModified=false}={}){
   const url = new URL(CHMURA_URL, location.href);
   url.searchParams.set("action", action);
   for(const [k,v] of Object.entries(params)) if(v!==undefined&&v!==null&&v!=="") url.searchParams.set(k,String(v));
-  const requestKey=method==="GET"&&body===null?url.toString():"",istniejace=requestKey?chmuraPobraniaWToku.get(requestKey):null;
+  const requestHeaders={...chmuraNaglowki(body!==null),...(headers&&typeof headers==="object"?headers:{})};
+  const requestKey=method==="GET"&&body===null?`${url.toString()}|${JSON.stringify(requestHeaders)}`:"",istniejace=requestKey?chmuraPobraniaWToku.get(requestKey):null;
   if(istniejace)return istniejace;
   const request=(async()=>{
-    const opt = {method, headers: chmuraNaglowki(body!==null), credentials:"same-origin"};
+    const opt = {method, headers: requestHeaders, credentials:"same-origin"};
     if(body!==null) opt.body = JSON.stringify(body);
     const ac = (typeof AbortController!=="undefined") ? new AbortController() : null;
     let timer=null;
@@ -848,6 +849,7 @@ async function chmura(action, {method="GET", body=null, params={}, timeout=9000}
     try{ r = await fetch(url.toString(), opt); }
     catch(e){ if(timer)clearTimeout(timer); throw new Error(e&&e.name==="AbortError"?"Serwer nie odpowiedział w wyznaczonym czasie":"Brak połączenia z serwerem"); }
     if(timer)clearTimeout(timer);
+    if(r.status===304&&allowNotModified)return {ok:true,notModified:true,etag:r.headers.get("etag")||String(requestHeaders["If-None-Match"]||requestHeaders["if-none-match"]||"")};
     const t = await r.text(); let d;
     try{ d = JSON.parse(t); }catch(e){ throw new Error("Serwer nie zwrócił prawidłowych danych — sprawdź usługę backendu VPS."); }
     if(!r.ok || d.ok===false){ const b=new Error(d.error||("Błąd bazy HTTP "+r.status)); Object.assign(b,d); b.code=d.code||""; b.status=r.status; throw b; }

@@ -663,11 +663,20 @@ test('Centralny rejestr pokazuje tylko aktywne problemy i odświeża się bez sk
     const action = new URL(route.request().url()).searchParams.get('action');
     if (action !== 'diagnostics-central') return route.fallback();
     diagnosticsReads += 1;
+    const etag = 'W/"artway-diagnostics-17"';
+    if (route.request().headers()['if-none-match'] === etag) {
+      await route.fulfill({ status: 304, headers: { ETag: etag, 'X-Artway-Data-Source': 'postgresql' } });
+      return;
+    }
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
+      headers: { ETag: etag, 'X-Artway-Data-Source': 'postgresql' },
       body: JSON.stringify({
         ok: true,
+        source: 'postgresql',
+        version: 17,
+        etag,
         updatedAt: '2026-07-25T23:28:56.719Z',
         summary: { total: 2, open: 0, errors: 0, warnings: 0, occurrences: 0 },
         agent: { configured: true, model: 'gpt-5-mini', reasoning: 'medium' },

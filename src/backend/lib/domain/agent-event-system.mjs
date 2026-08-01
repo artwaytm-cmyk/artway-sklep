@@ -6,6 +6,7 @@ const REVIEW_FIELD = /^(?:nazwa|name|opis|description|opisKrotki|krotkiOpis|prod
 
 export function createAgentEventSystem({
   pool = null,
+  listenerPool = pool,
   namespace = 'artway-sklep',
   readVersioned,
   writeIfVersion,
@@ -16,6 +17,7 @@ export function createAgentEventSystem({
 } = {}) {
   const queue = createAgentEventQueue({
     pool,
+    listenerPool,
     namespace,
     readVersioned,
     writeIfVersion,

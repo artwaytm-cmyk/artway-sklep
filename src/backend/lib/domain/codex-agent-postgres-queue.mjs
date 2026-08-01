@@ -38,6 +38,7 @@ function publicJob(row = {}) {
 
 export function createPostgresCodexAgentQueue({
   pool,
+  listenerPool = pool,
   namespace = 'artway-sklep',
   now = () => new Date(),
   token = () => crypto.randomBytes(24).toString('base64url'),
@@ -70,7 +71,7 @@ export function createPostgresCodexAgentQueue({
     if (listenerClient) return;
     if (!listenerPromise) {
       listenerPromise = (async () => {
-        const client = await pool.connect();
+        const client = await listenerPool.connect();
         let released = false;
         const release = () => {
           if (released) return;

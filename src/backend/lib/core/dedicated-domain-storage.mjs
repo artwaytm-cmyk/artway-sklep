@@ -18,6 +18,7 @@ const DOMAIN_TABLES = Object.freeze({
   'kv:agent_action_runs': 'artway_agent_records',
   'kv:agent_runtime': 'artway_agent_records',
   'kv:codex_agent_jobs': 'artway_agent_records',
+  'kv:system_diagnostics': 'artway_diagnostic_issues',
   'settings:artway_stany': 'artway_warehouse_records',
   'settings:artway_magazyn_niedobory_wydan': 'artway_warehouse_records',
   'settings:artway_dostepnosc': 'artway_warehouse_records',
@@ -49,6 +50,7 @@ export async function ensureDedicatedDomainSchema(client) {
     'artway_allegro_mappings',
     'artway_allegro_communications',
     'artway_agent_records',
+    'artway_diagnostic_issues',
     'artway_warehouse_records',
     'artway_domain_records_archive_v2',
   ], 'dedykowanych domen');

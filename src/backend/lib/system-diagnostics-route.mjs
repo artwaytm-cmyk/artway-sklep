@@ -187,6 +187,7 @@ export function createSystemDiagnosticsRoute({
   sessionOf = () => null,
   agentRuntime = null,
   diagnosticAgent = null,
+  readProjection = null,
   now = () => new Date(),
 } = {}) {
   if (typeof readVersioned !== 'function' || typeof writeIfVersion !== 'function' || typeof respond !== 'function' || typeof isAdmin !== 'function') {
@@ -439,7 +440,28 @@ export function createSystemDiagnosticsRoute({
     }
     if (action === 'diagnostics-central') {
       if (req.method !== 'GET') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
-      const version = await readVersioned(RECORD_KEY, {}), recordValue = safeRecord(version.value);
+      const status = clean(url.searchParams.get('status'), 30), level = clean(url.searchParams.get('level'), 30);
+      const limit = Math.max(1, Math.min(500, Number(url.searchParams.get('limit')) || 200));
+      const projection = typeof readProjection === 'function'
+        ? await readProjection({ status: status || 'all', level: level || 'all', limit })
+        : null;
+      const version = projection
+        ? { etag: String(projection.version || ''), exists: projection.exists !== false }
+        : await readVersioned(RECORD_KEY, {});
+      const recordValue = projection
+        ? safeRecord({ items: projection.items, updatedAt: projection.updatedAt || projection.metadata?.updatedAt, lastIngestAt: projection.metadata?.lastIngestAt })
+        : safeRecord(version.value);
+      const revision = String(version.etag || '').replace(/^W\//, '').replace(/^"|"$/g, '') || '0';
+      const etag = `W/"artway-diagnostics-${revision}"`;
+      const responseHeaders = {
+        etag,
+        'cache-control': 'private, no-cache, max-age=0, must-revalidate',
+        vary: 'authorization, x-admin-token, cookie',
+        'x-artway-data-source': 'postgresql',
+      };
+      if (req.headers.get('if-none-match')?.split(',').map((item) => item.trim()).includes(etag)) {
+        return new Response(null, { status: 304, headers: responseHeaders });
+      }
       if (diagnosticAgent?.status?.().configured) {
         const idle = recordValue.items
           .filter((item) => OPEN_STATUSES.has(item.status) && item.analysis.status === 'idle')
@@ -447,13 +469,21 @@ export function createSystemDiagnosticsRoute({
           .map((item) => item.id);
         if (idle.length) enqueueAnalysis(idle, { deep: false, manual: false });
       }
-      const status = clean(url.searchParams.get('status'), 30), level = clean(url.searchParams.get('level'), 30);
-      const limit = Math.max(1, Math.min(500, Number(url.searchParams.get('limit')) || 200));
-      const items = recordValue.items
+      const items = projection ? recordValue.items : recordValue.items
         .filter((item) => !status || status === 'all' || (status === 'open' ? OPEN_STATUSES.has(item.status) : item.status === status))
         .filter((item) => !level || level === 'all' || item.level === level)
         .slice(0, limit);
-      return respond({ ok: true, items, summary: summary(recordValue.items), updatedAt: recordValue.updatedAt, version: String(version.etag || ''), agent: diagnosticAgent?.status?.() || { configured: false } });
+      const projectionSummary = projection?.summary || summary(recordValue.items);
+      return respond({
+        ok: true,
+        source: 'postgresql',
+        items,
+        summary: projectionSummary,
+        updatedAt: projection?.updatedAt || recordValue.updatedAt,
+        version: String(version.etag || ''),
+        etag,
+        agent: diagnosticAgent?.status?.() || { configured: false },
+      }, 200, responseHeaders);
     }
     if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
     const body = await req.json().catch(() => ({})), ids = new Set((Array.isArray(body.ids) ? body.ids : [body.id]).map((id) => clean(id, 80)).filter(Boolean));

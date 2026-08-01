@@ -12,7 +12,7 @@ function fixture(overrides = {}) {
       value = structuredClone(next); version += 1;
       return { modified: true, version };
     },
-    respond: (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }),
+    respond: (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } }),
     isAdmin: (request) => request.headers.get('x-admin') === '1',
     rateLimit: () => null,
     sessionOf: () => ({ email: 'administrator@example.test' }),
@@ -155,6 +155,34 @@ test('pełny rejestr centralny jest dostępny wyłącznie administratorowi', asy
   assert.equal(body.summary.errors, 1);
 });
 
+test('projekcja PostgreSQL zwraca jedną rewizję, ETag i 304 bez ponownego przesyłania danych', async () => {
+  let reads = 0;
+  const projection = {
+    exists: true,
+    version: '"91"',
+    updatedAt: '2026-08-01T08:00:00.000Z',
+    metadata: { lastIngestAt: '2026-08-01T07:59:58.000Z' },
+    items: [{ id: 'diag-db-1', fingerprint: 'db-1', level: 'blad', message: 'Błąd z PostgreSQL', source: 'backend:test', route: '/api/store', status: 'open', count: 3, firstSeenAt: '2026-08-01T07:00:00.000Z', lastSeenAt: '2026-08-01T08:00:00.000Z' }],
+    summary: { total: 20, open: 4, errors: 2, warnings: 2, occurrences: 11 },
+  };
+  const { service } = fixture({ readProjection: async () => { reads += 1; return projection; } });
+  const firstRequest = new Request('https://artwaytm.pl/api/store?action=diagnostics-central&status=all', { headers: { 'x-admin': '1' } });
+  const first = await service.route(firstRequest, new URL(firstRequest.url), 'diagnostics-central');
+  const body = await json(first);
+  assert.equal(first.status, 200);
+  assert.equal(first.headers.get('etag'), 'W/"artway-diagnostics-91"');
+  assert.equal(first.headers.get('x-artway-data-source'), 'postgresql');
+  assert.equal(body.source, 'postgresql');
+  assert.deepEqual(body.summary, projection.summary);
+  assert.equal(body.items.length, 1);
+
+  const secondRequest = new Request('https://artwaytm.pl/api/store?action=diagnostics-central&status=all', { headers: { 'x-admin': '1', 'if-none-match': body.etag } });
+  const second = await service.route(secondRequest, new URL(secondRequest.url), 'diagnostics-central');
+  assert.equal(second.status, 304);
+  assert.equal(await second.text(), '');
+  assert.equal(reads, 2);
+});
+
 test('pełny autotest przekazuje Agentowi błędy i ostrzeżenia oraz zamyka ustąpione kontrole', async () => {
   const analyzed = [];
   const diagnosticAgent = {
@@ -271,6 +299,9 @@ test('frontend wysyła błędy do VPS i autotest zapisuje nazwę nieudanej kontr
   assert.match(diagnostics, /systemDokumentTymczasowyHTML/);
   assert.match(diagnostics, /systemOdswiezDiagnostyke.*diagnostykaSynchronizujProblemy/s);
   assert.match(diagnostics, /fetchedAt/);
+  assert.match(diagnostics, /SYSTEM_CENTRAL_DIAG_CACHE_KEY/);
+  assert.match(diagnostics, /If-None-Match/);
+  assert.match(diagnostics, /data\.source!=="postgresql"/);
   assert.doesNotMatch(diagnostics, /systemPobierzCentralneBledy\(true\)\.then\(renderuj\)/);
   assert.match(diagnostics, /item\.nazwa.*item\.szczegoly/s);
   assert.match(backend, /backend:\$\{action\}/);

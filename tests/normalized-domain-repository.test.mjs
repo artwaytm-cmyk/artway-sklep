@@ -88,6 +88,17 @@ test('repozytorium udostępnia przyrostowy odczyt ustawień zamiast obowiązkowe
   assert.match(source, /domain-records-incremental-v1/);
 });
 
+test('diagnostyka ma atomowy, liczony w PostgreSQL model odczytowy', async () => {
+  const source = await readFile(new URL('../src/backend/lib/core/normalized-domain-repository.mjs', import.meta.url), 'utf8');
+  const migration = await readFile(new URL('../db/migrations/0017_diagnostics_postgres_read_model.sql', import.meta.url), 'utf8');
+  assert.match(source, /readDiagnosticsProjection/);
+  assert.match(source, /FROM artway_diagnostic_issues/);
+  assert.match(source, /count\(\*\) FILTER \(WHERE status IN/);
+  assert.match(migration, /artway_diagnostic_issues_open_idx/);
+  assert.match(migration, /diagnostic-issues-dedicated-v1/);
+  assert.match(migration, /DELETE FROM artway_domain_records WHERE domain='kv:system_diagnostics'/);
+});
+
 test('identyczny zapis domeny nie podbija rewizji i jest traktowany jako poprawny brak zmiany', async () => {
   const source = await readFile(new URL('../src/backend/lib/core/normalized-domain-repository.mjs', import.meta.url), 'utf8');
   assert.match(source, /skipIfEqual: true/);
@@ -107,6 +118,7 @@ test('największe domeny operacyjne mają własne tabele zamiast wspólnej tabel
     'settings:artway_agent_ai_pamiec': 'artway_agent_records',
     'settings:artway_agent_ai_zlecenia': 'artway_agent_records',
     'kv:agent_runtime': 'artway_agent_records',
+    'kv:system_diagnostics': 'artway_diagnostic_issues',
   };
   for (const [domain, table] of Object.entries(expected)) {
     assert.equal(dedicatedTableForDomain(domain), table, `Domena ${domain} nie ma właściwej tabeli`);

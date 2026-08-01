@@ -208,6 +208,7 @@ async function ensureNormalizedSchema(pool, namespace) {
       'artway_allegro_mappings',
       'artway_allegro_communications',
       'artway_agent_records',
+      'artway_diagnostic_issues',
       'artway_warehouse_records',
       'artway_domain_records_archive_v2',
     ], 'domen operacyjnych');
@@ -371,10 +372,55 @@ export function createNormalizedDomainRepository({ pool, namespace, legacy }) {
     } catch (error) { await client.query('ROLLBACK'); throw error; }
     finally { client.release(); }
   };
+  const readDiagnosticsProjection = async ({ status = 'all', level = 'all', limit = 200 } = {}) => {
+    await ensure();
+    const normalizedStatus = ['all', 'open', 'resolved', 'ignored', 'investigating'].includes(String(status)) ? String(status) : 'all';
+    const normalizedLevel = ['all', 'blad', 'ostrzezenie'].includes(String(level)) ? String(level) : 'all';
+    const safeLimit = Math.max(1, Math.min(500, Number(limit) || 200));
+    const domain = domainForDirectKey('system_diagnostics');
+    const result = await pool.query(`WITH snapshot AS (
+      SELECT metadata,version,updated_at FROM artway_domain_snapshots
+      WHERE namespace=$1 AND domain=$2
+    ), totals AS (
+      SELECT count(*)::int total,
+        count(*) FILTER (WHERE status IN ('open','investigating'))::int open,
+        count(*) FILTER (WHERE status IN ('open','investigating') AND level='blad')::int errors,
+        count(*) FILTER (WHERE status IN ('open','investigating') AND level='ostrzezenie')::int warnings,
+        COALESCE(sum(CASE WHEN status IN ('open','investigating') THEN GREATEST(1,COALESCE((data->>'count')::int,1)) ELSE 0 END),0)::int occurrences
+      FROM artway_diagnostic_issues WHERE namespace=$1 AND domain=$2 AND collection='items'
+    ), selected AS (
+      SELECT data FROM artway_diagnostic_issues
+      WHERE namespace=$1 AND domain=$2 AND collection='items'
+        AND ($3='all' OR ($3='open' AND status IN ('open','investigating')) OR status=$3)
+        AND ($4='all' OR level=$4)
+      ORDER BY last_seen_at DESC,record_id
+      LIMIT $5
+    ) SELECT snapshot.metadata,snapshot.version,snapshot.updated_at,
+      totals.total,totals.open,totals.errors,totals.warnings,totals.occurrences,
+      COALESCE((SELECT jsonb_agg(data) FROM selected),'[]'::jsonb) items
+    FROM snapshot CROSS JOIN totals`, [namespace, domain, normalizedStatus, normalizedLevel, safeLimit]);
+    if (!result.rowCount) return { exists: false, version: '', updatedAt: '', metadata: {}, items: [], summary: { total: 0, open: 0, errors: 0, warnings: 0, occurrences: 0 } };
+    const row = result.rows[0];
+    return {
+      exists: true,
+      version: `"${Number(row.version) || 0}"`,
+      updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at || ''),
+      metadata: row.metadata && typeof row.metadata === 'object' ? row.metadata : {},
+      items: Array.isArray(row.items) ? row.items : [],
+      summary: {
+        total: Number(row.total) || 0,
+        open: Number(row.open) || 0,
+        errors: Number(row.errors) || 0,
+        warnings: Number(row.warnings) || 0,
+        occurrences: Number(row.occurrences) || 0,
+      },
+    };
+  };
   return Object.freeze({
     async readSettingsBase(fallback) { await ensure(); return legacy.read('settings', fallback); },
     async readSettingsDomain(key, fallback) { await ensure(); return readSettingsDomainValue(key, fallback, false); },
     async readSettingsDelta(fallback, options = {}) { await ensure(); return readSettingsDelta(fallback, options); },
+    async readDiagnosticsProjection(options = {}) { return readDiagnosticsProjection(options); },
     async read(key, fallback) {
       await ensure();
       if (key === 'settings') return readSettings(false, fallback);

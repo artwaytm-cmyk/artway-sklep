@@ -4,7 +4,7 @@ import { createAllegroPreparationWorker } from './domain/allegro-preparation-wor
 export function createAllegroPreparationRoute(deps = {}) {
   const {
     respond, isAdmin, sessionOf, text, readVersioned, writeIfVersion, runtime,
-    pool = null, namespace = 'artway-sklep',
+    pool = null, listenerPool = pool, namespace = 'artway-sklep',
     worker: workerDependencies,
     afterPrepare = null,
     coordinate = null,
@@ -69,6 +69,7 @@ export function createAllegroPreparationRoute(deps = {}) {
     readVersioned,
     writeIfVersion,
     pool,
+    listenerPool,
     namespace,
     prepare,
     afterPrepare,

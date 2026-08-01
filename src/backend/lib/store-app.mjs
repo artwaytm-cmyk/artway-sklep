@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { createRevisionSafeMutator, createRevisionSafeWriter, createStoreRepository } from './core/store-repository.mjs';
-import { postgresPoolFor } from './core/postgres-store-repository.mjs';
+import { postgresListenerPoolFor, postgresPoolFor } from './core/postgres-store-repository.mjs';
 import { filterKnownSettingsDomains } from './core/settings-domain-contract.mjs';
 import { bezpiecznePorownanie, czyAdmin as czyAdminToken, odpowiedz, odpowiedzHtml, tekst } from './core/http.mjs';
 import {
@@ -155,9 +155,8 @@ import {
   produktBezDanychPrywatnych,
 } from './infakt-purchase.mjs';
 const STORE_NAME = 'artway-sklep', repository = createStoreRepository({ name: STORE_NAME });
-const postgresPool = String(process.env.ARTWAY_STORE_DRIVER || '').trim().toLowerCase() === 'postgres' && process.env.DATABASE_URL
-  ? postgresPoolFor(process.env.DATABASE_URL)
-  : null;
+const postgresPool = String(process.env.ARTWAY_STORE_DRIVER || '').trim().toLowerCase() === 'postgres' && process.env.DATABASE_URL ? postgresPoolFor(process.env.DATABASE_URL) : null,
+  postgresListenerPool = postgresPool ? postgresListenerPoolFor(process.env.DATABASE_URL) : null;
 const centralProductCatalog = createCentralProductCatalog({
   pool: postgresPool,
   namespace: STORE_NAME,
@@ -315,7 +314,7 @@ const agentRuntime = createAgentRuntime({ readVersioned: czytajWersjonowane, wri
 const agentProductReport = createAgentProductReport({ pool: postgresPool, namespace: STORE_NAME });
 const coordinateProductEvent = createProductEventCodexCoordinator({ env: process.env });
 const agentEvents = createAgentEventSystem({
-  pool: postgresPool, namespace: STORE_NAME,
+  pool: postgresPool, listenerPool: postgresListenerPool, namespace: STORE_NAME,
   readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja,
   runtime: agentRuntime,
   coordinate: coordinateProductEvent, getProduct: (productId) => centralProductCatalog.get(productId, { admin: true }),
@@ -373,7 +372,7 @@ async function zwiekszLicznikKoduRabatowego(kod = '') {
   return false;
 }
 const inventoryDecisions = createInventoryDecisionService({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja });
-const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, pool: postgresPool, namespace: STORE_NAME });
+const codexAgentQueue = createCodexAgentQueue({ readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, pool: postgresPool, listenerPool: postgresListenerPool, namespace: STORE_NAME });
 const openAiPlatform = createOpenAiPlatformControl({ read: czytaj, write: zapisz });
 const agentSpecialists = createAgentSpecialists({
   readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja,
@@ -402,7 +401,7 @@ const kolejkujNiezaleznieProduktVonHalsky = createIndependentVonHalskyQueue((pro
 const allegroPreparationRoute = createAllegroPreparationRoute({
   respond: odpowiedz, isAdmin: czyAdmin, sessionOf: requestSession, text: tekst,
   readVersioned: czytajWersjonowane, writeIfVersion: zapiszJesliWersja, runtime: agentRuntime,
-  pool: postgresPool, namespace: STORE_NAME,
+  pool: postgresPool, listenerPool: postgresListenerPool, namespace: STORE_NAME,
   coordinate: coordinateProductEvent, afterPrepare: kolejkujNiezaleznieProduktVonHalsky,
   worker: {
     text: tekst, readSettings: () => czytaj('settings', { data: {}, rev: 0, updated_at: null }), loadProducts: allegroAgentProduktyKompletne,
@@ -2930,6 +2929,7 @@ const systemDiagnostics = createSystemDiagnosticsRoute({
   sessionOf: requestSession,
   agentRuntime,
   diagnosticAgent,
+  readProjection: typeof repository.readDiagnosticsProjection === 'function' ? (options) => repository.readDiagnosticsProjection(options) : null,
 });
 const serverMaintenanceRoute = createServerMaintenanceRoute({
   respond: odpowiedz,

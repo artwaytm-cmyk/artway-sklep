@@ -83,6 +83,7 @@ function publicState(events = []) {
 
 export function createAgentEventQueue({
   pool = null,
+  listenerPool = pool,
   namespace = 'artway-sklep',
   readVersioned = null,
   writeIfVersion = null,
@@ -120,7 +121,7 @@ export function createAgentEventQueue({
     if (!pool || listenerClient) return;
     if (!listenerPromise) {
       listenerPromise = (async () => {
-        const client = await pool.connect();
+        const client = await listenerPool.connect();
         let released = false;
         const release = () => {
           if (released) return;

@@ -231,11 +231,12 @@ export function createAllegroPreparationQueue({
   afterPrepare = null,
   now = () => new Date(),
   pool = null,
+  listenerPool = pool,
   namespace = 'artway-sklep',
 } = {}) {
   if (pool) {
     return createPostgresAllegroPreparationQueue({
-      pool, namespace, readVersioned, prepare, report, onIdle, afterPrepare, now,
+      pool, listenerPool, namespace, readVersioned, prepare, report, onIdle, afterPrepare, now,
     }, {
       clean, asArray, asObject, initialState, normalizeTask, normalizeState,
       publicState, providerQuotaUnavailable, MAX_AUTOMATIC_REMEDIATION_ATTEMPTS,
