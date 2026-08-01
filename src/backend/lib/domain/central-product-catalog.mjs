@@ -192,6 +192,7 @@ export { centralCatalogQueryOptions } from './central-product-catalog-query.mjs'
 export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' } = {}) {
   const available = !!pool, ns = text(namespace, 120) || 'artway-sklep'; let schemaPromise = null;
   const aggregateCache = new Map();
+  const publicationMetricCache = new Map();
   const ensureSchema = async () => {
     if (!available) return false;
     if (!schemaPromise) {
@@ -257,7 +258,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     const add = (sql, value) => { values.push(value); clauses.push(sql.replace('?', `$${values.length}`)); };
     if (!options.admin) clauses.push("record_status='active'", 'sale_available=true');
     if (options.query) add("search_vector @@ to_tsquery('simple', ?)", searchTsQuery(options.query));
-    if (options.category && options.category !== 'Wszystkie') add('category=?', options.category);
+    if (options.category) add('category=?', options.category);
     if (options.categories.length) { values.push(options.categories); clauses.push(`category=ANY($${values.length}::text[])`); }
     if (options.ids.length) { values.push(options.ids); clauses.push(`product_id=ANY($${values.length}::text[])`); }
     if (options.producer && options.producer !== 'wszyscy') add('producer=?', options.producer);
@@ -337,8 +338,12 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
     const pageValues = [...values, options.limit + 1, offset];
     const limitRef = `$${values.length + 1}`, offsetRef = `$${values.length + 2}`;
     const meta = await metadata();
-    const publicationQuery = options.admin && options.allegro.startsWith('publikacja-')
-      ? pool.query(`
+    const publicationMetrics = async () => {
+      if (!(options.admin && options.allegro.startsWith('publikacja-'))) return {};
+      const cacheKey = String(meta.sourceRevision || 'empty');
+      const cached = publicationMetricCache.get(cacheKey);
+      if (cached && Date.now() - cached.at < 5 * 60 * 1000) return cached.promise;
+      const promise = pool.query(`
           SELECT
             COUNT(*) FILTER(WHERE has_allegro=false AND sale_available=true)::bigint bez_oferty,
             COUNT(*) FILTER(WHERE has_allegro=false AND sale_available=true AND COALESCE(data->>'allegroAgentPreparationStatus','') IN ('ready','published') AND lower(COALESCE(admin_list_data->>'allegroAgentPreparationCurrent','false'))='true')::bigint gotowe_nowe,
@@ -356,13 +361,17 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
             )::bigint wszystkie
           FROM artway_product_records
           WHERE namespace=$1 AND record_status='active'
-        `, [ns])
-      : Promise.resolve({ rows: [{}] });
-    const [rows, count, aggregate, publicationResult] = await Promise.all([
+        `, [ns]).then((result) => Object.fromEntries(Object.entries(result.rows[0] || {}).map(([name, value]) => [name, Number(value) || 0])))
+        .catch((error) => { publicationMetricCache.delete(cacheKey); throw error; });
+      publicationMetricCache.set(cacheKey, { at: Date.now(), promise });
+      while (publicationMetricCache.size > 3) publicationMetricCache.delete(publicationMetricCache.keys().next().value);
+      return promise;
+    };
+    const [rows, count, aggregate, metrics] = await Promise.all([
       pool.query(`SELECT ${listColumn} product,product_id,external_id,sku FROM ${table} WHERE ${where} ORDER BY ${order} LIMIT ${limitRef} OFFSET ${offsetRef}`, pageValues),
       pool.query(`SELECT COUNT(*)::bigint total FROM ${table} WHERE ${countWhere}`, countValues),
       aggregates(options.admin, meta.sourceRevision),
-      publicationQuery,
+      publicationMetrics(),
     ]);
     const hasMore = rows.rows.length > options.limit;
     const selectedRows = rows.rows.slice(0, options.limit);
@@ -377,8 +386,7 @@ export function createCentralProductCatalog({ pool, namespace = 'artway-sklep' }
       : null;
     const total = Number(count.rows[0]?.total) || 0;
     const ids = options.admin && total <= 5000 ? (await pool.query(`SELECT product_id FROM artway_products WHERE ${countWhere} ORDER BY ${order}`, countValues)).rows.map((row) => row.product_id) : null;
-    const publicationMetrics = Object.fromEntries(Object.entries(publicationResult.rows[0] || {}).map(([name, value]) => [name, Number(value) || 0]));
-    return { available: true, items: selectedRows.map((row) => row.product), ids, total, page: options.page, limit: options.limit, nextCursor, pagination: cursorSupported ? 'cursor' : 'offset', summary: aggregate.summary, facets: aggregate.facets, publicationMetrics, revision: meta.sourceRevision, syncedAt: meta.syncedAt };
+    return { available: true, items: selectedRows.map((row) => row.product), ids, total, page: options.page, limit: options.limit, nextCursor, pagination: cursorSupported ? 'cursor' : 'offset', summary: aggregate.summary, facets: aggregate.facets, publicationMetrics: metrics, revision: meta.sourceRevision, syncedAt: meta.syncedAt };
   };
 
   const get = async (id, { admin = false } = {}) => {

@@ -853,6 +853,7 @@ async function chmura(action, {method="GET", body=null, params={}, timeout=9000,
     const t = await r.text(); let d;
     try{ d = JSON.parse(t); }catch(e){ throw new Error("Serwer nie zwrócił prawidłowych danych — sprawdź usługę backendu VPS."); }
     if(!r.ok || d.ok===false){ const b=new Error(d.error||("Błąd bazy HTTP "+r.status)); Object.assign(b,d); b.code=d.code||""; b.status=r.status; throw b; }
+    const responseEtag=r.headers.get("etag");if(responseEtag&&d&&typeof d==="object")Object.defineProperty(d,"_etag",{value:responseEtag,enumerable:false,configurable:true});
     return d;
   })();
   if(requestKey)chmuraPobraniaWToku.set(requestKey,request);

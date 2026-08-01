@@ -321,7 +321,7 @@ function rentownoscKanalowaPanelHTML(){
 function widokAdminAllegro(sekcja="start"){
   const alias={wystawianie:"oferty"}[sekcja]||sekcja;
   const aktywna=["zamowienia","oferty","wiadomosci","dyskusje","zgodnosc","ustawienia"].includes(alias)?alias:"start";
-  const zakres=aktywna==="zamowienia"?"orders":["oferty","zgodnosc"].includes(aktywna)?"offers":aktywna==="ustawienia"?"config":"summary";
+  const zakres=aktywna==="zamowienia"?"orders":aktywna==="oferty"?(allegroCentrumOfertTryb==="sprzedaz"?"offers":"summary"):aktywna==="zgodnosc"?"offers":aktywna==="ustawienia"?"config":"summary";
   allegroLadujJesliTrzeba(zakres);
   if(["wiadomosci","dyskusje"].includes(sekcja)&&!allegroKomunikacja?.updated_at&&!allegroKomunikacja?.sprawdzono&&!allegroStan.ladowanie) setTimeout(()=>allegroWczytajKomunikacje(true),0);
   if(["wiadomosci","dyskusje"].includes(sekcja)) setTimeout(()=>allegroAktywujKafelkiKomunikacji(sekcja==="dyskusje"?"issue":"thread"),0);

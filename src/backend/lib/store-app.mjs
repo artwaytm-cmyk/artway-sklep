@@ -128,6 +128,8 @@ import { createCentralProductPatchBuffer } from './domain/central-product-patch-
 import { createCentralCatalogProductOperationWriter } from './domain/catalog-product-operation-rebase.mjs';
 import { centralAllegroPreparationCurrent, centralAllegroPreparationFingerprint, createCentralProductCatalog } from './domain/central-product-catalog.mjs';
 import { createCentralProductCatalogRoute } from './central-product-catalog-route.mjs';
+import { createAllegroOfferEventSync } from './domain/allegro-offer-event-sync.mjs';
+import { createAllegroOfferFullSync } from './domain/allegro-offer-full-sync.mjs';
 import { createCentralProductCatalogSynchronizer } from './domain/central-product-catalog-synchronizer.mjs';
 import { createAllegroPublicationInfrastructure } from './domain/allegro-publication-tracker.mjs';
 import { buildAllegroOfferSyncResponse, createIndependentVonHalskyQueue } from './domain/sales-channel-coordination.mjs';
@@ -487,6 +489,20 @@ const publishCentralProductFields = createCentralProductFieldPublisher({
   synchronize: synchronizeCentralProductCatalog, errorText: tekst,
 });
 const centralProductCatalogRoute = createCentralProductCatalogRoute({ catalog: centralProductCatalog, isAdmin: czyAdmin, rateLimit: ograniczRuch, respond: odpowiedz, revisionState: centralProductCatalogRevisionState, synchronize: synchronizeCentralProductCatalog });
+const syncAllegroOfferEvents = createAllegroOfferEventSync({
+  text: tekst, call: allegroWywolaj, read: czytaj, write: zapisz,
+  offerItems: allegroOfertyItems, fetchDetails: allegroPobierzSzczegolyOfert,
+  normalizeOffer: allegroNormalizujOferte, mergeOfferDetails: allegroScalSzczegolyOferty,
+  autoMapOffers: allegroAutoMapujOfertyZKartoteka,
+});
+const syncAllegroOffers = createAllegroOfferFullSync({
+  text: tekst, read: czytaj, write: zapisz, settings: allegroPobierzUstawieniaOfert,
+  scheduledDue: allegroScheduledSyncDue, nextScheduledAt: allegroNextScheduledSyncAt,
+  offerItems: allegroOfertyItems, call: allegroWywolaj, fetchDetails: allegroPobierzSzczegolyOfert,
+  normalizeOffer: allegroNormalizujOferte, mergeOfferDetails: allegroScalSzczegolyOferty,
+  autoMapOffers: allegroAutoMapujOfertyZKartoteka, maintenance: allegroAutoUzupelnijKatalogProduktow,
+  complianceAudit: allegroAudytZgodnosciOfert, status: allegroStatus, buildResponse: buildAllegroOfferSyncResponse,
+});
 const allegroOfferWithdrawalRoute = createAllegroOfferWithdrawalRoute({
   autoMapOffers: allegroAutoMapujOfertyZKartoteka,
   callAllegro: allegroWywolaj,
@@ -3293,67 +3309,20 @@ export default async (req) => {
       return odpowiedz({ ok: true, order: items[index], orders: items, ...plan, updated_at: zapis.updated_at });
     }
 
-    // ─── ALLEGRO: synchronizacja ofert (admin) ───
+    // ─── ALLEGRO: przyrostowa synchronizacja ofert z dziennika zdarzeń ───
+    if (action === 'allegro-sync-offer-events') {
+      if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
+      const body = await req.json().catch(() => ({}));
+      return odpowiedz(await syncAllegroOfferEvents(req, body));
+    }
+
+    // ─── ALLEGRO: pełne okresowe uzgodnienie ofert (admin) ───
     if (action === 'allegro-sync-offers') {
       if (req.method !== 'POST') return odpowiedz({ ok: false, error: 'Metoda niedozwolona' }, 405);
       if (!czyAdmin(req, url)) return odpowiedz({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const body = await req.json().catch(() => ({}));
-      const limit = Math.min(20000, Math.max(1, Number(body.limit || url.searchParams.get('limit') || 10000)));
-      const details = body.details !== false && url.searchParams.get('details') !== '0';
-      const detailsLimit = details ? Math.min(limit, 1000, Math.max(1, Number(body.detailsLimit || 500))) : 0;
-      const [previousOffersRec, offerSettings, previousSyncState] = await Promise.all([
-        czytaj('allegro_offers', { items: [] }),
-        allegroPobierzUstawieniaOfert(),
-        czytaj('allegro_offer_sync_state', { lastLightSyncAt: null, lastFullSyncAt: null, lastSource: null, lastResult: null }),
-      ]);
-      const sourceName = tekst(body.source || 'manual', 100), scheduledLight = sourceName === 'scheduled-catalog-refresh', scheduledFull = sourceName === 'scheduled-offers-sync';
-      const syncKind = scheduledFull || details ? 'full' : 'light';
-      if ((scheduledLight || scheduledFull) && !allegroScheduledSyncDue(previousSyncState, offerSettings, syncKind)) {
-        return odpowiedz({
-          ok: true, skipped: true, reason: 'not_due', source: sourceName, count: allegroOfertyItems(previousOffersRec).length,
-          offerSyncState: {
-            ...previousSyncState,
-            nextLightSyncAt: allegroNextScheduledSyncAt(previousSyncState, offerSettings, 'light'),
-            nextFullSyncAt: allegroNextScheduledSyncAt(previousSyncState, offerSettings, 'full'),
-          },
-        });
-      }
-      const previousById = new Map(allegroOfertyItems(previousOffersRec).map((offer) => [String(offer?.id || ''), offer]));
-      const source = [];
-      let pages = 0;
-      let totalCount = null;
-      for (let offset = 0; offset < limit; offset += 1000) {
-        const pageLimit = Math.min(1000, limit - offset);
-        const dane = await allegroWywolaj(req, '/sale/offers', { parameters: { limit: pageLimit, offset } });
-        const page = Array.isArray(dane.offers) ? dane.offers : (Array.isArray(dane.items) ? dane.items : []);
-        if (Number.isFinite(Number(dane.totalCount))) totalCount = Number(dane.totalCount);
-        source.push(...page);
-        pages++;
-        if (page.length < pageLimit || (totalCount !== null && source.length >= totalCount)) break;
-      }
-      const pelne = details ? await allegroPobierzSzczegolyOfert(req, source, detailsLimit) : [];
-      const pelnePoId = new Map(pelne.filter((x) => x?.id).map((x) => [String(x.id), x]));
-      const items = source.map((summary) => {
-        const id = String(summary?.id || ''), detailedOffer = pelnePoId.get(id);
-        const normalized = allegroNormalizujOferte(detailedOffer || summary);
-        return allegroScalSzczegolyOferty(previousById.get(id), normalized, !!detailedOffer);
-      }).filter((x) => x.id);
-      const rec = { items, updated_at: new Date().toISOString(), count: items.length, totalCount: totalCount ?? items.length, pages, details, detailedCount: pelne.length, requestedLimit: limit };
-      await zapisz('allegro_offers', rec);
-      const mappingResult = await allegroAutoMapujOfertyZKartoteka(items);
-      let maintenance = null;
-      if (body.maintenance === true || body.source === 'scheduled-offers-sync') maintenance = await allegroAutoUzupelnijKatalogProduktow(req, { limit: body.maintenanceLimit || 10 });
-      let compliance = null;
-      if (body.source === 'scheduled-offers-sync') compliance = await allegroAudytZgodnosciOfert(req, { limit: Math.min(20, Math.max(1, Number(body.complianceLimit) || 10)), fix: true, activeOnly: true });
-      const completedAt = new Date().toISOString(), offerSyncState = {
-        ...previousSyncState,
-        lastLightSyncAt: completedAt,
-        ...(syncKind === 'full' ? { lastFullSyncAt: completedAt } : {}),
-        lastSource: sourceName,
-        lastResult: { offers: items.length, detailed: rec.detailedCount, autoMapped: mappingResult.autoMapped, refreshed: mappingResult.refreshed, quarantined: mappingResult.quarantined },
-      };
-      await zapisz('allegro_offer_sync_state', offerSyncState);
-      return odpowiedz(buildAllegroOfferSyncResponse({ allegro: await allegroStatus(req), items, mappingResult, maintenance, compliance, offerSyncState, nextLightSyncAt: allegroNextScheduledSyncAt(offerSyncState, offerSettings, 'light'), nextFullSyncAt: allegroNextScheduledSyncAt(offerSyncState, offerSettings, 'full'), reconciliation: rec, compact: body.compact === true }));
+      return odpowiedz(await syncAllegroOffers(req, body, url.searchParams));
     }
 
     if (action === 'allegro-auto-map-offers') {

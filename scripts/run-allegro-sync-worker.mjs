@@ -50,11 +50,9 @@ async function cycle() {
   const operations = [
     ['orders', 'allegro-sync-orders', { limit: 200, source: 'server-worker' }],
     ['communications', 'allegro-sync-communications', { limit: 50, autoReply: true, source: 'server-worker' }],
-    ['offers-light', 'allegro-sync-offers', {
-      limit: 20_000,
-      details: false,
-      compact: true,
-      source: 'scheduled-catalog-refresh',
+    ['offers-events', 'allegro-sync-offer-events', {
+      limit: 1_000,
+      source: 'server-worker',
     }],
     ['offers-full', 'allegro-sync-offers', {
       limit: 20_000,

@@ -103,6 +103,10 @@ test("domyślny filtr pokazuje tylko produkty naprawdę bez oferty Allegro",asyn
   }
   assert.match(listing,/product-catalog-query/);
   assert.match(listing,/allegroPublikacjaCentralnaPobierz/);
+  assert.match(listing,/If-None-Match/);
+  assert.match(listing,/allowNotModified:true/);
+  assert.match(listing,/allegroPublikacjaAktualizujDOM/);
+  assert.doesNotMatch(listing,/function allegroPublikacjaPrzelaczFiltr[^\n]+renderuj\(\)/);
   assert.match(workspace,/catalogProducts=Array\.isArray\(serverData\.items\)/);
   assert.doesNotMatch(workspace,/catalogProducts=produktyDoAdministracji\(\)/);
   assert.doesNotMatch(workspace,/Istniejące nieaktywne|Nieaktywne/);

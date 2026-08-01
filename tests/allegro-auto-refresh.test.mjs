@@ -33,8 +33,8 @@ test("serwer cyklicznie sprawdza zamówienia, komunikację i katalog Allegro",as
   assert.match(communications,/schedule: '\*\/15 \* \* \* \*'/);
   assert.match(communications,/allegro-sync-communications/);
   assert.match(catalog,/schedule: '10,25,40,55 \* \* \* \*'/);
-  assert.match(catalog,/allegro-sync-offers/);
-  assert.match(catalog,/details: false/);
+  assert.match(catalog,/allegro-sync-offer-events/);
+  assert.match(catalog,/sale\/offer-events|limit: 1000/);
   assert.match(offers,/schedule: '25 \*\/6 \* \* \*'/);
   assert.match(offers,/allegro-sync-offers/);
 });

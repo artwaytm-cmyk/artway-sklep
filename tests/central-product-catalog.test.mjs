@@ -247,6 +247,10 @@ test('zapytanie centralnego katalogu ogranicza stronę i dopuszcza tylko bezpiec
   assert.equal(empty.priceMin, null);
   assert.equal(empty.priceMax, null);
   assert.equal(empty.allegroPriceMin, null);
+  assert.equal(centralCatalogQueryOptions({ category: 'wszystkie' }).category, '');
+  assert.equal(centralCatalogQueryOptions({ category: 'Wszystkie' }).category, '');
+  assert.equal(centralCatalogQueryOptions({ producer: 'wszyscy' }).producer, '');
+  assert.equal(centralCatalogQueryOptions({ category: 'Gry rodzinne' }).category, 'Gry rodzinne');
 });
 
 test('publiczny katalog obsługuje gałęzie, wybrane produkty, nowości i oceny bez pobierania całej listy', () => {
@@ -277,7 +281,7 @@ test('publiczne listy pokazują tylko sprzedaż, lecz stały adres produktu nie 
 
 test('centralny katalog oblicza kolejkę publikacji Allegro jednym zapytaniem PostgreSQL', async () => {
   const source = await readFile('src/backend/lib/domain/central-product-catalog.mjs', 'utf8');
-  assert.match(source, /publicationQuery/);
+  assert.match(source, /publicationMetrics/);
   assert.match(source, /publikacja-bez-oferty/);
   assert.match(source, /publikacja-weryfikacja/);
   assert.match(source, /wycofane_brak_towaru/);
@@ -297,6 +301,9 @@ test('backend udostępnia stronicowaną kartotekę, pojedynczy produkt, synchron
   assert.match(synchronizer, /revisionState/);
   assert.match(synchronizer, /repository\.revisionToken/);
   assert.match(route, /Promise\.all\(\[catalog\.metadata\(\), revisionState\(\)\]\)/);
+  assert.match(route, /if-none-match/);
+  assert.match(route, /status: 304/);
+  assert.match(route, /private, no-cache/);
 });
 
 test('Asortyment korzysta z paginacji serwerowej i zachowuje tryb awaryjny', async () => {

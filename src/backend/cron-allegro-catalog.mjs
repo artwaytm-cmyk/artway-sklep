@@ -1,5 +1,5 @@
-// Lekka synchronizacja listy ofert Allegro. Co 15 minut wykrywa nowe, zakończone
-// i zmienione oferty bez pobierania kosztownych szczegółów każdej pozycji.
+// Przyrostowa synchronizacja ofert Allegro. Co 15 minut czyta dziennik zdarzeń
+// i pobiera szczegóły wyłącznie pozycji, które rzeczywiście się zmieniły.
 // Pełna konserwacja katalogu, opisów i kategorii pozostaje w osobnym przebiegu co 6 godzin.
 export const config = { schedule: '10,25,40,55 * * * *' };
 
@@ -11,10 +11,10 @@ export default async () => {
     return new Response('no token');
   }
   try {
-    const response = await fetch(`${base}/api/store?action=allegro-sync-offers`, {
+    const response = await fetch(`${base}/api/store?action=allegro-sync-offer-events`, {
       method: 'POST',
       headers: { 'x-admin-token': token, 'content-type': 'application/json' },
-      body: JSON.stringify({ limit: 10000, details: false, source: 'scheduled-catalog-refresh' }),
+      body: JSON.stringify({ limit: 1000, source: 'server-worker' }),
     });
     const body = await response.text();
     console.log('cron-allegro-catalog', response.status, body.slice(0, 900));

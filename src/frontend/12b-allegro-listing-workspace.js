@@ -13,27 +13,37 @@ function allegroPublikacjaSortSerwera(value=allegroWystawianieSort){
 function allegroPublikacjaCentralnaParametry(mode=allegroPublikacjaTrybSerwera()){
   const f=allegroWystawianieFiltry||{},data=({kompletne:"gotowe",braki:"braki",ean:"ean",zdjecie:"zdjecie",opis:"opis",producent:"producent",kategoria:"kategoria"})[f.dane]||"wszystkie",stock=({dostepne:"dostepne",niskie:"niskie",brak:"brak",bez_limitu:"bez_limitu"})[f.magazyn]||"wszystkie";
   const sale=f.sprzedaz==="aktywna"?"dostepne":f.sprzedaz==="wycofana_brak_towaru"?"niedostepne":"wszystkie";
-  return {q:String(szukajAllegroWystawiania||"").trim(),category:f.kategoria,producer:f.producent,status:"active",stock,allegro:mode,data,sale,link:f.zrodlo,allegroPriceMin:f.cenaOd,allegroPriceMax:f.cenaDo,sort:allegroPublikacjaSortSerwera(),page:allegroWystawianieStrona,limit:Math.max(25,Number(allegroLimitWystawiania)||50)};
+  return {q:String(szukajAllegroWystawiania||"").trim(),category:f.kategoria==="wszystkie"?"":f.kategoria,producer:f.producent==="wszyscy"?"":f.producent,status:"active",stock,allegro:mode,data,sale,link:f.zrodlo,allegroPriceMin:f.cenaOd,allegroPriceMax:f.cenaDo,sort:allegroPublikacjaSortSerwera(),page:allegroWystawianieStrona,limit:Math.max(25,Number(allegroLimitWystawiania)||50)};
 }
 function allegroPublikacjaCentralnaSygnatura(){return JSON.stringify(allegroPublikacjaCentralnaParametry());}
 function allegroPublikacjaCentralnaTrasa(){return trasa()==="/admin/allegro/oferty";}
 function allegroPublikacjaCentralnaUniewaznij(){allegroPublikacjaCentralna.cache.clear();allegroPublikacjaCentralna.data=null;allegroPublikacjaCentralna.signature="";}
+function allegroPublikacjaAktualizujDOM(){
+  if(!allegroPublikacjaCentralnaTrasa()||allegroCentrumOfertTryb==="sprzedaz")return false;
+  const current=document.querySelector(".allegro-offer-unified-content .allegro-listing-workspace");if(!current)return false;
+  const active=document.activeElement,restoreSearch=active?.matches?.("[data-allegro-publication-search]")===true,selection=restoreSearch?[active.selectionStart,active.selectionEnd]:null,scrollY=window.scrollY;
+  const template=document.createElement("template");template.innerHTML=allegroWystawianiePanelHTML().trim();const next=template.content.firstElementChild;if(!next)return false;
+  current.replaceWith(next);window.scrollTo({top:scrollY,left:window.scrollX,behavior:"auto"});
+  if(restoreSearch){const input=document.querySelector("[data-allegro-publication-search]");if(input){input.focus({preventScroll:true});try{input.setSelectionRange(selection[0],selection[1]);}catch(error){}}}
+  return true;
+}
 async function allegroPublikacjaCentralnaPobierz(force=false){
   const signature=allegroPublikacjaCentralnaSygnatura(),cached=allegroPublikacjaCentralna.cache.get(signature);
-  if(!force&&cached&&Date.now()-cached.at<ALLEGRO_PUBLICATION_CACHE_MS){allegroPublikacjaCentralna={...allegroPublikacjaCentralna,signature,loading:false,data:cached.data,error:"",request:null};return cached.data;}
+  if(!force&&cached&&Date.now()-cached.at<ALLEGRO_PUBLICATION_CACHE_MS){allegroPublikacjaCentralna={...allegroPublikacjaCentralna,signature,loading:false,data:cached.data,error:"",request:null};allegroPublikacjaAktualizujDOM();return cached.data;}
   if(allegroPublikacjaCentralna.loading&&allegroPublikacjaCentralna.signature===signature&&allegroPublikacjaCentralna.request)return allegroPublikacjaCentralna.request;
-  const request=chmura("product-catalog-query",{params:allegroPublikacjaCentralnaParametry(),timeout:30000}).then(data=>{
+  const request=chmura("product-catalog-query",{params:allegroPublikacjaCentralnaParametry(),timeout:30000,headers:cached?.etag?{"If-None-Match":cached.etag}:{},allowNotModified:true}).then(data=>{
     if(allegroPublikacjaCentralnaSygnatura()!==signature)return data;
+    if(data?.notModified&&cached){cached.at=Date.now();cached.etag=data.etag||cached.etag;allegroPublikacjaCentralna={...allegroPublikacjaCentralna,signature,loading:false,data:cached.data,error:"",request:null};allegroPublikacjaAktualizujDOM();return cached.data;}
     if(Array.isArray(data.items))zapamietajProduktyCentralne(data.items);
-    const result={...data};allegroPublikacjaCentralna.cache.set(signature,{at:Date.now(),data:result});
+    const result={...data};allegroPublikacjaCentralna.cache.set(signature,{at:Date.now(),data:result,etag:data?._etag||""});
     while(allegroPublikacjaCentralna.cache.size>32)allegroPublikacjaCentralna.cache.delete(allegroPublikacjaCentralna.cache.keys().next().value);
-    allegroPublikacjaCentralna={...allegroPublikacjaCentralna,signature,loading:false,data:result,error:"",request:null};if(allegroPublikacjaCentralnaTrasa())renderuj();return result;
-  }).catch(error=>{if(allegroPublikacjaCentralnaSygnatura()===signature){allegroPublikacjaCentralna={...allegroPublikacjaCentralna,signature,loading:false,data:null,error:String(error?.message||error),request:null};if(allegroPublikacjaCentralnaTrasa())renderuj();}return null;});
-  allegroPublikacjaCentralna={...allegroPublikacjaCentralna,signature,loading:true,error:"",request};return request;
+    allegroPublikacjaCentralna={...allegroPublikacjaCentralna,signature,loading:false,data:result,error:"",request:null};if(!allegroPublikacjaAktualizujDOM()&&allegroPublikacjaCentralnaTrasa())renderuj();return result;
+  }).catch(error=>{if(allegroPublikacjaCentralnaSygnatura()===signature){allegroPublikacjaCentralna={...allegroPublikacjaCentralna,signature,loading:false,data:cached?.data||allegroPublikacjaCentralna.data,error:String(error?.message||error),request:null};if(!allegroPublikacjaAktualizujDOM()&&allegroPublikacjaCentralnaTrasa())renderuj();}return null;});
+  allegroPublikacjaCentralna={...allegroPublikacjaCentralna,signature,loading:true,data:cached?.data||allegroPublikacjaCentralna.data,error:"",request};return request;
 }
 function allegroPublikacjaCentralnaWidok(){
   const signature=allegroPublikacjaCentralnaSygnatura(),cached=allegroPublikacjaCentralna.cache.get(signature);
-  if(cached&&Date.now()-cached.at<ALLEGRO_PUBLICATION_CACHE_MS)return {ready:true,data:cached.data};
+  if(cached){if(Date.now()-cached.at>=ALLEGRO_PUBLICATION_CACHE_MS&&(!allegroPublikacjaCentralna.loading||allegroPublikacjaCentralna.signature!==signature))setTimeout(()=>allegroPublikacjaCentralnaPobierz(false),0);return {ready:true,data:cached.data,refreshing:Date.now()-cached.at>=ALLEGRO_PUBLICATION_CACHE_MS};}
   if(allegroPublikacjaCentralna.signature===signature&&allegroPublikacjaCentralna.data)return {ready:true,data:allegroPublikacjaCentralna.data,refreshing:allegroPublikacjaCentralna.loading};
   if(allegroPublikacjaCentralna.signature===signature&&allegroPublikacjaCentralna.error)return {error:allegroPublikacjaCentralna.error};
   if(!allegroPublikacjaCentralna.loading||allegroPublikacjaCentralna.signature!==signature)setTimeout(()=>allegroPublikacjaCentralnaPobierz(false),0);
@@ -44,11 +54,14 @@ function allegroPublikacjaWybraneIds(){
   const data=allegroPublikacjaCentralna?.data,allowed=new Set((Array.isArray(data?.ids)?data.ids:data?.items||[]).map(item=>String(item?.id??item)));
   return [...zaznaczoneAllegroProduktyKatalogu].map(String).filter(id=>{if(allowed.size&&!allowed.has(id))return false;const product=asortymentProduktPoId(id);return product&&!czyProduktAdminWKoszu(product)&&allegroPublikacjaMetaProduktu(product).selectable;});
 }
-function allegroPublikacjaUstawStrone(value){allegroWystawianieStrona=Math.max(1,Number(value)||1);renderuj();}
-function allegroPublikacjaPrzelaczFiltr(value){filtrAllegroWystawiania=String(value||"bez_oferty");allegroWystawianieStrona=1;renderuj();}
-function allegroPublikacjaPrzelaczSort(value){allegroWystawianieSort=String(value||"gotowosc");allegroWystawianieStrona=1;renderuj();}
-function allegroPublikacjaUstawFiltrZaawansowany(key,value){if(!(key in allegroWystawianieFiltry))return;allegroWystawianieFiltry={...allegroWystawianieFiltry,[key]:String(value??"")};allegroWystawianieStrona=1;renderuj();}
-function allegroPublikacjaResetujFiltry(){szukajAllegroWystawiania="";filtrAllegroWystawiania="bez_oferty";allegroWystawianieSort="gotowosc";allegroWystawianieFiltry={kategoria:"wszystkie",producent:"wszyscy",dane:"wszystkie",sprzedaz:"wszystkie",magazyn:"wszystkie",zrodlo:"wszystkie",cenaOd:"",cenaDo:""};allegroWystawianieStrona=1;renderuj();}
+function allegroPublikacjaZmienZapytanie(){document.querySelector(".allegro-offer-unified-content .allegro-listing-workspace")?.classList.add("is-refreshing");return allegroPublikacjaCentralnaPobierz(false);}
+function allegroPublikacjaUstawStrone(value){allegroWystawianieStrona=Math.max(1,Number(value)||1);allegroPublikacjaZmienZapytanie();}
+function allegroPublikacjaPrzelaczFiltr(value){filtrAllegroWystawiania=String(value||"bez_oferty");allegroWystawianieStrona=1;allegroPublikacjaZmienZapytanie();}
+function allegroPublikacjaPrzelaczSort(value){allegroWystawianieSort=String(value||"gotowosc");allegroWystawianieStrona=1;allegroPublikacjaZmienZapytanie();}
+function allegroPublikacjaUstawFiltrZaawansowany(key,value){if(!(key in allegroWystawianieFiltry))return;allegroWystawianieFiltry={...allegroWystawianieFiltry,[key]:String(value??"")};allegroWystawianieStrona=1;allegroPublikacjaZmienZapytanie();}
+function allegroPublikacjaUstawLimit(value){allegroLimitWystawiania=Number(value)||50;allegroWystawianieStrona=1;allegroPublikacjaZmienZapytanie();}
+function allegroPublikacjaSzukaj(value){szukajAllegroWystawiania=String(value||"").toLowerCase();allegroWystawianieStrona=1;clearTimeout(window.__allegroPublicationSearch);window.__allegroPublicationSearch=setTimeout(()=>allegroPublikacjaZmienZapytanie(),280);}
+function allegroPublikacjaResetujFiltry(){szukajAllegroWystawiania="";filtrAllegroWystawiania="bez_oferty";allegroWystawianieSort="gotowosc";allegroWystawianieFiltry={kategoria:"wszystkie",producent:"wszyscy",dane:"wszystkie",sprzedaz:"wszystkie",magazyn:"wszystkie",zrodlo:"wszystkie",cenaOd:"",cenaDo:""};allegroWystawianieStrona=1;allegroPublikacjaZmienZapytanie();}
 function allegroPublikacjaZaznaczIds(ids=[],checked=true){
   const safe=ids.map(String).filter(id=>{const p=asortymentProduktPoId(id);return p&&allegroPublikacjaMetaProduktu(p).selectable;});
   allegroZaznaczOfertyProduktow(safe,checked);
@@ -83,15 +96,16 @@ function allegroPublikacjaDostepnoscMeta(p={},offer=null){
   return {availability,decision,saleAvailable,productUnavailable,withdrawnNoStock,pendingWithdrawal,automatic,reason};
 }
 function allegroPublikacjaMetaProduktu(p={}){
-  const offer=typeof asortymentOfertaProduktu==="function"?asortymentOfertaProduktu(p):allegroOfertaDlaProduktuSklepu(p);
-  const offerId=String(offer?.id||p.allegroOfferId||p.allegro?.offerId||"").trim();
+  const registeredOffer=typeof asortymentOfertaProduktu==="function"?asortymentOfertaProduktu(p):allegroOfertaDlaProduktuSklepu(p),channel=p?._catalog?.channels?.allegro||{};
+  const channelOfferId=String(channel.offerId||p.allegroOfferId||p.allegro?.offerId||"").trim(),offer=registeredOffer||(channelOfferId?{id:channelOfferId,status:channel.status||""}:null);
+  const offerId=String(offer?.id||channelOfferId).trim();
   const status=String(offer?.status||offer?.publication?.status||(offerId?"UNKNOWN":"")).toUpperCase();
   const missing=allegroBrakiProduktuDoWystawienia(p);
-  const unresolved=!!offerId&&!offer;
+  const unresolved=!!offerId&&!registeredOffer&&!channel.offerId;
   const noOffer=!offerId;
-  const differences=offer?allegroRozniceOfertyProduktu(p,offer):[];
+  const differences=registeredOffer?allegroRozniceOfertyProduktu(p,registeredOffer):[];
   const inactive=!!offer&&status!=="ACTIVE";
-  const needsUpdate=!!offer&&!!differences.length;
+  const needsUpdate=!!offer&&(p.allegroEditorialSyncPending===true||!!differences.length);
   const availability=allegroPublikacjaDostepnoscMeta(p,offer);
   const draft=inactive&&!availability.withdrawnNoStock&&!["ENDED","ARCHIVED"].includes(status);
   const ended=inactive&&!availability.withdrawnNoStock&&["ENDED","ARCHIVED"].includes(status);

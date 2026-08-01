@@ -83,7 +83,7 @@ allegroWystawianiePanelHTML=function(){
   const readyVisible=rows.filter(p=>{const meta=metaFor(p);return meta.selectable&&meta.ready&&!meta.active;}),readyNewFiltered=rows.filter(p=>metaFor(p).readyNew),missingFiltered=rows.filter(p=>{const meta=metaFor(p);return meta.selectable&&!meta.ready;}),updateFiltered=rows.filter(p=>{const meta=metaFor(p);return meta.selectable&&meta.needsUpdate;}),selected=allegroPublikacjaWybraneIds().length,activeFilters=allegroPublikacjaFiltryAktywne(),f=allegroWystawianieFiltry;
   allegroWystawianieWynikiIds=rows.map(p=>p.id);allegroWystawianieStronaIds=rows.map(p=>p.id);
   const fields=`<div class="allegro-listing-advanced-grid admin-search-full">
-    <label class="allegro-listing-search-wide"><span>Produkt lub identyfikator</span><input value="${esc(szukajAllegroWystawiania)}" placeholder="Nazwa, EXTERNAL_ID, SKU, EAN, kod producenta lub ID oferty…" oninput="szukajAllegroWystawiania=this.value.toLowerCase();allegroWystawianieStrona=1;zaplanujRenderPoWpisaniu()"></label>
+    <label class="allegro-listing-search-wide"><span>Produkt lub identyfikator</span><input data-allegro-publication-search value="${esc(szukajAllegroWystawiania)}" placeholder="Nazwa, EXTERNAL_ID, SKU, EAN, kod producenta lub ID oferty…" oninput="allegroPublikacjaSzukaj(this.value)"></label>
     <label><span>Dokładny stan kolejki</span><select onchange="allegroPublikacjaPrzelaczFiltr(this.value)">${allegroPublikacjaOpcjeHTML([
       ["bez_oferty",`Bez oferty Allegro (${counts.bez_oferty})`],
       ["gotowe_nowe",`Gotowe do pierwszego wystawienia (${counts.gotowe_nowe})`],
@@ -104,7 +104,7 @@ allegroWystawianiePanelHTML=function(){
     <label><span>Cena Allegro od</span><input type="number" min="0" step="0.01" value="${esc(f.cenaOd)}" placeholder="0,00 zł" onchange="allegroPublikacjaUstawFiltrZaawansowany('cenaOd',this.value)"></label>
     <label><span>Cena Allegro do</span><input type="number" min="0" step="0.01" value="${esc(f.cenaDo)}" placeholder="bez limitu" onchange="allegroPublikacjaUstawFiltrZaawansowany('cenaDo',this.value)"></label>
     <label><span>Sortowanie</span><select onchange="allegroPublikacjaPrzelaczSort(this.value)">${allegroPublikacjaOpcjeHTML([["gotowosc","Najpierw pilne i gotowe"],["status","Według stanu kolejki"],["external","EXTERNAL_ID / SKU"],["nazwa","Nazwa A–Z"],["producent","Producent A–Z"],["najnowsze","Najnowsze produkty"],["cena","Cena rosnąco"],["cena_desc","Cena malejąco"]],allegroWystawianieSort)}</select></label>
-    <label><span>Na stronie</span><select onchange="allegroLimitWystawiania=Number(this.value)||50;allegroWystawianieStrona=1;renderuj()">${[25,50,100,250,500,1000].map(n=>`<option value="${n}" ${pageSize===n?"selected":""}>${n}</option>`).join("")}</select></label>
+    <label><span>Na stronie</span><select onchange="allegroPublikacjaUstawLimit(this.value)">${[25,50,100,250,500,1000].map(n=>`<option value="${n}" ${pageSize===n?"selected":""}>${n}</option>`).join("")}</select></label>
     <button class="btn ghost allegro-listing-reset" type="button" onclick="allegroPublikacjaResetujFiltry()" ${activeFilters?"":"disabled"}>Wyczyść i pokaż bez oferty</button>
   </div>`;
   const operations=adminOperacjeWynikowHTML({id:"allegro-listing-products",selected,pageCount:rows.length,resultCount:resultTotal,selectPage:"allegroZaznaczZakresWystawiania('strona',true)",selectAll:"allegroZaznaczZakresWystawiania('strona',true)",deselectPage:"allegroZaznaczZakresWystawiania('strona',false)",deselectAll:"allegroZaznaczZakresWystawiania('strona',false)",clear:"allegroPublikacjaWyczyscWybor()",exportSelected:"allegroEksportujProduktyWystawiania('zaznaczone')",exportAll:"allegroEksportujProduktyWystawiania('filtr')",extra:`<button class="btn ghost" onclick='allegroPublikacjaZaznaczGotoweNowe(${JSON.stringify(readyNewFiltered.map(p=>String(p.id)))})' ${readyNewFiltered.length?"":"disabled"}>☑ Gotowe z tej strony (${readyNewFiltered.length})</button><button class="btn ghost" onclick='allegroPublikacjaZaznaczDoAktualizacji(${JSON.stringify(updateFiltered.map(p=>String(p.id)))})' ${updateFiltered.length?"":"disabled"}>↻ Aktualizacje z tej strony (${updateFiltered.length})</button><button class="btn ghost" onclick='allegroPublikacjaPrzygotujWybranePoId(${JSON.stringify(missingFiltered.slice(0,250).map(p=>String(p.id)))})' ${missingFiltered.length?"":"disabled"}>🤖 Uzupełnij braki (${Math.min(250,missingFiltered.length)})</button><button class="btn product-allegro-publish" onclick="allegroPublikacjaOtworzDecyzje(null,'activate')" ${selected?"":"disabled"}>🟠 Wystaw lub aktualizuj (${selected})</button>`});
@@ -241,6 +241,7 @@ function allegroCentrumOfertUstawTryb(tryb="publikacja",filtr=""){
     filtrStatusuAllegroOfert=filtr||"sprzedaz";
     filtrAllegroOfert="wszystkie";
     allegroOfertyStrona=1;
+    allegroLadujJesliTrzeba("offers");
   }
   renderuj();
 }

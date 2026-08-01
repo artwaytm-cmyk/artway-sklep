@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 export function createCentralProductCatalogRoute({ catalog, isAdmin, rateLimit, respond, revisionState, synchronize } = {}) {
   return async function centralProductCatalogRoute(request, url, action) {
     if (!String(action || '').startsWith('product-catalog-')) return null;
@@ -9,11 +11,22 @@ export function createCentralProductCatalogRoute({ catalog, isAdmin, rateLimit, 
       let synchronization = null;
       if (!metaBefore.count || metaBefore.outdated) synchronization = await synchronize({ force: true, revision });
       else if (metaBefore.sourceRevision !== revision.sourceRevision) void synchronize({ revision }).catch((error) => console.error('central_product_catalog_sync', error));
+      const meta = synchronization ? await catalog.metadata() : metaBefore;
+      const catalogChangedUpstream = meta.sourceRevision !== revision.sourceRevision;
+      const validator = crypto.createHash('sha256')
+        .update(JSON.stringify({ revision: meta.sourceRevision, schemaVersion: meta.schemaVersion, admin, query: url.searchParams.toString() }))
+        .digest('base64url').slice(0, 32);
+      const etag = `\"catalog-${validator}\"`;
+      const requestEtag = String(request.headers.get('if-none-match') || '');
+      const cacheHeaders = { 'cache-control': 'private, no-cache', etag, vary: 'authorization, x-admin-token' };
+      if (!catalogChangedUpstream && requestEtag.split(',').map((value) => value.trim()).includes(etag)) {
+        return new Response(null, { status: 304, headers: cacheHeaders });
+      }
       const result = await catalog.query({
         admin, query: url.searchParams.get('q'), category: url.searchParams.get('category'), categories: url.searchParams.get('categories'), ids: url.searchParams.get('ids'), special: url.searchParams.get('special'), minRating: url.searchParams.get('minRating'), producer: url.searchParams.get('producer'), status: url.searchParams.get('status'), source: url.searchParams.get('source'), stock: url.searchParams.get('stock'), allegro: url.searchParams.get('allegro'), data: url.searchParams.get('data'), sale: url.searchParams.get('sale'), promotion: url.searchParams.get('promotion'), link: url.searchParams.get('link'),
         priceMin: url.searchParams.get('priceMin'), priceMax: url.searchParams.get('priceMax'), allegroPriceMin: url.searchParams.get('allegroPriceMin'), allegroPriceMax: url.searchParams.get('allegroPriceMax'), sort: url.searchParams.get('sort'), page: url.searchParams.get('page'), limit: url.searchParams.get('limit'), cursor: url.searchParams.get('cursor'),
       });
-      return respond({ ok: true, ...result, private: admin, stale: !synchronization?.synchronized && metaBefore.count > 0 && metaBefore.sourceRevision !== revision.sourceRevision, synchronization });
+      return respond({ ok: true, ...result, private: admin, stale: !synchronization?.synchronized && metaBefore.count > 0 && metaBefore.sourceRevision !== revision.sourceRevision, synchronization }, 200, cacheHeaders);
     }
 
     if (action === 'product-catalog-item') {
