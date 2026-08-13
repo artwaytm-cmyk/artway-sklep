@@ -20,6 +20,20 @@ import { normalizeInpostServiceTracking } from './domain/inpost-service-tracking
 
 const STORE_KEY = 'inpost_service_shipments';
 
+async function defaultPolishPostcodeLookup(code) {
+  const response = await globalThis.fetch(`https://api.zippopotam.us/PL/${encodeURIComponent(code)}`, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(6_000),
+  });
+  if (response.status === 404) return { postCode: code, cities: [] };
+  if (!response.ok) throw new Error(`Usługa kodów pocztowych odpowiedziała statusem ${response.status}.`);
+  const data = await response.json();
+  const cities = [...new Set((Array.isArray(data?.places) ? data.places : [])
+    .map((place) => String(place?.['place name'] || place?.placeName || '').trim())
+    .filter(Boolean))];
+  return { postCode: String(data?.['post code'] || code), cities };
+}
+
 function initialStore() {
   return { items: [], contacts: [], settings: inpostServiceDefaultSettings(), updatedAt: null };
 }
@@ -48,7 +62,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
     respond, isAdmin, text, readVersioned, writeIfVersion, publicConfig, configure,
     call, serviceAvailability, organization, waitForLabel, trackingNumber,
     shipmentStatus, labelReady, offerId, infaktPublicConfig, infaktCall,
-    infaktReference,
+    infaktReference, postcodeLookup = defaultPolishPostcodeLookup,
   } = deps;
 
   async function mutateStore(mutator) {
@@ -229,6 +243,22 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         billing: summarizeInpostServiceBilling(store.items),
         updatedAt: store.updatedAt,
       });
+    }
+
+    if (action === 'inpost-service-postcode') {
+      if (req.method !== 'GET') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const rawCode = String(url.searchParams.get('code') || '').replace(/\s/g, '');
+      const match = rawCode.match(/^(\d{2})-?(\d{3})$/);
+      if (!match) return respond({ ok: false, error: 'Podaj kod pocztowy w formacie 00-000.', code: 'postcode_validation' }, 422);
+      const code = `${match[1]}-${match[2]}`;
+      try {
+        const result = await postcodeLookup(code);
+        const cities = [...new Set((Array.isArray(result?.cities) ? result.cities : [])
+          .map((city) => text(city, 100).trim()).filter(Boolean))];
+        return respond({ ok: true, postCode: code, cities, found: cities.length > 0, source: 'postal_directory' });
+      } catch {
+        return respond({ ok: false, error: 'Nie udało się teraz sprawdzić kodu pocztowego. Miasto można wpisać ręcznie.', code: 'postcode_unavailable' }, 502);
+      }
     }
 
     if (action === 'inpost-service-contact-save') {

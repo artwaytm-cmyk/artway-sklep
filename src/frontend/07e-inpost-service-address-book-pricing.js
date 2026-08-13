@@ -1,4 +1,5 @@
 let inpostServiceWycenaTimer=0;
+const inpostServiceKodPocztowyTimery={sender:0,receiver:0},inpostServiceKodPocztowyCache=new Map();
 const inpostServiceKsiazkaStan={
   sender:{role:"sender",q:"",postCode:"",city:"",street:"",page:1,selectedKey:"",targetFormId:""},
   receiver:{role:"receiver",q:"",postCode:"",city:"",street:"",page:1,selectedKey:"",targetFormId:""},
@@ -38,6 +39,44 @@ function inpostServiceAdresDane(contact={}){
     city:String(address.city||"").trim(),
     street:String(address.street||"").trim(),
   };
+}
+function inpostServiceKodPocztowy(value=""){
+  const digits=String(value||"").replace(/\D/g,"").slice(0,5);
+  return digits.length===5?`${digits.slice(0,2)}-${digits.slice(2)}`:digits;
+}
+function inpostServiceUliceDlaAdresu(form,prefix){
+  const code=inpostServiceKodPocztowy(form?.elements?.[`${prefix}PostCode`]?.value),city=inpostServiceAdresNormal(form?.elements?.[`${prefix}City`]?.value);
+  const streets=inpostServiceAdresUnikalne(inpostServiceAdresy().filter(contact=>{
+    const address=inpostServiceAdresDane(contact);
+    return (!code||inpostServiceKodPocztowy(address.postCode)===code)&&(!city||inpostServiceAdresNormal(address.city)===city);
+  }).map(contact=>inpostServiceAdresDane(contact).street),250);
+  const list=document.getElementById(`inpostService${prefix}StreetHints`);if(list)list.innerHTML=streets.map(street=>`<option value="${esc(street)}"></option>`).join("");
+  return streets;
+}
+function inpostServiceMiastoWpis(input,prefix){inpostServiceUliceDlaAdresu(input?.form,prefix);}
+function inpostServiceKodPocztowyWpis(input,prefix){
+  const code=inpostServiceKodPocztowy(input?.value),form=input?.form,hint=form?.querySelector?.(`[data-inpost-postcode-hint="${prefix}"]`);
+  if(input&&input.value!==code)input.value=code;
+  clearTimeout(inpostServiceKodPocztowyTimery[prefix]);
+  if(!/^\d{2}-\d{3}$/.test(code)){if(hint){hint.hidden=true;hint.textContent="";}return;}
+  if(hint){hint.hidden=false;hint.className="backend-note wide";hint.textContent="Sprawdzam kod pocztowy…";}
+  inpostServiceKodPocztowyTimery[prefix]=setTimeout(()=>inpostServiceSprawdzKodPocztowy(form,prefix,code),350);
+}
+async function inpostServiceSprawdzKodPocztowy(form,prefix,code){
+  if(!form||inpostServiceKodPocztowy(form.elements[`${prefix}PostCode`]?.value)!==code)return;
+  const hint=form.querySelector(`[data-inpost-postcode-hint="${prefix}"]`);
+  try{
+    let d=inpostServiceKodPocztowyCache.get(code);
+    if(!d){d=await chmura("inpost-service-postcode",{params:{code},timeout:9000});inpostServiceKodPocztowyCache.set(code,d);}
+    if(inpostServiceKodPocztowy(form.elements[`${prefix}PostCode`]?.value)!==code)return;
+    const localCities=inpostServiceAdresy().filter(contact=>inpostServiceKodPocztowy(inpostServiceAdresDane(contact).postCode)===code).map(contact=>inpostServiceAdresDane(contact).city);
+    const cities=inpostServiceAdresUnikalne([...(d.cities||[]),...localCities],50),cityInput=form.elements[`${prefix}City`],cityList=document.getElementById(`inpostService${prefix}CityHints`);
+    if(cityList)cityList.innerHTML=cities.map(city=>`<option value="${esc(city)}"></option>`).join("");
+    if(cityInput&&!String(cityInput.value||"").trim()&&cities.length===1)cityInput.value=cities[0];
+    const streets=inpostServiceUliceDlaAdresu(form,prefix);
+    if(hint){hint.hidden=false;hint.className="backend-note wide";hint.textContent=cities.length?`Kod rozpoznany: ${cities.join(", ")}. ${streets.length?"Możesz wybrać zapisaną ulicę z podpowiedzi.":"Wpisz ulicę i numer budynku."}`:"Nie znaleziono miejscowości dla tego kodu. Sprawdź kod albo wpisz miasto ręcznie.";}
+    inpostServiceZaplanujWycene(form);
+  }catch(e){if(hint){hint.hidden=false;hint.className="backend-note wide";hint.textContent="Nie udało się teraz sprawdzić kodu. Miasto i ulicę możesz wpisać ręcznie.";}}
 }
 function inpostServiceRoleKontaktu(contact={},role="all"){
   return role==="all"||(contact.roles||[]).includes(role);
@@ -266,6 +305,7 @@ function inpostServiceAktualizujWyceneUI(form,pricing=inpostServiceStan.pricing)
   const customer=Math.round((total+fee)*100)/100,b=pricing.breakdown||{},source=pricing.source==="manual"?"pełny koszt wpisany ręcznie":"Twój cennik umowny";
   const api=pricing.apiComparison||{},difference=Number.isFinite(Number(api.differenceGross))?Number(api.differenceGross):null;
   box.innerHTML=`<div class="inpost-price-main"><span><small>Koszt nadania</small><strong>${zl(total)}</strong></span><span><small>Prowizja Artway-TM</small><strong>${zl(fee)}</strong></span><span class="total"><small>Kwota na FV klienta</small><strong>${zl(customer)}</strong></span></div>
+    ${pricing.complete&&!pricing.apiWarning?'<div class="inpost-price-meta"><span class="lvl lvl-ok">Dane są poprawne</span><small>ShipX przyjął dane przesyłki. Rozliczenie korzysta ze stawki umownej konta postpaid.</small></div>':""}
     <div class="inpost-price-meta"><span class="lvl ${pricing.complete?"lvl-ok":"lvl-ostrzezenie"}">${esc(source)}</span><small>${esc(pricing.rateLabel||"stawka indywidualna")}</small>${Number(b.extrasGross)>0?`<small>Dopłaty: ${zl(b.extrasGross)}</small>`:""}<small>Opłata paliwowa: w cenie</small></div>
     ${pricing.complete?"":`<div class="inpost-price-warning"><b>Niepełna wycena opcji dodatkowych:</b> ${esc((pricing.unpricedOptions||[]).join(", ")||"brak stawki")}. Uzupełnij dopłaty w cenniku albo wpisz pełny koszt ręcznie — do tego czasu FV jest zablokowana.</div>`}
     ${pricing.apiWarning?`<div class="inpost-price-warning"><b>Cennik umowny działa, ale ShipX odrzucił kontrolę:</b> ${esc(pricing.apiWarning)}. Popraw wskazane dane przed utworzeniem przesyłki.</div>`:""}
@@ -346,11 +386,12 @@ function inpostServiceOsobaFields(prefix,title,person={}){
       <label>Nazwisko<input name="${prefix}LastName" value="${esc(person.lastName||"")}"></label>
       <label>E-mail *<input name="${prefix}Email" type="email" required value="${esc(person.email||"")}"></label>
       <label>Telefon *<input name="${prefix}Phone" inputmode="tel" required value="${esc(person.phone||"")}"></label>
-      <label class="wide">Ulica ${prefix==="sender"?"*":""}<input name="${prefix}Street" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.street||"")}"></label>
+      <label>Kod pocztowy ${prefix==="sender"?"*":""}<input name="${prefix}PostCode" ${prefix==="sender"?"required":"data-receiver-address"} pattern="\\d{2}-?\\d{3}" inputmode="numeric" autocomplete="postal-code" value="${esc(a.postCode||a.post_code||"")}" oninput="inpostServiceKodPocztowyWpis(this,${jsArg(prefix)})"></label>
+      <label>Miasto ${prefix==="sender"?"*":""}<input name="${prefix}City" ${prefix==="sender"?"required":"data-receiver-address"} list="inpostService${prefix}CityHints" autocomplete="address-level2" value="${esc(a.city||"")}" oninput="inpostServiceMiastoWpis(this,${jsArg(prefix)})"><datalist id="inpostService${prefix}CityHints"></datalist></label>
+      <div class="backend-note wide" data-inpost-postcode-hint="${prefix}" hidden></div>
+      <label class="wide">Ulica ${prefix==="sender"?"*":""}<input name="${prefix}Street" ${prefix==="sender"?"required":"data-receiver-address"} list="inpostService${prefix}StreetHints" autocomplete="address-line1" value="${esc(a.street||"")}"><datalist id="inpostService${prefix}StreetHints"></datalist></label>
       <label>Nr budynku ${prefix==="sender"?"*":""}<input name="${prefix}Building" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.buildingNumber||a.building_number||"")}"></label>
       <label>Nr lokalu<input name="${prefix}Flat" value="${esc(a.flatNumber||a.flat_number||"")}"></label>
-      <label>Kod pocztowy ${prefix==="sender"?"*":""}<input name="${prefix}PostCode" ${prefix==="sender"?"required":"data-receiver-address"} pattern="\\d{2}-?\\d{3}" value="${esc(a.postCode||a.post_code||"")}"></label>
-      <label>Miasto ${prefix==="sender"?"*":""}<input name="${prefix}City" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.city||"")}"></label>
       ${prefix==="receiver"?'<button class="btn ghost wide" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie(\'receiver\')">📍 Znajdź Paczkomaty przy tym adresie</button>':""}
       <div class="inpost-contact-roles wide"><b>Używaj tego adresu jako</b><label><input type="checkbox" name="${prefix}RoleSender" ${prefix==="sender"?"checked":""}> Nadawca</label><label><input type="checkbox" name="${prefix}RoleReceiver" ${prefix==="receiver"?"checked":""}> Odbiorca</label></div>
       <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt(${jsArg(prefix)},this)">💾 Zapisz w książce</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt(${jsArg(prefix)},this)">Usuń zapis</button></div>
@@ -411,7 +452,7 @@ function inpostServiceFormHTML(){
           <div class="inpost-contact-selector"><div class="inpost-selected-contact" data-inpost-selected-contact="sender">${inpostServiceWybranyKontaktHTML(sender,"sender")}</div><div class="inpost-contact-selector-actions"><button class="btn" type="button" onclick="inpostServiceOtworzKsiazke('sender',this)">📒 Wybierz z książki</button><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres('sender',this)">＋ Nowy adres</button></div></div>
           <details><summary>Sprawdź lub popraw dane nadawcy</summary><div class="inpost-form-grid">
             <label>Firma<input name="senderCompany" value="${esc(sender.companyName||"")}"></label><label>NIP<input name="senderTaxCode" inputmode="numeric" maxlength="10" value="${esc(sender.taxCode||"")}"></label><label>Imię<input name="senderFirstName" value="${esc(sender.firstName||"")}"></label><label>Nazwisko<input name="senderLastName" value="${esc(sender.lastName||"")}"></label><label>E-mail *<input name="senderEmail" type="email" required value="${esc(sender.email||"")}"></label><label>Telefon *<input name="senderPhone" inputmode="tel" required value="${esc(sender.phone||"")}"></label>
-            <label class="wide">Ulica *<input name="senderStreet" required value="${esc(sender.address?.street||"")}"></label><label>Nr budynku *<input name="senderBuilding" required value="${esc(sender.address?.buildingNumber||sender.address?.building_number||"")}"></label><label>Nr lokalu<input name="senderFlat" value="${esc(sender.address?.flatNumber||sender.address?.flat_number||"")}"></label><label>Kod pocztowy *<input name="senderPostCode" required pattern="\\d{2}-?\\d{3}" value="${esc(sender.address?.postCode||sender.address?.post_code||"")}"></label><label>Miasto *<input name="senderCity" required value="${esc(sender.address?.city||"")}"></label>
+            <label>Kod pocztowy *<input name="senderPostCode" required pattern="\\d{2}-?\\d{3}" inputmode="numeric" autocomplete="postal-code" value="${esc(sender.address?.postCode||sender.address?.post_code||"")}" oninput="inpostServiceKodPocztowyWpis(this,'sender')"></label><label>Miasto *<input name="senderCity" required list="inpostServicesenderCityHints" autocomplete="address-level2" value="${esc(sender.address?.city||"")}" oninput="inpostServiceMiastoWpis(this,'sender')"><datalist id="inpostServicesenderCityHints"></datalist></label><div class="backend-note wide" data-inpost-postcode-hint="sender" hidden></div><label class="wide">Ulica *<input name="senderStreet" required list="inpostServicesenderStreetHints" autocomplete="address-line1" value="${esc(sender.address?.street||"")}"><datalist id="inpostServicesenderStreetHints"></datalist></label><label>Nr budynku *<input name="senderBuilding" required value="${esc(sender.address?.buildingNumber||sender.address?.building_number||"")}"></label><label>Nr lokalu<input name="senderFlat" value="${esc(sender.address?.flatNumber||sender.address?.flat_number||"")}"></label>
             <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt('sender',this)">💾 Zapisz w książce</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt('sender',this)">Usuń zapis</button></div><label class="check wide"><input type="checkbox" name="saveSender" checked> Zapamiętaj lub zaktualizuj nadawcę</label>
           </div></details>
         </fieldset>
@@ -423,7 +464,7 @@ function inpostServiceFormHTML(){
           <div class="inpost-form-grid">
             <label>E-mail *<input name="receiverEmail" type="email" required placeholder="Adres e-mail odbiorcy"></label><label>Telefon *<input name="receiverPhone" inputmode="tel" required placeholder="9 cyfr"></label>
             <div class="wide" data-inpost-only="locker"><label>Punkt odbioru *<div class="inpost-inline"><input id="inpostServiceTargetPoint" name="targetPoint" required placeholder="Nazwa lub lokalizacja punktu"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape('target')">Mapa</button></div></label><div class="inpost-point-search"><input id="inpostServicePointSearch" placeholder="Miasto, kod, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow('target')">Szukaj</button><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie('receiver','target')">Przy adresie</button></div><div id="inpostServicePointResults"></div></div>
-            <div class="wide inpost-courier-address" data-inpost-only="courier"><div class="inpost-form-grid"><label>Imię i nazwisko<input name="receiverFirstName" placeholder="Imię"><input name="receiverLastName" placeholder="Nazwisko"></label><label>Nazwa firmy<input name="receiverCompany"></label><label>NIP<input name="receiverTaxCode" inputmode="numeric" maxlength="10"></label><label>Kod pocztowy *<input name="receiverPostCode" data-receiver-address pattern="\\d{2}-?\\d{3}"></label><label>Miasto *<input name="receiverCity" data-receiver-address></label><label class="wide">Ulica *<input name="receiverStreet" data-receiver-address></label><label>Nr budynku *<input name="receiverBuilding" data-receiver-address></label><label>Nr lokalu<input name="receiverFlat"></label></div></div>
+            <div class="wide inpost-courier-address" data-inpost-only="courier"><div class="inpost-form-grid"><label>Imię i nazwisko<input name="receiverFirstName" placeholder="Imię"><input name="receiverLastName" placeholder="Nazwisko"></label><label>Nazwa firmy<input name="receiverCompany"></label><label>NIP<input name="receiverTaxCode" inputmode="numeric" maxlength="10"></label><label>Kod pocztowy *<input name="receiverPostCode" data-receiver-address pattern="\\d{2}-?\\d{3}" inputmode="numeric" autocomplete="postal-code" oninput="inpostServiceKodPocztowyWpis(this,'receiver')"></label><label>Miasto *<input name="receiverCity" data-receiver-address list="inpostServicereceiverCityHints" autocomplete="address-level2" oninput="inpostServiceMiastoWpis(this,'receiver')"><datalist id="inpostServicereceiverCityHints"></datalist></label><div class="backend-note wide" data-inpost-postcode-hint="receiver" hidden></div><label class="wide">Ulica *<input name="receiverStreet" data-receiver-address list="inpostServicereceiverStreetHints" autocomplete="address-line1"><datalist id="inpostServicereceiverStreetHints"></datalist></label><label>Nr budynku *<input name="receiverBuilding" data-receiver-address></label><label>Nr lokalu<input name="receiverFlat"></label></div></div>
             <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt('receiver',this)">💾 Dodaj odbiorcę do książki</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt('receiver',this)">Usuń zapis</button></div><label class="check wide"><input type="checkbox" name="saveReceiver" checked> Zapamiętaj lub zaktualizuj odbiorcę</label>
           </div>
         </fieldset>

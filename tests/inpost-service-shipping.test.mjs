@@ -75,7 +75,7 @@ test('nadanie usługowe waliduje klienta i obsługuje Paczkomat, pobranie, ochro
   assert.deepEqual(payload.insurance, { amount: 200, currency: 'PLN' });
 });
 
-test('kurier obsługuje te same trzy sposoby nadania i wymaga automatu tylko dla parcel_locker', () => {
+test('kurier odrzuca metodę Paczkomatu i bezpiecznie wybiera PaczkoPunkt', () => {
   const value = draft({
     deliveryType: 'courier',
     targetPoint: '',
@@ -84,12 +84,12 @@ test('kurier obsługuje te same trzy sposoby nadania i wymaga automatu tylko dla
     weekend: true,
     additionalServices: ['sms'],
   });
-  assert.equal(value.sendingMethod, 'parcel_locker');
+  assert.equal(value.sendingMethod, 'pop');
   assert.equal(value.weekend, false);
   assert.equal(validateInpostServiceDraft(value).ok, true);
   const payload = inpostServiceShipxPayload(value);
   assert.equal(payload.service, 'inpost_courier_standard');
-  assert.deepEqual(payload.custom_attributes, { sending_method: 'parcel_locker', dropoff_point: 'BOJ01N' });
+  assert.deepEqual(payload.custom_attributes, { sending_method: 'pop' });
   assert.deepEqual(payload.additional_services, ['sms']);
 });
 
@@ -171,6 +171,7 @@ test('historia transportu scala zdarzenia ShipX, zachowuje starsze wpisy i tłum
   assert.equal(history[0].label, 'Gotowa do odbioru');
   assert.equal(history[1].location, 'Gdańsk');
   assert.equal(history[2].status, 'confirmed');
+  assert.equal(history[2].label, 'Etykieta utworzona — paczka czeka na nadanie');
 });
 
 test('FV miesięczna wymaga firmy i NIP, a Artway-TM fakturuje koszt nadania wraz z prowizją', () => {
@@ -286,6 +287,16 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /Historia transportu/);
   assert.match(shipping, /inpostServiceZastosujZgodnoscTypu/);
   assert.match(shipping, /Automat nadawczy \*/);
+  assert.match(shipping, /Dane są poprawne/);
+  assert.match(shipping, /konta postpaid/);
+  assert.match(shipping, /inpost-service-postcode/);
+  assert.match(shipping, /Kod rozpoznany/);
+  assert.match(shipping, /Koszt InPost/);
+  assert.match(shipping, /Prowizja Artway-TM/);
+  assert.match(shipping, /Razem dla klienta/);
+  assert.match(shipping, /Podpis osoby wystawiającej/);
+  assert.match(shipping, /Pieczęć firmowa Artway-TM/);
+  assert.doesNotMatch(shipping, /linear-gradient\(135deg,#111827,#312e81\)/);
   assert.match(shipping, /Kontrola ShipX:<\/b>.*niepotwierdzona/s);
   assert.equal((shipping.match(/function inpostServiceUstawTyp\(/g) || []).length, 1);
   assert.match(core, /#\/admin\/infakt\/wysylki/);
@@ -304,6 +315,7 @@ test('trasa serwerowa zabezpiecza idempotencję, książkę adresową i wycenę 
   assert.match(source, /inpost-service-contact-delete/);
   assert.match(source, /inpost-service-contact-import/);
   assert.match(source, /inpost-service-quote/);
+  assert.match(source, /inpost-service-postcode/);
   assert.match(source, /shipments\/calculate/);
   assert.doesNotMatch(source, /carrierCost\s*:/);
 });
@@ -322,6 +334,30 @@ test('zamówienia sklepu korzystają z tego samego cennika umownego bez ujawnian
   assert.match(orders, /Koszt InPost brutto/);
   assert.match(orders, /inpostWycenaZamowieniaLaduj/);
   assert.doesNotMatch(orders, /abonament/i);
+});
+
+test('etykieta A4 używa wspieranego przez ShipX typu normal, a A6 zachowuje A6', async () => {
+  const calls = [];
+  const route = createInpostRoute({
+    respond: (body, status = 200) => ({ body, status }),
+    isAdmin: () => true,
+    text: (value, max = 200) => String(value ?? '').slice(0, max),
+    orderNumber: (value) => String(value || ''),
+    configure: () => ({ configured: true }),
+    waitForLabel: async () => ({ id: 'SHIP-1', status: 'confirmed', tracking_number: '620000000000000000000001' }),
+    shipmentStatus: (value) => value?.status || '',
+    trackingNumber: (value) => value?.tracking_number || '',
+    labelReady: (value) => value?.status === 'confirmed',
+    call: async (path, options) => { calls.push({ path, options }); return { base64: 'JVBERi0xLjQ=' }; },
+  });
+  for (const type of ['A4', 'A6']) {
+    const request = new Request(`http://localhost/api?action=inpost-label&id=SHIP-1&type=${type}`);
+    const result = await route(request, new URL(request.url), 'inpost-label');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.type, type);
+  }
+  assert.match(calls[0].path, /type=normal$/);
+  assert.match(calls[1].path, /type=A6$/);
 });
 
 test('wycena zamówienia sklepu zwraca operacyjny koszt umowny bez danych abonamentu', async () => {
@@ -366,7 +402,14 @@ test('endpoint wyceny naprawdę wysyła szkic do ShipX, a książka adresowa zap
       calls.push({ path, options });
       return [{ id: 'REQ-1', calculated_charge_amount: '16.50', fuel_charge_amount: '1.50' }];
     },
+    postcodeLookup: async (code) => ({ postCode: code, cities: ['Jurków'] }),
   });
+  const postcodeRequest = new Request('http://localhost/api?action=inpost-service-postcode&code=34-634');
+  const postcode = await route(postcodeRequest, new URL(postcodeRequest.url), 'inpost-service-postcode');
+  assert.equal(postcode.status, 200);
+  assert.equal(postcode.body.postCode, '34-634');
+  assert.deepEqual(postcode.body.cities, ['Jurków']);
+  assert.equal(postcode.body.found, true);
   const quoteRequest = new Request('http://localhost/api?action=inpost-service-quote', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

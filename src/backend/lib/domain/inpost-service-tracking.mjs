@@ -1,6 +1,6 @@
 const STATUS_LABELS = {
   created: 'Przesyłka utworzona',
-  confirmed: 'Przesyłka potwierdzona',
+  confirmed: 'Etykieta utworzona — paczka czeka na nadanie',
   dispatched_by_sender: 'Przekazana przez nadawcę',
   collected_from_sender: 'Odebrana od nadawcy',
   taken_by_courier: 'Odebrana przez kuriera',
@@ -42,7 +42,7 @@ function normalizeEvent(event = {}) {
   return {
     status,
     originStatus: clean(event.originStatus || event.origin_status, 80),
-    label: clean(event.title || event.label || STATUS_LABELS[status] || status.replaceAll('_', ' '), 180),
+    label: clean(status === 'confirmed' ? STATUS_LABELS.confirmed : (event.title || event.label || STATUS_LABELS[status] || status.replaceAll('_', ' ')), 180),
     description: clean(event.description, 300),
     location: trackingLocation(event.location || event.agency),
     occurredAt: trackingDate(event.occurredAt || event.datetime || event.occurred_at || event.date, ''),

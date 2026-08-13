@@ -722,9 +722,11 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
   await shipmentForm.locator('.inpost-delivery-choice label').filter({ hasText: 'InPost Kurier' }).click();
   await expect(shipmentForm.locator('[data-inpost-size="xlarge"]')).toBeVisible();
   await expect(shipmentForm.locator('[data-inpost-only="courier"].inpost-courier-address')).toBeVisible();
-  await shipmentForm.locator('.inpost-method-choice label').filter({ hasText: 'Nadam w automacie Paczkomat' }).click();
-  await expect(shipmentForm.locator('[name="dropoffPoint"]')).toHaveAttribute('required', '');
-  await expect(shipmentForm.locator('[data-inpost-dropoff-panel]')).toBeVisible();
+  await expect(shipmentForm.locator('.inpost-method-choice label').filter({ hasText: 'Nadam w automacie Paczkomat' })).toBeHidden();
+  await expect(shipmentForm.locator('[name="sendingMethod"][value="parcel_locker"]')).toBeDisabled();
+  await shipmentForm.locator('.inpost-method-choice label').filter({ hasText: 'Nadam w PaczkoPunkcie' }).click();
+  await expect(shipmentForm.locator('[name="dropoffPoint"]')).not.toHaveAttribute('required', '');
+  await expect(shipmentForm.locator('[data-inpost-dropoff-panel]')).toBeHidden();
   await shipmentForm.locator('.inpost-method-choice label').filter({ hasText: 'Przesyłkę odbierze kurier InPost' }).click();
   await expect(shipmentForm.locator('[name="dropoffPoint"]')).not.toHaveAttribute('required', '');
   await expect(shipmentForm.locator('[data-inpost-dropoff-panel]')).toBeHidden();
@@ -795,7 +797,8 @@ test('potwierdzenie klienta otwiera druk A4 z aktualną historią transportu', a
       deliveryType: 'locker',
       targetPoint: 'GDA01N',
       parcel: { template: 'small', weight: 1 },
-      billing: { mode: 'monthly' },
+      billing: { mode: 'monthly', commissionGross: 4 },
+      pricing: { totalGross: 17.58, customerTotalGross: 21.58, commissionGross: 4 },
       trackingHistory: [
         { status: 'ready_to_pickup', label: 'Gotowa do odbioru', occurredAt: '2026-07-23T08:10:00.000Z' },
         { status: 'out_for_delivery', label: 'Wydana do doręczenia', occurredAt: '2026-07-23T06:15:00.000Z' },
@@ -807,6 +810,12 @@ test('potwierdzenie klienta otwiera druk A4 z aktualną historią transportu', a
   await expect(popup.getByRole('heading', { name: 'Potwierdzenie nadania przesyłki' })).toBeVisible();
   await expect(popup.getByText('Gotowa do odbioru', { exact: true })).toHaveCount(2);
   await expect(popup.getByRole('heading', { name: 'Historia transportu' })).toBeVisible();
+  await expect(popup.getByText('Koszt InPost')).toBeVisible();
+  await expect(popup.getByText('17,58 zł')).toBeVisible();
+  await expect(popup.getByText('Prowizja Artway-TM')).toBeVisible();
+  await expect(popup.getByText('Razem dla klienta')).toBeVisible();
+  await expect(popup.getByText('Podpis osoby wystawiającej')).toBeVisible();
+  await expect(popup.getByText('Pieczęć firmowa Artway-TM')).toBeVisible();
   await expect(popup.getByRole('button', { name: 'Drukuj / zapisz PDF' })).toBeVisible();
   await expect(popup.getByText('Dokument nie jest fakturą ani paragonem.')).toBeVisible();
   await popup.close();

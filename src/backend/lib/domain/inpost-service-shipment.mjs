@@ -3,7 +3,7 @@ const BILLING_MODES = new Set(['none', 'single', 'monthly']);
 const DELIVERY_TYPES = new Set(['locker', 'courier']);
 const SENDING_METHODS = new Set(['parcel_locker', 'any_point', 'pok', 'pop', 'courier_pok', 'branch', 'dispatch_order']);
 const LOCKER_SENDING_METHODS = new Set(['parcel_locker', 'any_point', 'pok', 'pop', 'branch', 'dispatch_order']);
-const COURIER_SENDING_METHODS = new Set(['', 'parcel_locker', 'any_point', 'pok', 'pop', 'courier_pok', 'branch', 'dispatch_order']);
+const COURIER_SENDING_METHODS = new Set(['pop', 'dispatch_order']);
 const DROPOFF_POINT_REQUIRED_METHODS = new Set(['parcel_locker', 'pok', 'courier_pok']);
 const LOCKER_EXTRAS = new Set(['labelless']);
 const COURIER_EXTRAS = new Set(['sms', 'email', 'saturday', 'dor1720', 'rod', 'labelless']);
@@ -213,7 +213,7 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
   const requestedSendingMethod = SENDING_METHODS.has(clean(raw.sendingMethod, 40)) ? clean(raw.sendingMethod, 40) : '';
   const sendingMethod = deliveryType === 'locker'
     ? (LOCKER_SENDING_METHODS.has(requestedSendingMethod) ? requestedSendingMethod : 'parcel_locker')
-    : (COURIER_SENDING_METHODS.has(requestedSendingMethod) ? requestedSendingMethod : '');
+    : (COURIER_SENDING_METHODS.has(requestedSendingMethod) ? requestedSendingMethod : 'pop');
   const allowedExtras = deliveryType === 'locker' ? LOCKER_EXTRAS : COURIER_EXTRAS;
   const extras = [...new Set((Array.isArray(raw.additionalServices) ? raw.additionalServices : []).map((item) => clean(item, 30)).filter((item) => allowedExtras.has(item)))];
   const billingMode = BILLING_MODES.has(clean(raw.billingMode, 20)) ? clean(raw.billingMode, 20) : 'none';
