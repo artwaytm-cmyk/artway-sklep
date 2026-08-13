@@ -80,6 +80,14 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 - Obecne działanie: formularz korzysta z uproszczonego utworzenia, które od razu kupuje przesyłkę i ustawia status `confirmed`. Po wykryciu błędu danych InPost nie pozwala już jej zmienić ani anulować, więc poprawiona etykieta oznacza drugi zakup.
 - Oczekiwane działanie: najpierw utworzyć przesyłkę z `only_choice_of_offer: true` i zatrzymać ją w statusie `offer_selected`, pokazać operatorowi ostateczne dane nadawcy, odbiorcy, wymiarów, wagi, uwag i ceny, a dopiero osobnym świadomym krokiem opłacić przesyłkę. Do chwili opłacenia szkic można anulować.
 
+### WYS-021 — Stawka umowna panelu różni się od kontroli ceny ShipX
+
+- Data zgłoszenia: 2026-08-13
+- Status: wymaga sprawdzenia cennika umownego przed kolejnym zakupem etykiety kurierskiej
+- Miejsce: podsumowanie kosztu przesyłki kurierskiej A, 1 kg, nadawanej w PaczkoPunkcie
+- Obecne działanie: panel wylicza koszt umowny 17,58 zł, natomiast kontrola ShipX dla tych samych danych zwraca 32,07 zł, czyli o 14,49 zł więcej.
+- Oczekiwane działanie: panel jednoznacznie wskazuje stawkę, która rzeczywiście zostanie naliczona przez organizację InPost, a przy rozbieżności blokuje zakup do czasu zatwierdzenia lub aktualizacji cennika.
+
 ## Naprawione
 
 ### WYS-001 — Brak wyszukiwania adresu po wpisaniu kodu pocztowego
