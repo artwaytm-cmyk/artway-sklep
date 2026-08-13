@@ -323,6 +323,7 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /priceDifferenceConfirmed/);
   assert.match(shipping, /Rozbieżność ceny wymaga potwierdzenia/);
   assert.match(shipping, /Potwierdzam tę rozbieżność ceny/);
+  assert.match(shipping, /priceDifferenceConfirmed[^>]*oninput="event\.stopPropagation\(\)"/);
   assert.match(shipping, /inpost-service-postcode/);
   assert.match(shipping, /Kod rozpoznany/);
   assert.match(shipping, /Koszt nadania/);
