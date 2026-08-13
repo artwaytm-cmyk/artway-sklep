@@ -542,8 +542,9 @@ function widokAdminWysylki(sekcja="zlecenia"){
   return adminSzkielet("/admin/wysylki",`<div class="module-page-stack shipping-module-page shipping-section-${esc(aktywna)}">${nawigacjaWysylek(aktywna)}${wysylkiKontekstPodstronyHTML(aktywna)}<div class="shipping-workspace section-${esc(aktywna)}">${widok}</div></div>`);
 }
 
-let inpostServiceStan={loaded:false,loading:false,saving:false,error:"",items:[],addressBook:[],settings:{commissionGross:4,commissionTiers:[{upToGross:20,commissionGross:4},{upToGross:30,commissionGross:6},{upToGross:40,commissionGross:8},{upToGross:50,commissionGross:10}],defaultDeliveryType:"locker",defaultSendingMethod:"parcel_locker",defaultDropoffPoint:"",defaultParcelTemplate:"small",defaultParcelWeight:1,defaultBillingMode:"none",defaultWeekend:false,labelDefaultFormat:"A6",labelOpenMode:"preview",labelAutoPrint:false,sender:{}},billing:{groups:[]},serviceAvailability:null,requestId:"",pricing:null};
+let inpostServiceStan={loaded:false,loading:false,saving:false,error:"",items:[],addressBook:[],settings:{commissionGross:4,sender:{}},billing:{groups:[]},serviceAvailability:null,requestId:"",pricing:null};
 let inpostServiceSzukaj="",inpostServiceFiltr="wszystkie",inpostServiceBillingFiltr="wszystkie";
+let inpostServicePotwierdzenieWybrane=new Set();
 
 function inpostServiceNowyRequestId(){
   inpostServiceStan.requestId=(globalThis.crypto?.randomUUID?.()||`inpost-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -557,9 +558,12 @@ function inpostServiceNadawca(){
   const fallback=inpostServiceAdresFirmy(),saved=inpostServiceStan.settings?.sender||{};
   return {...fallback,...saved,address:{...(fallback.address||{}),...(saved.address||{})}};
 }
+function inpostServicePustyNadawcaKlienta(){
+  return {companyName:"",taxCode:"",firstName:"",lastName:"",email:"",phone:"",address:{street:"",buildingNumber:"",flatNumber:"",postCode:"",city:""}};
+}
 function inpostServiceKlienci(){
   const users=typeof pobierzUzytkownikow==="function"?pobierzUzytkownikow():[];
-  const shipmentClients=(inpostServiceStan.items||[]).map(item=>item.customer||item.sender).filter(Boolean);
+  const shipmentClients=(inpostServiceStan.items||[]).map(item=>item.receiver).filter(Boolean);
   const map=new Map();
   [...users,...shipmentClients].forEach(raw=>{
     const company=raw.daneFirmy||{},email=String(raw.email||company.email||"").trim().toLowerCase(),nip=String(raw.nip||company.nip||raw.taxCode||"").replace(/\D/g,""),key=nip||email;
@@ -577,7 +581,7 @@ async function inpostServiceLaduj(force=false,cicho=true){
     inpostServiceStan={...inpostServiceStan,loaded:true,loading:false,items:Array.isArray(d.items)?d.items:[],addressBook:Array.isArray(d.addressBook)?d.addressBook:[],settings:d.settings||{commissionGross:4,sender:{}},billing:d.billing||{groups:[]},serviceAvailability:d.serviceAvailability||null,error:""};
     if(!inpostServiceStan.requestId)inpostServiceNowyRequestId();
   }catch(e){inpostServiceStan={...inpostServiceStan,loaded:true,loading:false,error:e.message||String(e)};if(!cicho)toast("InPost: "+inpostServiceStan.error);}
-  if(["/admin/wysylki/inpost","/admin/wysylki/inpost-rejestr","/admin/wysylki/inpost-ustawienia","/admin/wysylki/odbior-kuriera"].includes(trasa()))renderuj();
+  if(trasa().startsWith("/admin/wysylki/inpost")||trasa()==="/admin/wysylki/odbior-kuriera")renderuj();
 }
 const inpostServiceMetodyNadania={
   locker:[
@@ -592,25 +596,35 @@ const inpostServiceMetodyNadania={
   ]
 };
 const inpostServiceMetodyWymagajacePunktu=new Set(["parcel_locker","pok","courier_pok"]);
+function inpostServiceCourierC2CAktywny(){return (inpostServiceStan.serviceAvailability?.services||[]).includes("inpost_courier_c2c");}
 function inpostServiceMetodyNadaniaOpcjeHTML(type="locker",selected=""){
   return (inpostServiceMetodyNadania[type]||inpostServiceMetodyNadania.locker).map(([value,label])=>`<option value="${esc(value)}" ${String(value)===String(selected)?"selected":""}>${esc(label)}</option>`).join("");
 }
-function inpostServiceZastosujZgodnoscTypu(form){
+function inpostServiceZastosujZgodnoscTypu(form,preferDefault=false){
   const type=String(form?.deliveryType?.value||"locker");
   form?.querySelectorAll("[data-inpost-only]").forEach(el=>el.hidden=!String(el.dataset.inpostOnly||"").split(",").includes(type));
-  const allowed=inpostServiceMetodyNadania[type]||[],allowedValues=new Set(allowed.map(([value])=>value)),methodInputs=[...(form?.querySelectorAll?.('[name="sendingMethod"]')||[])];
-  methodInputs.forEach(input=>{const enabled=allowedValues.has(input.value);input.disabled=!enabled;if(input.closest("[data-inpost-method-card]"))input.closest("[data-inpost-method-card]").hidden=!enabled;});
+  const allowed=(inpostServiceMetodyNadania[type]||[]).filter(([value])=>type!=="courier"||value!=="parcel_locker"||inpostServiceCourierC2CAktywny()),allowedValues=new Set(allowed.map(([value])=>value)),methodInputs=[...(form?.querySelectorAll?.('[name="sendingMethod"]')||[])];
+  methodInputs.forEach(input=>{const enabled=allowedValues.has(input.value),card=input.closest("[data-inpost-method-card]");input.disabled=!enabled;if(card){card.hidden=!enabled;if(enabled)card.style.removeProperty("display");else card.style.setProperty("display","none","important");}});
   let method=String(form?.elements?.sendingMethod?.value||"");
-  if(!allowedValues.has(method)){const fallback=methodInputs.find(input=>input.value==="dispatch_order"&&!input.disabled)||methodInputs.find(input=>!input.disabled);if(fallback)fallback.checked=true;method=String(fallback?.value||"");}
+  if(preferDefault){
+    const preferred=methodInputs.find(input=>input.value==="parcel_locker"&&!input.disabled);
+    methodInputs.forEach(input=>{input.checked=Boolean(preferred&&input===preferred);});
+    method=preferred?.value||"";
+  }
+  if(!allowedValues.has(method)){
+    methodInputs.forEach(input=>{input.checked=false;});method="";
+    const fallbackValue=type==="locker"?"parcel_locker":"pop",preferred=methodInputs.find(input=>input.value===fallbackValue&&!input.disabled);
+    if(preferred){preferred.checked=true;method=preferred.value;}
+  }
   const requiresPoint=inpostServiceMetodyWymagajacePunktu.has(method),dropoff=form?.elements?.dropoffPoint;
   if(dropoff){
     dropoff.required=requiresPoint;
     dropoff.setAttribute("aria-required",requiresPoint?"true":"false");
     if(!requiresPoint)dropoff.value="";
-    else if(!String(dropoff.value||"").trim())dropoff.value=String(inpostServiceStan.settings?.defaultDropoffPoint||"").toUpperCase();
     dropoff.placeholder=requiresPoint?"Wybierz automat nadawczy":"";
   }
   const dropoffPanel=form?.querySelector("[data-inpost-dropoff-panel]");if(dropoffPanel)dropoffPanel.hidden=!requiresPoint;
+  const compatibility=form?.querySelector("[data-inpost-method-compatibility]");if(compatibility){compatibility.hidden=type!=="courier";compatibility.innerHTML=inpostServiceCourierC2CAktywny()?"<b>Domyślny Paczkomat jest dostępny.</b> Formularz użyje usługi Kurier C2C z tej samej organizacji InPost. Możesz też świadomie wybrać PaczkoPunkt albo odbiór przez kuriera.":"<b>Domyślny Paczkomat nie jest dostępny dla Kuriera Standard.</b> Formularz bezpiecznie wybierze PaczkoPunkt/POP; możesz też wybrać odbiór przez kuriera.";}
   const label=form?.querySelector("[data-inpost-dropoff-label]"),hint=form?.querySelector("[data-inpost-dropoff-hint]");
   if(label)label.textContent=requiresPoint?"Automat nadawczy *":"";
   if(hint)hint.textContent=requiresPoint?"ShipX wymaga kodu automatu dla tego sposobu nadania.":"";
@@ -632,30 +646,58 @@ function inpostServicePrzelicz(form){
 function inpostServiceWypelnijKlienta(input){
   const form=input?.form,key=String(input?.value||"").trim().toLowerCase(),client=inpostServiceKlienci().find(item=>item.key.toLowerCase()===key||item.email===key||item.taxCode===key);
   if(!form||!client)return;
-  const fields={senderCompany:client.companyName,senderTaxCode:client.taxCode,senderFirstName:client.firstName,senderLastName:client.lastName,senderEmail:client.email,senderPhone:client.phone,senderStreet:client.address?.street,senderBuilding:client.address?.buildingNumber,senderFlat:client.address?.flatNumber,senderPostCode:client.address?.postCode,senderCity:client.address?.city};
+  const fields={receiverCompany:client.companyName,receiverTaxCode:client.taxCode,receiverFirstName:client.firstName,receiverLastName:client.lastName,receiverEmail:client.email,receiverPhone:client.phone,receiverStreet:client.address?.street,receiverBuilding:client.address?.buildingNumber,receiverFlat:client.address?.flatNumber,receiverPostCode:client.address?.postCode,receiverCity:client.address?.city};
   Object.entries(fields).forEach(([name,value])=>{if(form.elements[name])form.elements[name].value=value||"";});
   toast("Dane stałego klienta uzupełnione ✅");
 }
 function inpostServiceStronaOsoby(form,prefix){
   return {companyName:form.elements[`${prefix}Company`]?.value||"",taxCode:form.elements[`${prefix}TaxCode`]?.value||"",firstName:form.elements[`${prefix}FirstName`]?.value||"",lastName:form.elements[`${prefix}LastName`]?.value||"",email:form.elements[`${prefix}Email`]?.value||"",phone:form.elements[`${prefix}Phone`]?.value||"",address:{street:form.elements[`${prefix}Street`]?.value||"",buildingNumber:form.elements[`${prefix}Building`]?.value||"",flatNumber:form.elements[`${prefix}Flat`]?.value||"",postCode:form.elements[`${prefix}PostCode`]?.value||"",city:form.elements[`${prefix}City`]?.value||""}};
 }
-function inpostServiceReferencja(form){
-  const field=form?.elements?.reference;if(!field)return "";
-  const customer=inpostServiceStronaOsoby(form,"sender"),a=customer.address||{},number=[a.buildingNumber,a.flatNumber].filter(Boolean).join("/"),street=[a.street,number].filter(Boolean).join(" "),address=[street,a.postCode,a.city].filter(Boolean).join(", ");
-  const id=String(inpostServiceStan.requestId||inpostServiceNowyRequestId()).replace(/[^a-z0-9]/gi,"").slice(-10).toUpperCase()||Date.now().toString(36).toUpperCase();
-  const base=`USL-${id}`,person=[customer.firstName,customer.lastName].filter(Boolean).join(" ").trim(),sender=String(customer.companyName||person||"").trim(),comments=form?.elements?.comments,prefix="Nadawca: ";
-  field.value=base.slice(0,30);
-  if(comments){
-    const senderLimit=Math.max(0,100-prefix.length-address.length-(sender?2:0)),senderLabel=sender.slice(0,senderLimit);
-    comments.value=address?`${prefix}${senderLabel?senderLabel+", ":""}${address}`.slice(0,100):sender?`${prefix}${sender}`.slice(0,100):"";
-  }
-  return field.value;
+function inpostServiceTekstPorownawczy(value){return String(value||"").trim().toLocaleLowerCase("pl-PL");}
+function inpostServiceAdresKlucz(person={}){const a=person.address||{};return [a.street,a.buildingNumber||a.building_number,a.flatNumber||a.flat_number,a.postCode||a.post_code,a.city].map(inpostServiceTekstPorownawczy).filter(Boolean).join("|");}
+function inpostServiceNormalizujNadawceKlienta(form){
+  if(!form)return;
+  const current=inpostServiceStronaOsoby(form,"sender"),technical=inpostServiceNadawca();
+  const personalChanged=!!(current.firstName||current.lastName)&&[current.firstName,current.lastName].map(inpostServiceTekstPorownawczy).join("|")!==[technical.firstName,technical.lastName].map(inpostServiceTekstPorownawczy).join("|");
+  const currentAddress=inpostServiceAdresKlucz(current),technicalAddress=inpostServiceAdresKlucz(technical),addressChanged=!!currentAddress&&currentAddress!==technicalAddress;
+  if(!personalChanged&&!addressChanged)return;
+  const company=form.elements.senderCompany,taxCode=form.elements.senderTaxCode;
+  if(company&&technical.companyName&&inpostServiceTekstPorownawczy(company.value)===inpostServiceTekstPorownawczy(technical.companyName))company.value="";
+  if(taxCode&&technical.taxCode&&String(taxCode.value||"").replace(/\D/g,"")===String(technical.taxCode||"").replace(/\D/g,""))taxCode.value="";
+}
+function inpostServiceAdresZwrotuNotatka(person={}){
+  const a=person.address||{},name=person.companyName||`${person.firstName||""} ${person.lastName||""}`.trim(),building=[a.buildingNumber||a.building_number,a.flatNumber||a.flat_number].filter(Boolean).join("/"),street=[a.street,building].filter(Boolean).join(" "),city=[a.postCode||a.post_code,a.city].filter(Boolean).join(" "),destination=[name,street,city].filter(Boolean).join(", ");
+  return destination?`Zwroty kierować pod adres nadawcy: ${destination}.`.replace(/\s+/g," ").trim().slice(0,100):"";
+}
+function inpostServiceUwagiZeZwrotem(value,sender,technicalSenderRequired=false){
+  const entered=String(value||"").replace(/\s+/g," ").trim();
+  if(!technicalSenderRequired)return entered.slice(0,100);
+  const note=inpostServiceAdresZwrotuNotatka(sender),custom=entered.replace(/(?:^|\s)Zwroty\s+kierować(?:\s+pod|\s+na)?\s+adres(?:\s+nadawcy)?\s*:?.*$/iu,"").trim();
+  if(!custom)return note;
+  const prefix=custom.slice(0,Math.max(0,100-note.length-1)).replace(/[\s,;:-]+$/u,"");
+  return [prefix,note].filter(Boolean).join(" ").slice(0,100);
+}
+function inpostServiceAktualizujAdresZwrotu(form){
+  const target=form?.querySelector?.("[data-inpost-return-address]");if(!target)return;
+  const required=form?.elements?.technicalSenderRequired?.checked===true;
+  target.textContent=required?(inpostServiceAdresZwrotuNotatka(inpostServiceStronaOsoby(form,"sender"))||"Uzupełnij dane klienta, które mają trafić do uwag."):"Domyślnie nic nie dopisujemy do uwag.";
+}
+function inpostServiceUzupelnijKontaktTechniczny(form){
+  const technical=inpostServiceNadawca(),fallback=inpostServiceAdresFirmy(),email=technical.email||fallback.email||"",phone=technical.phone||fallback.phone||"";
+  ["sender","receiver"].forEach(prefix=>{
+    const emailInput=form?.elements?.[`${prefix}Email`],phoneInput=form?.elements?.[`${prefix}Phone`];
+    if(emailInput&&!String(emailInput.value||"").trim()&&email){emailInput.value=email;emailInput.dataset.inpostTechnicalContact="true";}
+    if(phoneInput&&!String(phoneInput.value||"").trim()&&phone){phoneInput.value=phone;phoneInput.dataset.inpostTechnicalContact="true";}
+  });
 }
 function inpostServicePayload(form){
-  inpostServiceReferencja(form);
+  inpostServiceNormalizujNadawceKlienta(form);
+  inpostServiceUzupelnijKontaktTechniczny(form);
   const data=new FormData(form),additionalServices=[...form.querySelectorAll('[name="additionalServices"]:checked')].map(input=>input.value);
   const codAmount=Math.max(0,Number(String(data.get("codAmount")||"0").replace(",","."))||0),insuranceAmount=Math.max(0,Number(String(data.get("insuranceAmount")||"0").replace(",","."))||0),sendingMethod=String(data.get("sendingMethod")||"");
-  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:String(data.get("comments")||"").trim(),customer:inpostServiceStronaOsoby(form,"sender"),receiver:inpostServiceStronaOsoby(form,"receiver"),saveCustomer:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod,targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:codAmount>0||data.get("codEnabled")==="on",amount:codAmount},insurance:{enabled:insuranceAmount>0||data.get("insuranceEnabled")==="on",amount:insuranceAmount},weekend:["on","true","1"].includes(String(data.get("weekend")||"")),additionalServices,pickupRequested:data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
+  const sender=inpostServiceStronaOsoby(form,"sender");
+  const technicalSenderRequired=data.get("technicalSenderRequired")==="on";
+  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:inpostServiceUwagiZeZwrotem(data.get("comments"),sender,technicalSenderRequired),returnAddress:sender.address,principal:sender,sender,technicalSenderRequired,receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod,targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:codAmount>0||data.get("codEnabled")==="on",amount:codAmount},insurance:{enabled:insuranceAmount>0||data.get("insuranceEnabled")==="on",amount:insuranceAmount},weekend:["on","true","1"].includes(String(data.get("weekend")||"")),additionalServices,pickupRequested:sendingMethod==="dispatch_order"||data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
 }
 function inpostServiceSzczegolyBledu(fields,prefix=""){
   const out=[];
@@ -671,15 +713,23 @@ function inpostServiceSzczegolyBledu(fields,prefix=""){
   visit(fields,prefix);return out;
 }
 function inpostServiceNazwaPola(path=""){
-  const map={"customer.firstName":"senderFirstName","customer.email":"senderEmail","customer.phone":"senderPhone","customer.address.street":"senderStreet","customer.address.buildingNumber":"senderBuilding","customer.address.postCode":"senderPostCode","customer.address.city":"senderCity","sender.firstName":"senderFirstName","sender.email":"senderEmail","sender.phone":"senderPhone","sender.address.street":"senderStreet","sender.address.buildingNumber":"senderBuilding","sender.address.postCode":"senderPostCode","sender.address.city":"senderCity","receiver.firstName":"receiverFirstName","receiver.email":"receiverEmail","receiver.phone":"receiverPhone","receiver.address.street":"receiverStreet","receiver.address.buildingNumber":"receiverBuilding","receiver.address.postCode":"receiverPostCode","receiver.address.city":"receiverCity","targetPoint":"targetPoint","dropoffPoint":"dropoffPoint","custom_attributes.target_point":"targetPoint","custom_attributes.dropoff_point":"dropoffPoint","custom_attributes.sending_method":"sendingMethod","cod.amount":"codAmount","insurance.amount":"insuranceAmount","parcel.weight":"weight","commissionGross":"commissionGross"};
+  const map={"sender.firstName":"senderFirstName","sender.email":"senderEmail","sender.phone":"senderPhone","sender.address.street":"senderStreet","sender.address.buildingNumber":"senderBuilding","sender.address.postCode":"senderPostCode","sender.address.city":"senderCity","receiver.firstName":"receiverFirstName","receiver.email":"receiverEmail","receiver.phone":"receiverPhone","receiver.address.street":"receiverStreet","receiver.address.buildingNumber":"receiverBuilding","receiver.address.postCode":"receiverPostCode","receiver.address.city":"receiverCity","targetPoint":"targetPoint","dropoffPoint":"dropoffPoint","sending_method":"sendingMethod","custom_attributes.target_point":"targetPoint","custom_attributes.dropoff_point":"dropoffPoint","custom_attributes.sending_method":"sendingMethod","cod.amount":"codAmount","insurance.amount":"insuranceAmount","parcel.weight":"weight","commissionGross":"commissionGross","technicalSenderRequired":"technicalSenderRequired"};
   return map[path]||path.split(".").at(-1)||"";
+}
+function inpostServicePrzyjaznyBlad(detail={},form=null){
+  const field=String(detail.field||""),message=String(detail.message||"").trim(),type=String(form?.elements?.deliveryType?.value||"");
+  if(/sending_method/.test(field)||/sending[_ ]method/i.test(message))return type==="courier"?"Dla przesyłki kurierskiej wybierz nadanie w PaczkoPunkcie albo odbiór przez kuriera.":"Wybierz sposób nadania zgodny z wybraną usługą InPost.";
+  if(/dropoff_point/.test(field))return "Wybierz punkt nadania dla wskazanego sposobu przekazania paczki.";
+  if(/target_point/.test(field))return "Wybierz Paczkomat lub PaczkoPunkt odbiorcy.";
+  if(/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(message)||/custom_attributes|uuid|request[_ ]?id/i.test(message))return "InPost odrzucił jedną z opcji. Sprawdź sposób nadania i dane przesyłki.";
+  return message||"Sprawdź wskazane pole.";
 }
 function inpostServiceWyczyscBledyFormularza(form){
   form?.querySelectorAll(".inpost-field-error").forEach(element=>element.classList.remove("inpost-field-error"));
   const box=form?.querySelector("[data-inpost-form-errors]");if(box){box.hidden=true;box.innerHTML="";}
 }
 function inpostServiceBladPol(fields=[],form=document.getElementById("inpostServiceForm"),notify=true){
-  const details=inpostServiceSzczegolyBledu(fields);
+  const details=inpostServiceSzczegolyBledu(fields).map(detail=>({...detail,message:inpostServicePrzyjaznyBlad(detail,form)}));
   inpostServiceWyczyscBledyFormularza(form);
   details.forEach(detail=>{const input=form?.elements?.[inpostServiceNazwaPola(detail.field)];input?.classList?.add("inpost-field-error");});
   const messages=[...new Set(details.map(item=>item.message).filter(Boolean))],box=form?.querySelector("[data-inpost-form-errors]");
@@ -690,18 +740,22 @@ function inpostServiceBladPol(fields=[],form=document.getElementById("inpostServ
 }
 async function inpostServiceUtworz(event){
   event.preventDefault();if(inpostServiceStan.saving)return;
-  const form=event.currentTarget;if(!confirm("To utworzy prawdziwą przesyłkę w InPost. Jeśli chcesz tylko sprawdzić dane, użyj przycisku „Test bez tworzenia”. Utworzyć przesyłkę?"))return;
-  const payload=inpostServicePayload(form),button=form.querySelector('[type="submit"]');
+  const form=event.currentTarget,payload=inpostServicePayload(form),button=form.querySelector('[type="submit"]');
   inpostServiceWyczyscBledyFormularza(form);
+  if(!payload.sender.companyName&&!payload.sender.firstName){
+    inpostServiceBladPol([{field:"sender.firstName",message:"Wybierz z książki albo wpisz rzeczywistego nadawcę przesyłki. Dane Artway-TM są wyłącznie kontaktem technicznym."}],form);
+    return;
+  }
   inpostServiceStan={...inpostServiceStan,saving:true};if(button){button.disabled=true;button.textContent="⏳ Tworzę przesyłkę…";}
   try{
     const d=await chmura("inpost-service-create",{method:"POST",body:payload,timeout:90000});
     if(d.item)inpostServiceStan.items=[d.item,...inpostServiceStan.items.filter(item=>item.id!==d.item.id)];
     inpostServiceNowyRequestId();await inpostServiceLaduj(true,true);
+    if(d.item){inpostServiceSzukaj=String(d.item.trackingNumber||d.item.reference||d.item.id||"");inpostServiceFiltr="wszystkie";inpostServiceBillingFiltr="wszystkie";}
     toast(d.invoice?.error?`Przesyłka utworzona ✅ Faktura wymaga uwagi: ${d.invoice.error}`:`Przesyłka InPost utworzona ✅ ${d.item?.trackingNumber||"oczekuje na numer"}`);
     renderuj();
-  }catch(e){if(e.code==="previous_attempt_failed"){inpostServiceNowyRequestId();if(form.elements.requestId)form.elements.requestId.value=inpostServiceStan.requestId;}inpostServiceBladPol(e.details,form,false);toast("Nie utworzono przesyłki: "+(e.message||e));}
-  finally{inpostServiceStan={...inpostServiceStan,saving:false};if(button){button.disabled=false;button.textContent="🔴 Utwórz prawdziwą przesyłkę";}}
+  }catch(e){if(e.code==="previous_attempt_failed"){inpostServiceNowyRequestId();if(form.elements.requestId)form.elements.requestId.value=inpostServiceStan.requestId;}const details=inpostServiceBladPol(e.details,form,false),message=details[0]?.message||"Nie udało się utworzyć przesyłki. Sprawdź dane i spróbuj ponownie.";toast("Nie utworzono przesyłki: "+message);}
+  finally{inpostServiceStan={...inpostServiceStan,saving:false};if(button){button.disabled=false;button.textContent="🟡 Utwórz przesyłkę InPost";}}
 }
 async function inpostServiceZapiszUstawienia(event){
   event.preventDefault();const form=event.currentTarget,body={commissionGross:form.commissionGross.value,sender:inpostServiceStronaOsoby(form,"sender")};
@@ -718,7 +772,7 @@ async function inpostServiceStatus(id){
   try{await inpostServicePobierzStatus(id);toast("Status i historia InPost odświeżone ✅");renderuj();}catch(e){toast("Status InPost: "+(e.message||e));}
 }
 function inpostServiceStatusNazwa(status){
-  const labels={created:"Przesyłka utworzona",confirmed:"Przesyłka potwierdzona",dispatched_by_sender:"Przekazana przez nadawcę",collected_from_sender:"Odebrana od nadawcy",taken_by_courier:"Odebrana przez kuriera",adopted_at_source_branch:"Przyjęta w oddziale nadawczym",sent_from_source_branch:"Wysłana z oddziału nadawczego",adopted_at_sorting_center:"Przyjęta w sortowni",sent_from_sorting_center:"Wysłana z sortowni",adopted_at_target_branch:"Przyjęta w oddziale docelowym",out_for_delivery:"Wydana do doręczenia",ready_to_pickup:"Gotowa do odbioru",pickup_reminder_sent:"Wysłano przypomnienie o odbiorze",delivered:"Doręczona",avizo:"Nieudana próba doręczenia",undelivered:"Nie doręczono",missing:"Przesyłka poszukiwana",returned_to_sender:"Zwrócona do nadawcy",cancelled:"Przesyłka anulowana"};
+  const labels={created:"Przesyłka utworzona",confirmed:"Etykieta utworzona — paczka czeka na nadanie",dispatched_by_sender:"Przekazana przez nadawcę",collected_from_sender:"Odebrana od nadawcy",taken_by_courier:"Odebrana przez kuriera",adopted_at_source_branch:"Przyjęta w oddziale nadawczym",sent_from_source_branch:"Wysłana z oddziału nadawczego",adopted_at_sorting_center:"Przyjęta w sortowni",sent_from_sorting_center:"Wysłana z sortowni",adopted_at_target_branch:"Przyjęta w oddziale docelowym",out_for_delivery:"Wydana do doręczenia",ready_to_pickup:"Gotowa do odbioru",pickup_reminder_sent:"Wysłano przypomnienie o odbiorze",delivered:"Doręczona",avizo:"Nieudana próba doręczenia",undelivered:"Nie doręczono",missing:"Przesyłka poszukiwana",returned_to_sender:"Zwrócona do nadawcy",cancelled:"Przesyłka anulowana"};
   const key=String(status||"").trim().toLowerCase();return labels[key]||key.replaceAll("_"," ")||"Oczekuje na pierwszy status";
 }
 function inpostServiceDataPotwierdzenia(value){
@@ -729,83 +783,95 @@ function inpostServiceAdresPotwierdzenia(person={}){
   const street=[a.street,[a.buildingNumber||a.building_number,a.flatNumber||a.flat_number].filter(Boolean).join("/")].filter(Boolean).join(" ");
   return `<b>${esc(name)}</b>${street?`<span>${esc(street)}</span>`:""}<span>${esc([a.postCode||a.post_code,a.city].filter(Boolean).join(" "))}</span>${person.email?`<span>${esc(person.email)}</span>`:""}${person.phone?`<span>${esc(person.phone)}</span>`:""}`;
 }
-function inpostServiceMaDaneOsoby(person={}){
-  const a=person.address||{};return !!(person.companyName||person.firstName||person.lastName||person.email||person.phone||person.taxCode||a.street||a.city||a.postCode||a.post_code);
+function inpostServiceZleceniodawca(item={}){return item.principal||item.requester||item.customer||item.sender||{};}
+function inpostServiceKluczZleceniodawcy(item={}){
+  const person=inpostServiceZleceniodawca(item),a=person.address||{};
+  return [person.taxCode,person.email,person.companyName,person.firstName,person.lastName,a.street,a.buildingNumber||a.building_number,a.postCode||a.post_code,a.city].map(value=>normalizujSzukanyTekst(String(value||""))).join("|");
 }
+function inpostServiceCenaKoncowa(item={}){
+  const stored=item.pricing?.customerTotalGross;
+  if(stored!==null&&stored!==undefined&&String(stored).trim()!==""&&Number.isFinite(Number(stored)))return Number(stored);
+  const carrier=item.pricing?.totalGross,commission=item.billing?.commissionGross??item.pricing?.commissionGross;
+  return carrier!==null&&carrier!==undefined&&String(carrier).trim()!==""&&Number.isFinite(Number(carrier))?Number(carrier)+(Number.isFinite(Number(commission))?Number(commission):0):NaN;
+}
+function inpostServiceNazwaPotwierdzenia(person={}){return person.companyName||`${person.firstName||""} ${person.lastName||""}`.trim()||"—";}
 function inpostServiceAdresTekstPotwierdzenia(person={}){
-  const a=person.address||{},number=[a.buildingNumber||a.building_number,a.flatNumber||a.flat_number].filter(Boolean).join("/"),street=[a.street,number].filter(Boolean).join(" ");
-  return [street,a.postCode||a.post_code,a.city].filter(Boolean).join(", ");
+  const a=person.address||{},street=[a.street,[a.buildingNumber||a.building_number,a.flatNumber||a.flat_number].filter(Boolean).join("/")].filter(Boolean).join(" ");
+  return [street,[a.postCode||a.post_code,a.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")||"—";
 }
-function inpostServicePotwierdzenieHTMLLegacy(item={},warning=""){
-  const company=typeof daneFirmy==="function"?daneFirmy():{},config=typeof KONFIG!=="undefined"?KONFIG:{},sender=item.sender||inpostServiceNadawca(),events=Array.isArray(item.trackingHistory)?item.trackingHistory:[],currentStatus=item.inpostStatus||item.status;
-  const currentEvent=events[0],updated=item.trackingUpdatedAt||currentEvent?.occurredAt||item.updatedAt||item.createdAt;
-  const trackingUrl=item.trackingNumber?`https://inpost.pl/sledzenie-przesylek?number=${encodeURIComponent(item.trackingNumber)}`:"";
-  const service=item.deliveryType==="locker"?"InPost Paczkomat® / PaczkoPunkt":"InPost Kurier";
-  const methodLabels={parcel_locker:"Nadanie w automacie Paczkomat®",dispatch_order:"Odbiór przez kuriera InPost",pop:"Nadanie w PaczkoPunkcie",any_point:"Nadanie w dowolnym punkcie InPost",pok:"Punkt Obsługi Klienta InPost",courier_pok:"Punkt Obsługi Klienta InPost",branch:"Oddział InPost"},sendingMethod=methodLabels[item.sendingMethod]||"Nadanie w sieci InPost";
-  const senderAddress=inpostServiceAdresTekstPotwierdzenia(sender);
-  const origin=item.sendingMethod==="dispatch_order"?(senderAddress||"Adres Artway‑TM"):item.dropoffPoint||"Punkt InPost wybrany przy nadaniu";
-  const destination=item.deliveryType==="locker"?(item.targetPoint||"Punkt odbioru InPost"):(inpostServiceAdresTekstPotwierdzenia(item.receiver)||"Adres odbiorcy");
-  const parcel=item.parcel||{},size=parcel.template?String(parcel.template).toUpperCase():[parcel.length,parcel.width,parcel.height].filter(Boolean).join(" × ");
-  const billing={none:"Bez faktury",single:"Faktura wystawiana od razu",monthly:"Rozliczenie na fakturze miesięcznej"}[item.billing?.mode]||"—";
-  const timeline=events.length?events:(currentStatus||item.createdAt?[{status:currentStatus||"created",label:inpostServiceStatusNazwa(currentStatus||"created"),occurredAt:updated}]:[]);
-  return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Potwierdzenie ${esc(item.reference||item.id||"nadania")}</title><style>
-  :root{font-family:Inter,Arial,sans-serif;color:#172033;background:#edf2f7}*{box-sizing:border-box}body{margin:0;padding:26px}.sheet{max-width:900px;margin:auto;background:#fff;border:1px solid #d9e2ec;border-radius:20px;box-shadow:0 18px 55px #17203318;overflow:hidden}.head{display:grid;grid-template-columns:1fr 1.2fr;gap:30px;padding:30px 34px;background:linear-gradient(135deg,#172554,#1d4ed8);color:#fff}.brand{font-size:22px;font-weight:900}.head h1{margin:7px 0;font-size:25px}.head small,.company-data span{display:block;color:#dbeafe}.company-data{border-left:1px solid #ffffff55;padding-left:24px;font-size:12px;line-height:1.55}.company-data b{display:block;margin-bottom:3px;font-size:13px}.tracking{padding:24px 34px;background:#eff6ff;border-bottom:1px solid #bfdbfe}.tracking-grid{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:16px}.tracking small,.meta small,.party small,.parcel small,.route small{display:block;margin-bottom:6px;color:#64748b;font-weight:800;text-transform:uppercase;letter-spacing:.04em}.tracking strong{display:block;color:#1e3a8a;font-size:20px;white-space:nowrap}.tracking b{font-size:14px}.status-line{display:flex;align-items:center;gap:9px;margin-top:14px;color:#166534;font-weight:800}.status-dot{width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 4px #dcfce7}.content{padding:26px 34px}.route-grid{display:grid;grid-template-columns:1fr 54px 1fr;align-items:stretch;margin-bottom:18px}.route{padding:17px;border:1px solid #cbd5e1;border-radius:14px;background:#f8fafc}.route b,.route span{display:block}.route b{font-size:16px}.route span{margin-top:5px;color:#475569;font-size:13px}.route-arrow{display:grid;place-items:center;color:#2563eb;font-size:27px;font-weight:900}.meta{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}.meta div,.party,.parcel{padding:14px;border:1px solid #e2e8f0;border-radius:13px}.parties{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.party{display:grid;gap:3px}.party span{font-size:13px;color:#475569}.parcel{margin-top:12px}.parcel span{display:inline-block;margin:7px 12px 0 0;color:#475569;font-size:13px}.timeline{margin:18px 0 0;padding:0;list-style:none}.timeline li{position:relative;margin-left:12px;padding:0 0 18px 27px;border-left:2px solid #cbd5e1}.timeline li:last-child{padding-bottom:0}.timeline li:before{content:"";position:absolute;left:-7px;top:2px;width:12px;height:12px;border-radius:50%;background:#2563eb;box-shadow:0 0 0 4px #dbeafe}.timeline li:first-child:before{background:#16a34a;box-shadow:0 0 0 4px #dcfce7}.timeline b{display:block}.timeline span,.timeline small{display:block;margin-top:3px;color:#64748b}.track-link{display:inline-block;margin:16px 0 4px;color:#1d4ed8;font-weight:800}.warning{margin:0 34px 20px;padding:12px 14px;border:1px solid #f59e0b;border-radius:12px;background:#fffbeb;color:#92400e}.foot{display:grid;grid-template-columns:1fr auto;gap:20px;padding:20px 34px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px}.foot b,.foot span{display:block}.foot b{color:#334155;margin-bottom:3px}.actions{display:flex;justify-content:center;gap:10px;padding:20px}.actions button{padding:11px 18px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:800;cursor:pointer}.actions button:last-child{background:#e2e8f0;color:#172033}@media(max-width:650px){body{padding:0}.sheet{border:0;border-radius:0}.head,.tracking,.content,.foot{padding-left:18px;padding-right:18px}.head,.tracking-grid,.meta,.parties,.foot{grid-template-columns:1fr}.company-data{border:0;border-top:1px solid #ffffff55;padding:14px 0 0}.tracking strong{white-space:normal;overflow-wrap:anywhere}.route-grid{grid-template-columns:1fr}.route-arrow{transform:rotate(90deg);height:40px}}@page{size:A4;margin:12mm}@media print{body{padding:0;background:#fff}.sheet{max-width:none;border:0;border-radius:0;box-shadow:none}.actions{display:none}.head,.tracking{-webkit-print-color-adjust:exact;print-color-adjust:exact}.timeline li,.route,.party{break-inside:avoid}.warning{margin-left:34px;margin-right:34px}}</style></head><body><main class="sheet">
-    <header class="head"><div><div class="brand">ARTWAY‑TM</div><h1>Potwierdzenie przesyłki InPost</h1><small>Profesjonalne potwierdzenie dla klienta</small></div><div class="company-data"><b>Dane Artway‑TM</b><span>${esc(company.nazwa||sender.companyName||"Artway‑TM")}</span><span>${esc([company.adres,company.kodPocztowy,company.miasto].filter(Boolean).join(", ")||senderAddress)}</span>${company.nip||sender.taxCode?`<span>NIP: ${esc(company.nip||sender.taxCode)}</span>`:""}${config.emailSklepu||sender.email?`<span>${esc(config.emailSklepu||sender.email)}</span>`:""}${config.telefon||sender.phone?`<span>tel. ${esc(config.telefon||sender.phone)}</span>`:""}</div></header>
-    <section class="tracking"><div class="tracking-grid"><div><small>Numer przesyłki</small><strong>${esc(item.trackingNumber||"Numer oczekuje na przydzielenie")}</strong></div><div><small>Numer referencyjny</small><b>${esc(item.reference||item.id||"—")}</b></div><div><small>Data nadania</small><b>${esc(inpostServiceDataPotwierdzenia(item.createdAt))}</b></div></div><div class="status-line"><span class="status-dot"></span>${esc(currentEvent?.label||inpostServiceStatusNazwa(currentStatus))} • ${esc(inpostServiceDataPotwierdzenia(updated))}</div></section>
-    ${warning?`<div class="warning"><b>Nie udało się pobrać świeżego statusu.</b> Wydruk pokazuje ostatnie dane zapisane w systemie: ${esc(warning)}</div>`:""}
-    <div class="content"><div class="route-grid"><section class="route"><small>Nadanie</small><b>${esc(sendingMethod)}</b><span>${esc(origin)}</span></section><div class="route-arrow">→</div><section class="route"><small>Doręczenie</small><b>${esc(item.deliveryType==="locker"?"Punkt odbioru InPost":"Adres odbiorcy")}</b><span>${esc(destination)}</span></section></div>
-      <div class="meta"><div><small>Sposób nadania</small><b>${esc(sendingMethod)}</b></div><div><small>Usługa</small><b>${esc(service)}</b></div><div><small>Rozliczenie</small><b>${esc(billing)}</b></div></div>
-      <div class="parties"><section class="party"><small>Odbiorca</small>${inpostServiceAdresPotwierdzenia(item.receiver)}</section>${inpostServiceMaDaneOsoby(item.customer)?`<section class="party"><small>Klient zlecający</small>${inpostServiceAdresPotwierdzenia(item.customer)}</section>`:""}</div>
-      <section class="parcel"><small>Dane przesyłki</small><b>${esc(size?`Gabaryt / wymiary: ${size}`:"Przesyłka InPost")}${parcel.weight?` • ${esc(parcel.weight)} kg`:""}</b>${item.cod?.enabled?`<span>Pobranie: ${esc(zl(item.cod.amount))}</span>`:""}${item.weekend?'<span>Paczka w Weekend</span>':""}</section>
-      ${trackingUrl?`<a class="track-link" href="${trackingUrl}" target="_blank" rel="noopener">Sprawdź przesyłkę online w InPost →</a>`:""}
-      <h2>Historia przesyłki</h2><ol class="timeline">${timeline.map(event=>`<li><b>${esc(event.label||inpostServiceStatusNazwa(event.status))}</b><span>${esc(inpostServiceDataPotwierdzenia(event.occurredAt))}${event.location?` • ${esc(event.location)}`:""}</span>${event.description?`<small>${esc(event.description)}</small>`:""}</li>`).join("")||"<li><b>Oczekuje na pierwsze zdarzenie przewoźnika</b></li>"}</ol>
-    </div><footer class="foot"><div><b>${esc(company.nazwa||sender.companyName||"Artway‑TM")}</b><span>${esc([config.emailSklepu||sender.email,config.telefon||sender.phone].filter(Boolean).join(" • "))}</span></div><span>Potwierdzenie informacyjne • dokument nie jest fakturą ani paragonem</span></footer>
-  </main><div class="actions"><button onclick="window.print()">Drukuj / zapisz PDF</button><button onclick="window.close()">Zamknij</button></div></body></html>`;
+function inpostServicePotwierdzenieHTML(input={},warning=""){
+  const items=(Array.isArray(input)?input:[input]).filter(Boolean),first=items[0]||{},company=typeof daneFirmy==="function"?daneFirmy():{},multi=items.length>1;
+  const principal=inpostServiceZleceniodawca(first),keys=new Set(items.map(inpostServiceKluczZleceniodawcy)),samePrincipal=keys.size<=1;
+  if(!samePrincipal)throw new Error("Jedno potwierdzenie może obejmować tylko przesyłki tego samego zleceniodawcy.");
+  const eventLabel=event=>String(event?.status||"").toLowerCase()==="confirmed"?inpostServiceStatusNazwa("confirmed"):(event?.label||inpostServiceStatusNazwa(event?.status));
+  const latestAt=items.map(item=>item.trackingUpdatedAt||item.updatedAt||item.createdAt).filter(Boolean).sort().at(-1)||"";
+  const prices=items.map(inpostServiceCenaKoncowa),finalTotal=prices.every(Number.isFinite)?prices.reduce((sum,value)=>sum+value,0):NaN;
+  const billingLabels=[...new Set(items.map(item=>({none:"Bez faktury",single:"Faktura wystawiana od razu",monthly:"Rozliczenie na fakturze miesięcznej"}[item.billing?.mode]||"—")))];
+  const documentNumber=multi?`ZBIORCZE-${items.length}-${first.reference||first.id||"NADANIE"}`:(first.reference||first.id||"—");
+  const title=multi?"Potwierdzenie nadania przesyłek":"Potwierdzenie nadania przesyłki";
+  const itemRows=items.map((item,index)=>{
+    const parcel=item.parcel||{},size=parcel.template?String(parcel.template).toUpperCase():[parcel.length,parcel.width,parcel.height].filter(Boolean).join(" × "),service=item.deliveryType==="locker"?`Paczkomat / PaczkoPunkt${item.targetPoint?` • ${item.targetPoint}`:""}`:"Kurier InPost",status=eventLabel((item.trackingHistory||[])[0]||{status:item.inpostStatus||item.status});
+    return `<tr><td>${index+1}</td><td><b>${esc(item.trackingNumber||"Oczekuje na numer")}</b><small>${esc(item.reference||item.id||"")}</small></td><td><b>${esc(inpostServiceNazwaPotwierdzenia(item.receiver))}</b><small>${esc(inpostServiceAdresTekstPotwierdzenia(item.receiver))}</small></td><td><b>${esc(service)}</b><small>${esc(size?`Gabaryt / wymiary: ${size}`:"Przesyłka")}${parcel.weight?` • ${esc(parcel.weight)} kg`:""}</small></td><td><b>${esc(status)}</b><small>${esc(inpostServiceDataPotwierdzenia(item.trackingUpdatedAt||item.updatedAt||item.createdAt))}</small></td></tr>`;
+  }).join("");
+  const history=items.flatMap(item=>{
+    const events=Array.isArray(item.trackingHistory)&&item.trackingHistory.length?item.trackingHistory:[{status:item.inpostStatus||item.status||"created",occurredAt:item.trackingUpdatedAt||item.updatedAt||item.createdAt}];
+    return events.slice(0,multi?1:8).map(event=>({...event,shipment:item.trackingNumber||item.reference||item.id}));
+  });
+  return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Potwierdzenie ${esc(documentNumber)}</title></head><body><main class="sheet">
+    <header class="head"><div><div class="brand">${esc(company.nazwa||"Artway‑TM")}</div><h1>${title}</h1><small>Dokument potwierdzający przyjęcie i realizację usługi przewozu</small></div><div class="head-meta"><b>Nr dokumentu: ${esc(documentNumber)}</b><small>Data wystawienia: ${esc(inpostServiceDataPotwierdzenia(new Date().toISOString()))}</small></div></header>
+    <section class="status"><b>${multi?`${items.length} przesyłek na jednym potwierdzeniu`:esc(eventLabel((first.trackingHistory||[])[0]||{status:first.inpostStatus||first.status}))}</b><span>Stan danych na: ${esc(inpostServiceDataPotwierdzenia(latestAt))}</span></section>
+    ${warning?`<div class="warning"><b>Uwaga:</b> ${esc(warning)} Dokument pokazuje ostatnie dane zapisane w systemie.</div>`:""}
+    <div class="content"><div class="meta"><div><small>Liczba przesyłek</small><b>${items.length}</b></div><div><small>Rozliczenie</small><b>${esc(billingLabels.join(" / "))}</b></div><div><small>Format dokumentu</small><b>A4 • czarno-biały</b></div></div>
+      <div class="parties principal-only"><section class="party"><small>Zleceniodawca</small>${inpostServiceAdresPotwierdzenia(principal)}</section><section class="party issuer"><small>Wystawca dokumentu</small><b>${esc(company.nazwa||"Artway‑TM")}</b><span>${esc(pelnyAdresFirmy?.(company)||"")}</span></section></div>
+      <h2 class="section-title">Przesyłki objęte potwierdzeniem</h2><table class="shipments"><thead><tr><th>Lp.</th><th>Numer przesyłki</th><th>Odbiorca</th><th>Usługa i paczka</th><th>Status</th></tr></thead><tbody>${itemRows}</tbody></table>
+      <section class="final-price"><small>Cena końcowa usługi${multi?" — łącznie":""}</small><b>${esc(Number.isFinite(finalTotal)?zl(finalTotal):"—")}</b><span>Kwota należna od zleceniodawcy. Dokument nie ujawnia kosztów wewnętrznych ani sposobu kalkulacji ceny.</span></section>
+      <h2 class="section-title">Aktualny przebieg transportu</h2><ol class="timeline">${history.map(event=>`<li><b>${esc(eventLabel(event))}</b><span>${esc(inpostServiceDataPotwierdzenia(event.occurredAt))}${event.location?` • ${esc(event.location)}`:""}</span><small>Przesyłka: ${esc(event.shipment)}${event.description?` • ${esc(event.description)}`:""}</small></li>`).join("")||"<li><b>Oczekuje na pierwsze zdarzenie przewoźnika</b></li>"}</ol>
+      <div class="signatures"><div class="signature-box">Podpis osoby wystawiającej</div><div class="stamp-box">Pieczęć firmowa Artway-TM</div></div>
+      <p class="formal-note">Dokument potwierdza utworzenie wskazanych przesyłek i zapisanie ich danych w systemie. Status „Etykieta utworzona — paczka czeka na nadanie” nie oznacza fizycznego przekazania paczki przewoźnikowi.</p>
+    </div><footer class="foot"><span>${esc([company.nazwa,pelnyAdresFirmy?.(company)].filter(Boolean).join(" • "))}</span><span>Drukarka docelowa: Brother DCP‑T525W • A4</span><span>Dokument nie jest fakturą ani paragonem.</span></footer>
+  </main><div class="actions"><div><b>Brother DCP‑T525W</b><small>A4 • pionowo • czarno-biały</small></div><button onclick="window.print()">Drukuj na Brother A4</button><button onclick="window.close()">Zamknij</button></div></body></html>`;
 }
-async function inpostServicePotwierdzenieLegacy(id){
-  const popup=window.open("","_blank","width=980,height=900");if(!popup)return toast("Przeglądarka zablokowała okno wydruku");
-  popup.document.write('<!doctype html><html lang="pl"><meta charset="utf-8"><title>Przygotowanie potwierdzenia</title><body style="font-family:Arial;padding:40px"><h2>Odświeżam tracking InPost…</h2><p>Dokument otworzy się za chwilę.</p></body></html>');popup.document.close();
-  let item=inpostServiceStan.items.find(row=>row.id===id),warning="";
-  try{item=await inpostServicePobierzStatus(id);}catch(e){warning=e.message||String(e);}
-  if(!item){popup.close();return toast("Nie znaleziono nadania");}
-  popup.document.open();popup.document.write(inpostServicePotwierdzenieHTMLLegacy(item,warning));popup.document.close();
+function inpostServiceCzekajNaOknoPotwierdzenia(popup,timeout=7000){
+  return new Promise((resolve,reject)=>{const started=Date.now(),check=()=>{
+    if(!popup||popup.closed)return reject(new Error("Okno potwierdzenia zostało zamknięte"));
+    try{if(popup.location.pathname==="/assets/inpost-confirmation.html"&&popup.document.readyState==="complete")return resolve();}catch{}
+    if(Date.now()-started>=timeout)return reject(new Error("Nie udało się przygotować okna potwierdzenia"));
+    setTimeout(check,50);
+  };check();});
+}
+async function inpostServicePrzygotujPotwierdzenie(ids=[]){
+  const unique=[...new Set((Array.isArray(ids)?ids:[ids]).filter(Boolean))],popup=window.open("/assets/inpost-confirmation.html","_blank","width=1100,height=920");if(!popup)return toast("Przeglądarka zablokowała okno wydruku");
+  let items=[],failures=0;
+  for(const id of unique){const current=inpostServiceStan.items.find(row=>row.id===id);if(!current)continue;try{items.push(await inpostServicePobierzStatus(id));}catch{items.push(current);failures+=1;}}
+  if(!items.length){popup.close();return toast("Nie znaleziono nadań do potwierdzenia");}
+  const keys=new Set(items.map(inpostServiceKluczZleceniodawcy));if(keys.size>1){popup.close();return toast("Wybierz przesyłki tylko jednego zleceniodawcy");}
+  try{
+    await inpostServiceCzekajNaOknoPotwierdzenia(popup);
+    const warning=failures?`Nie udało się odświeżyć statusu ${failures} ${failures===1?"przesyłki":"przesyłek"}.`:"",documentHtml=new DOMParser().parseFromString(inpostServicePotwierdzenieHTML(items,warning),"text/html");
+    popup.document.title=documentHtml.title;popup.document.body.innerHTML=documentHtml.body.innerHTML;
+  }catch(e){popup.close();return toast(e.message||String(e));}
   renderuj();
 }
-function inpostServicePotwierdzenieHTML(item={}){
-  const sender=item.sender||inpostServiceNadawca(),trackingUrl=item.trackingNumber?`https://inpost.pl/sledzenie-przesylek?number=${encodeURIComponent(item.trackingNumber)}`:"";
-  const methodLabels={parcel_locker:"Nadanie w automacie Paczkomat®",dispatch_order:"Odbiór przez kuriera InPost",pop:"Nadanie w PaczkoPunkcie"},sendingMethod=methodLabels[item.sendingMethod]||"Nadanie w sieci InPost";
-  const origin=item.sendingMethod==="dispatch_order"?(inpostServiceAdresTekstPotwierdzenia(sender)||"Stały adres nadania"):item.dropoffPoint||"Punkt nadania InPost";
-  const destination=item.deliveryType==="locker"?(item.targetPoint||"Punkt odbioru InPost"):(inpostServiceAdresTekstPotwierdzenia(item.receiver)||"Adres odbiorcy"),parcel=item.parcel||{},size=parcel.template?String(parcel.template).toUpperCase():[parcel.length,parcel.width,parcel.height].filter(Boolean).join(" × ");
-  const rawCost=item.pricing?.customerTotalGross??(Number(item.pricing?.totalGross||0)+Number(item.billing?.commissionGross||0)),cost=Number(rawCost)>0?zl(rawCost):"Do ustalenia";
-  return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Potwierdzenie nadania ${esc(item.reference||item.id||"")}</title><style>
-  :root{font-family:Inter,Arial,sans-serif;color:#172033;background:#eef2f7}*{box-sizing:border-box}body{margin:0;padding:26px}.sheet{max-width:820px;margin:auto;background:#fff;border:1px solid #dbe3ed;border-radius:18px;box-shadow:0 16px 45px #17203318;overflow:hidden}.head{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:26px 32px;background:linear-gradient(135deg,#172554,#1d4ed8);color:#fff}.brand{font-size:20px;font-weight:900;letter-spacing:.04em}.head h1{margin:4px 0 0;font-size:26px}.head span{font-size:13px;color:#dbeafe}.facts{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:12px;padding:22px 32px;background:#eff6ff;border-bottom:1px solid #bfdbfe}.facts div,.card{padding:14px;border:1px solid #dbe3ed;border-radius:12px;background:#fff}.facts small,.card small{display:block;margin-bottom:6px;color:#64748b;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}.facts strong{display:block;color:#1e3a8a;font-size:18px;overflow-wrap:anywhere}.facts .cost strong{color:#166534;font-size:22px}.content{padding:24px 32px}.route{display:grid;grid-template-columns:1fr 42px 1fr;align-items:center}.arrow{text-align:center;color:#2563eb;font-size:24px;font-weight:900}.card b,.card span{display:block}.card span{margin-top:5px;color:#475569;font-size:13px}.details{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}.receiver{display:grid;gap:3px}.receiver span{font-size:13px;color:#475569}.track-link{display:inline-block;margin-top:18px;color:#1d4ed8;font-weight:800}.foot{padding:16px 32px;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px}.actions{display:flex;justify-content:center;gap:10px;padding:18px}.actions button{padding:11px 18px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:800;cursor:pointer}.actions button:last-child{background:#e2e8f0;color:#172033}@media(max-width:650px){body{padding:0}.sheet{border:0;border-radius:0}.head{align-items:flex-start;flex-direction:column}.facts,.details,.route{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.head,.facts,.content,.foot{padding-left:18px;padding-right:18px}}@page{size:A4;margin:12mm}@media print{body{padding:0;background:#fff}.sheet{max-width:none;border:0;border-radius:0;box-shadow:none}.actions{display:none}.head,.facts{-webkit-print-color-adjust:exact;print-color-adjust:exact}.card{break-inside:avoid}}</style></head><body><main class="sheet"><header class="head"><div><div class="brand">ARTWAY‑TM</div><h1>Potwierdzenie nadania</h1></div><span>InPost</span></header><section class="facts"><div><small>Numer przesyłki</small><strong>${esc(item.trackingNumber||"Numer oczekuje")}</strong></div><div><small>Data nadania</small><b>${esc(inpostServiceDataPotwierdzenia(item.createdAt))}</b><br><small style="margin-top:8px">Referencja</small><b>${esc(item.reference||item.id||"—")}</b></div><div class="cost"><small>Koszt nadania</small><strong>${esc(cost)}</strong></div></section><div class="content"><div class="route"><section class="card"><small>Nadanie</small><b>${esc(sendingMethod)}</b><span>${esc(origin)}</span></section><div class="arrow">→</div><section class="card"><small>Doręczenie</small><b>${esc(item.deliveryType==="locker"?"Punkt odbioru InPost":"Adres odbiorcy")}</b><span>${esc(destination)}</span></section></div><div class="details"><section class="card receiver"><small>Odbiorca</small>${inpostServiceAdresPotwierdzenia(item.receiver)}</section><section class="card"><small>Przesyłka</small><b>${esc(size?`Gabaryt / wymiary: ${size}`:"Przesyłka InPost")}${parcel.weight?` • ${esc(parcel.weight)} kg`:""}</b>${item.cod?.enabled?`<span>Pobranie: ${esc(zl(item.cod.amount))}</span>`:""}${item.weekend?'<span>Paczka w Weekend</span>':""}</section></div>${trackingUrl?`<a class="track-link" href="${trackingUrl}" target="_blank" rel="noopener">Sprawdź historię przesyłki w InPost →</a>`:""}</div><footer class="foot">Artway‑TM</footer></main><div class="actions"><button onclick="window.print()">Drukuj / zapisz PDF</button><button onclick="window.close()">Zamknij</button></div></body></html>`;
+async function inpostServicePotwierdzenie(id){return inpostServicePrzygotujPotwierdzenie([id]);}
+async function inpostServicePotwierdzenieZbiorcze(){
+  const ids=[...inpostServicePotwierdzenieWybrane];if(!ids.length)return toast("Zaznacz co najmniej jedną przesyłkę");return inpostServicePrzygotujPotwierdzenie(ids);
 }
-function inpostServiceDodajStyleWydruku(popup){
-  const link=popup?.document?.createElement?.("link");if(!link)return;
-  link.rel="stylesheet";link.href="/assets/inpost-print.css";popup.document.head?.appendChild(link);
+function inpostServiceOdswiezWyborPotwierdzenia(){
+  const count=inpostServicePotwierdzenieWybrane.size;document.querySelectorAll("[data-inpost-confirm-count]").forEach(el=>el.textContent=String(count));document.querySelectorAll("[data-inpost-confirm-selected]").forEach(el=>{el.disabled=count===0;});document.querySelectorAll("[data-inpost-confirm-clear]").forEach(el=>{el.disabled=count===0;});
 }
-function inpostServicePotwierdzenie(id){
-  const item=inpostServiceStan.items.find(row=>row.id===id);if(!item)return toast("Nie znaleziono nadania");
-  const popup=window.open("","_blank","width=920,height=900");if(!popup)return toast("Przeglądarka zablokowała okno wydruku");
-  popup.document.open();popup.document.write(inpostServicePotwierdzenieHTML(item));popup.document.close();inpostServiceDodajStyleWydruku(popup);
+function inpostServiceZaznaczPotwierdzenie(id,checked,input=null){
+  const item=inpostServiceStan.items.find(row=>row.id===id);if(!item)return;
+  if(checked&&inpostServicePotwierdzenieWybrane.size){const firstId=[...inpostServicePotwierdzenieWybrane][0],first=inpostServiceStan.items.find(row=>row.id===firstId);if(first&&inpostServiceKluczZleceniodawcy(first)!==inpostServiceKluczZleceniodawcy(item)){if(input)input.checked=false;return toast("Do jednego potwierdzenia wybierz paczki tego samego zleceniodawcy");}}
+  if(checked)inpostServicePotwierdzenieWybrane.add(id);else inpostServicePotwierdzenieWybrane.delete(id);inpostServiceOdswiezWyborPotwierdzenia();
 }
-function inpostServiceHistoriaPrzesylkiHTML(item={},warning=""){
-  const events=Array.isArray(item.trackingHistory)?item.trackingHistory:[],status=item.inpostStatus||item.status,updated=item.trackingUpdatedAt||item.updatedAt||item.createdAt;
-  const timeline=events.length?events:[{status:status||"created",label:inpostServiceStatusNazwa(status||"created"),occurredAt:updated}];
-  return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Historia ${esc(item.trackingNumber||item.reference||"")}</title><style>:root{font-family:Inter,Arial,sans-serif;color:#172033;background:#eef2f7}*{box-sizing:border-box}body{margin:0;padding:26px}.sheet{max-width:760px;margin:auto;background:#fff;border:1px solid #dbe3ed;border-radius:18px;box-shadow:0 16px 45px #17203318;overflow:hidden}.head{padding:26px 32px;background:linear-gradient(135deg,#172554,#1d4ed8);color:#fff}.head small{color:#dbeafe}.head h1{margin:6px 0}.content{padding:24px 32px}.status{padding:14px;border:1px solid #86efac;border-radius:12px;background:#f0fdf4;color:#166534}.timeline{margin:22px 0 0;padding:0;list-style:none}.timeline li{position:relative;margin-left:12px;padding:0 0 20px 28px;border-left:2px solid #cbd5e1}.timeline li:last-child{padding-bottom:0}.timeline li:before{content:"";position:absolute;left:-7px;top:2px;width:12px;height:12px;border-radius:50%;background:#2563eb;box-shadow:0 0 0 4px #dbeafe}.timeline b,.timeline span,.timeline small{display:block}.timeline span,.timeline small{margin-top:3px;color:#64748b}.warning{margin-bottom:14px;padding:12px;border:1px solid #f59e0b;border-radius:10px;background:#fffbeb;color:#92400e}.actions{text-align:center;padding:18px}.actions button{padding:10px 18px;border:0;border-radius:10px;background:#2563eb;color:#fff;font-weight:800}@media(max-width:650px){body{padding:0}.sheet{border:0;border-radius:0}.head,.content{padding-left:18px;padding-right:18px}}</style></head><body><main class="sheet"><header class="head"><small>ARTWAY‑TM • InPost</small><h1>Historia przesyłki</h1><b>${esc(item.trackingNumber||"Numer oczekuje")}</b></header><div class="content">${warning?`<div class="warning">Nie udało się pobrać świeżego statusu: ${esc(warning)}</div>`:""}<div class="status"><b>${esc(inpostServiceStatusNazwa(status))}</b><br><small>Aktualizacja: ${esc(inpostServiceDataPotwierdzenia(updated))}</small></div><ol class="timeline">${timeline.map(event=>`<li><b>${esc(event.label||inpostServiceStatusNazwa(event.status))}</b><span>${esc(inpostServiceDataPotwierdzenia(event.occurredAt))}${event.location?` • ${esc(event.location)}`:""}</span>${event.description?`<small>${esc(event.description)}</small>`:""}</li>`).join("")}</ol></div></main><div class="actions"><button onclick="window.close()">Zamknij</button></div></body></html>`;
-}
-async function inpostServiceHistoriaPrzesylki(id){
-  const popup=window.open("","_blank","width=850,height=900");if(!popup)return toast("Przeglądarka zablokowała okno historii");
-  popup.document.write('<!doctype html><html lang="pl"><meta charset="utf-8"><title>Historia przesyłki</title><body style="font-family:Arial;padding:40px"><h2>Pobieram aktualną historię InPost…</h2></body></html>');popup.document.close();
-  let item=inpostServiceStan.items.find(row=>row.id===id),warning="";try{item=await inpostServicePobierzStatus(id);}catch(e){warning=e.message||String(e);}
-  if(!item){popup.close();return toast("Nie znaleziono nadania");}popup.document.open();popup.document.write(inpostServiceHistoriaPrzesylkiHTML(item,warning));popup.document.close();inpostServiceDodajStyleWydruku(popup);renderuj();
-}
+function inpostServiceWyczyscWyborPotwierdzenia(){inpostServicePotwierdzenieWybrane.clear();document.querySelectorAll("[data-inpost-confirm-checkbox]").forEach(input=>{input.checked=false;});inpostServiceOdswiezWyborPotwierdzenia();}
 async function inpostServiceEtykieta(id,format="A6"){
   const item=inpostServiceStan.items.find(row=>row.id===id);if(!item?.inpostId)return toast("Przesyłka nie ma jeszcze ID InPost");
-  try{await inpostOtworzPodgladEtykiety({id:item.inpostId,format,reference:item.reference||item.trackingNumber||id});}catch(e){toast("Etykieta: "+(e.message||e));}
+  try{const d=await chmura("inpost-label",{params:{id:item.inpostId,type:format},timeout:30000}),url=URL.createObjectURL(b64toBlob(d.base64,"application/pdf"));window.open(url,"_blank","noopener");setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(e){toast("Etykieta: "+(e.message||e));}
 }
 async function inpostServiceOdbior(id){
-  if(!confirm("To zamówi prawdziwy odbiór kuriera InPost dla tej przesyłki. Kontynuować?"))return;
+  const item=inpostServiceStan.items.find(record=>record.id===id),sender=item?.sender||{},address=sender.address||{},senderName=sender.companyName||`${sender.firstName||""} ${sender.lastName||""}`.trim()||"nadawca",addressText=[address.street,[address.buildingNumber||address.building_number,address.flatNumber||address.flat_number].filter(Boolean).join("/"),address.postCode||address.post_code,address.city].filter(Boolean).join(" ");
+  if(!confirm(`Zamówić kuriera InPost po paczkę od: ${senderName}, ${addressText}? InPost może naliczyć opłatę za odbiór. Paczka i koszt pozostaną w organizacji firmowej InPost.`))return;
   try{const d=await chmura("inpost-service-pickup",{method:"POST",body:{id},timeout:45000});if(d.item)inpostServiceStan.items=inpostServiceStan.items.map(item=>item.id===id?d.item:item);toast(d.duplicatePrevented?"Odbiór kuriera jest już zlecony":"Odbiór kuriera zlecony ✅");renderuj();}catch(e){toast("Odbiór kuriera: "+(e.message||e));}
 }
 async function inpostServiceAnuluj(id){
@@ -819,7 +885,7 @@ async function inpostServiceFakturaMiesieczna(month,clientKey){
   try{const d=await chmura("inpost-service-bill",{method:"POST",body:{month,clientKey},timeout:60000});toast(d.invoice?.duplicatePrevented?"Miesięczny dokument już istnieje":`Przekazano ${d.count||0} nadań do jednej FV inFakt ✅`);await inpostServiceLaduj(true,true);renderuj();}catch(e){toast("Faktura miesięczna: "+(e.message||e));}
 }
 function inpostServiceOtworzMape(purpose="target"){
-  window.__inpostPointPurpose=["dropoff","default-dropoff"].includes(purpose)?purpose:"target";window.__geoTarget="inpost-service";otworzGeowidget();
+  window.__inpostPointPurpose=purpose==="dropoff"?"dropoff":"target";window.__geoTarget="inpost-service";otworzGeowidget();
 }
 async function inpostServiceSzukajPunktow(){
   const query=String(document.getElementById("inpostServicePointSearch")?.value||"").trim(),box=document.getElementById("inpostServicePointResults");
@@ -828,14 +894,14 @@ async function inpostServiceSzukajPunktow(){
   try{const params={limit:10,...(/^\d{2}-?\d{3}$/.test(query)?{post_code:query}:{q:query})},d=await chmura("inpost-points",{params,timeout:15000});if(box)box.innerHTML=(d.points||[]).map(point=>`<button type="button" class="inpost-point-result" onclick="inpostServiceWybierzPunkt(${jsArg(point.name)},${jsArg(opisPunktuInpost(point))})"><b>${esc(point.name)}</b><span>${esc(opisPunktuInpost(point))}</span></button>`).join("")||"<small>Nie znaleziono punktów.</small>";}catch(e){if(box)box.innerHTML=`<small class="error">${esc(e.message||e)}</small>`;}
 }
 function inpostServiceWybierzPunkt(code,address="",purpose=window.__inpostPointPurpose||"target"){
-  const defaultDropoff=purpose==="default-dropoff",dropoff=purpose==="dropoff",input=document.getElementById(defaultDropoff?"inpostServiceDefaultDropoffPoint":dropoff?"inpostServiceDropoffPoint":"inpostServiceTargetPoint"),label=document.getElementById(defaultDropoff?"inpostServiceDefaultDropoffPointLabel":dropoff?"inpostServiceDropoffPointLabel":"inpostServiceTargetPointLabel");
+  const dropoff=purpose==="dropoff",input=document.getElementById(dropoff?"inpostServiceDropoffPoint":"inpostServiceTargetPoint"),label=document.getElementById(dropoff?"inpostServiceDropoffPointLabel":"inpostServiceTargetPointLabel");
   if(input){input.value=String(code||"").toUpperCase();input.dispatchEvent(new Event("input",{bubbles:true}));}
-  if(label)label.textContent=address||code;window.__inpostPointPurpose="";toast(`${dropoff||defaultDropoff?"Automat nadawczy":"Punkt odbioru"}: ${code}`);
+  if(label)label.textContent=address||code;window.__inpostPointPurpose="";toast(`${dropoff?"Automat nadawczy":"Punkt odbioru"}: ${code}`);
 }
 function inpostServiceLista(){
   const q=normalizujSzukanyTekst(inpostServiceSzukaj),terms=q.split(" ").filter(Boolean);
   return (inpostServiceStan.items||[]).filter(item=>{
-    const customer=item.customer||item.sender||{},text=normalizujSzukanyTekst([item.id,item.reference,item.trackingNumber,item.inpostStatus,customer.companyName,customer.firstName,customer.lastName,customer.email,customer.taxCode,item.receiver?.companyName,item.receiver?.firstName,item.receiver?.lastName,item.receiver?.email,item.receiver?.taxCode,item.targetPoint].join(" "));
+    const text=normalizujSzukanyTekst([item.id,item.reference,item.trackingNumber,item.inpostStatus,item.receiver?.companyName,item.receiver?.firstName,item.receiver?.lastName,item.receiver?.email,item.receiver?.taxCode,item.targetPoint].join(" "));
     if(terms.some(term=>!text.includes(term)))return false;
     if(inpostServiceFiltr!=="wszystkie"&&String(item.status)!==inpostServiceFiltr)return false;
     if(inpostServiceBillingFiltr==="oczekuje"&&item.billing?.status!=="pending")return false;
@@ -862,7 +928,7 @@ function inpostServiceBillingLabel(item){
 function inpostServiceHistoriaHTML(){
   const rows=inpostServiceLista();
   const fields=`<label class="search-wide">Szukaj<input value="${esc(inpostServiceSzukaj)}" placeholder="Numer nadania, klient, NIP, e-mail, punkt lub referencja…" oninput="inpostServiceSzukaj=this.value;zaplanujRenderPoWpisaniu()"></label><label>Status<select onchange="inpostServiceFiltr=this.value;renderuj()"><option value="wszystkie">Wszystkie statusy</option>${[["label_ready","Etykieta gotowa"],["created","Utworzone"],["error","Błędy"],["cancelled","Anulowane"]].map(([v,l])=>`<option value="${v}" ${inpostServiceFiltr===v?"selected":""}>${l}</option>`).join("")}</select></label><label>Rozliczenie<select onchange="inpostServiceBillingFiltr=this.value;renderuj()"><option value="wszystkie">Wszystkie rozliczenia</option><option value="oczekuje" ${inpostServiceBillingFiltr==="oczekuje"?"selected":""}>Do FV miesięcznej</option><option value="rozliczone" ${inpostServiceBillingFiltr==="rozliczone"?"selected":""}>Przekazane do inFakt</option><option value="bez" ${inpostServiceBillingFiltr==="bez"?"selected":""}>Bez faktury</option></select></label><button class="btn ghost" onclick="inpostServiceSzukaj='';inpostServiceFiltr='wszystkie';inpostServiceBillingFiltr='wszystkie';renderuj()">Wyczyść</button>`;
-  return `<section class="panel inpost-service-history"><div class="order-section-head"><div><span class="order-pro-label">Rejestr operacyjny</span><h2>Nadania i rozliczenia</h2><p class="order-detail-lead">Tracking, etykieta, zlecenie odbioru i faktura tworzą jeden ślad operacyjny. Koszt umowny przewoźnika nie jest wyświetlany.</p></div><button class="btn ghost" onclick="inpostServiceLaduj(true,false)">↻ Odśwież</button></div>${adminWyszukiwaniePanelHTML({id:"inpost-service-history",description:"Filtry działają po danych nadania i rozliczenia klienta.",fields,results:rows.length,active:!!(inpostServiceSzukaj||inpostServiceFiltr!=="wszystkie"||inpostServiceBillingFiltr!=="wszystkie"),open:true})}<div class="warehouse-worktable-wrap"><table class="log-table inpost-service-table"><thead><tr><th>Nadanie</th><th>Odbiorca</th><th>Usługa</th><th>Status</th><th>Rozliczenie</th><th>Akcje</th></tr></thead><tbody>${rows.map(item=>`<tr data-stable-key="${esc(item.id)}"><td><b>${esc(item.reference||item.id)}</b><br><small>${esc(item.trackingNumber||"numer oczekuje")}</small><br><small>${esc(allegroDataTxt(item.createdAt))}</small></td><td><b>${esc(item.receiver?.companyName||`${item.receiver?.firstName||""} ${item.receiver?.lastName||""}`.trim()||"Klient")}</b><br><small>${esc(item.receiver?.email||"")}${item.receiver?.taxCode?` • NIP ${esc(item.receiver.taxCode)}`:""}</small></td><td>${item.deliveryType==="locker"?"📮 Paczkomat / punkt":"🚚 Kurier"}${item.targetPoint?`<br><small>${esc(item.targetPoint)}</small>`:""}${item.weekend?'<br><span class="lvl lvl-info">Paczka w Weekend</span>':""}${item.cod?.enabled?`<br><span class="lvl lvl-info">pobranie ${zl(item.cod.amount)}</span>`:""}</td><td>${inpostServiceStatusLabel(item)}<br><small>${esc(item.inpostStatus||"")}</small>${item.pickup?.id?`<br><span class="lvl lvl-ok">odbiór kuriera ${esc(item.pickup.status||"")}</span>`:""}</td><td>${inpostServiceBillingLabel(item)}<br><small>prowizja ${zl(item.billing?.commissionGross||0)}</small>${item.billing?.error?`<br><small class="error">${esc(item.billing.error)}</small>`:""}</td><td><div class="inpost-row-actions"><button class="btn ghost" onclick="inpostServiceStatus(${jsArg(item.id)})">↻ Status</button>${item.labelReady?`<button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A6')">A6</button><button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A4')">A4</button>`:""}${item.pickupRequested&&!item.pickup?.id?`<button class="btn ghost" onclick="inpostServiceOdbior(${jsArg(item.id)})">Odbiór kuriera</button>`:""}${item.billing?.mode==="single"&&!["processing","created"].includes(String(item.billing?.link?.status||item.billing?.status))?`<button class="btn" onclick="inpostServiceFaktura(${jsArg(item.id)})">FV inFakt</button>`:""}${["creating","created"].includes(item.status)?`<button class="btn danger" onclick="inpostServiceAnuluj(${jsArg(item.id)})">Anuluj</button>`:""}</div></td></tr>`).join("")||'<tr><td colspan="6">Brak nadań pasujących do filtrów.</td></tr>'}</tbody></table></div></section>`;
+  return `<section class="panel inpost-service-history"><div class="order-section-head"><div><span class="order-pro-label">Rejestr operacyjny</span><h2>Nadania i rozliczenia</h2><p class="order-detail-lead">Tracking, etykieta, zlecenie odbioru i faktura tworzą jeden ślad operacyjny. Koszt umowny przewoźnika nie jest wyświetlany.</p></div><button class="btn ghost" onclick="inpostServiceLaduj(true,false)">↻ Odśwież</button></div>${adminWyszukiwaniePanelHTML({id:"inpost-service-history",description:"Filtry działają po danych nadania i rozliczenia klienta.",fields,results:rows.length,active:!!(inpostServiceSzukaj||inpostServiceFiltr!=="wszystkie"||inpostServiceBillingFiltr!=="wszystkie"),open:true})}<div class="warehouse-worktable-wrap"><table class="log-table inpost-service-table"><thead><tr><th>Nadanie</th><th>Odbiorca</th><th>Usługa</th><th>Status</th><th>Rozliczenie</th><th>Akcje</th></tr></thead><tbody>${rows.map(item=>`<tr data-stable-key="${esc(item.id)}"><td><b>${esc(item.reference||item.id)}</b><br><small>${esc(item.trackingNumber||"numer oczekuje")}</small><br><small>${esc(allegroDataTxt(item.createdAt))}</small></td><td><b>${esc(item.receiver?.companyName||`${item.receiver?.firstName||""} ${item.receiver?.lastName||""}`.trim()||"Klient")}</b><br><small>${esc(item.receiver?.email||"")}${item.receiver?.taxCode?` • NIP ${esc(item.receiver.taxCode)}`:""}</small></td><td>${item.deliveryType==="locker"?"📮 Paczkomat / punkt":"🚚 Kurier"}${item.targetPoint?`<br><small>${esc(item.targetPoint)}</small>`:""}${item.weekend?'<br><span class="lvl lvl-info">Paczka w Weekend</span>':""}${item.cod?.enabled?`<br><span class="lvl lvl-info">pobranie ${zl(item.cod.amount)}</span>`:""}</td><td>${inpostServiceStatusLabel(item)}<br><small>${esc(item.inpostStatus||"")}</small>${item.pickup?.id?`<br><span class="lvl lvl-ok">odbiór kuriera ${esc(item.pickup.status||"")}</span>`:""}</td><td>${inpostServiceBillingLabel(item)}<br><small>prowizja ${zl(item.billing?.commissionGross||0)}</small>${item.billing?.error?`<br><small class="error">${esc(item.billing.error)}</small>`:""}</td><td><div class="inpost-row-actions"><button class="btn ghost" onclick="inpostServiceStatus(${jsArg(item.id)})">↻ Status</button>${item.labelReady?`<button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A6')">A6</button><button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A4')">A4</button>`:""}${item.labelReady&&!item.pickup?.id?`<button class="btn ghost" onclick="inpostServiceOdbior(${jsArg(item.id)})">🚚 Zamów kuriera</button>`:""}${item.billing?.mode==="single"&&!["processing","created"].includes(String(item.billing?.link?.status||item.billing?.status))?`<button class="btn" onclick="inpostServiceFaktura(${jsArg(item.id)})">FV inFakt</button>`:""}${["creating","created"].includes(item.status)?`<button class="btn danger" onclick="inpostServiceAnuluj(${jsArg(item.id)})">Anuluj</button>`:""}</div></td></tr>`).join("")||'<tr><td colspan="6">Brak nadań pasujących do filtrów.</td></tr>'}</tbody></table></div></section>`;
 }
 function inpostServiceMiesieczneHTML(){
   const groups=inpostServiceStan.billing?.groups||[];if(!groups.length)return "";
@@ -873,7 +939,7 @@ function inpostServiceOsobaFields(prefix,title,person={},withNip=false){
   return `<fieldset class="inpost-party-card"><legend>${esc(title)}</legend><div class="inpost-form-grid"><label>Firma${withNip?" / stały klient":""}<input name="${prefix}Company" value="${esc(person.companyName||"")}"></label>${withNip?`<label>NIP<input name="${prefix}TaxCode" inputmode="numeric" maxlength="10" value="${esc(person.taxCode||"")}"></label>`:""}<label>Imię<input name="${prefix}FirstName" value="${esc(person.firstName||"")}"></label><label>Nazwisko<input name="${prefix}LastName" value="${esc(person.lastName||"")}"></label><label>E-mail *<input name="${prefix}Email" type="email" required value="${esc(person.email||"")}"></label><label>Telefon *<input name="${prefix}Phone" inputmode="tel" required value="${esc(person.phone||"")}"></label><label class="wide">Ulica *<input name="${prefix}Street" required value="${esc(a.street||"")}"></label><label>Nr budynku *<input name="${prefix}Building" required value="${esc(a.buildingNumber||a.building_number||"")}"></label><label>Nr lokalu<input name="${prefix}Flat" value="${esc(a.flatNumber||a.flat_number||"")}"></label><label>Kod pocztowy *<input name="${prefix}PostCode" required pattern="\\d{2}-?\\d{3}" value="${esc(a.postCode||a.post_code||"")}"></label><label>Miasto *<input name="${prefix}City" required value="${esc(a.city||"")}"></label></div></fieldset>`;
 }
 function inpostServiceFormHTML(){
-  const sender=inpostServiceNadawca(),clients=inpostServiceKlienci(),fee=Number(inpostServiceStan.settings?.commissionGross??4),month=new Date().toISOString().slice(0,7),available=inpostServiceStan.serviceAvailability;
+  const sender=inpostServicePustyNadawcaKlienta(),clients=inpostServiceKlienci(),fee=Number(inpostServiceStan.settings?.commissionGross??4),month=new Date().toISOString().slice(0,7),available=inpostServiceStan.serviceAvailability;
   return `<section class="panel inpost-service-create"><div class="order-section-head"><div><span class="order-pro-label">Umowa InPost • ShipX</span><h2>Utwórz przesyłkę</h2><p class="order-detail-lead">Wpisz nadawcę i odbiorcę, wybierz usługę oraz opcje dodatkowe. System zapisze numer, etykietę, tracking i rozliczenie prowizji.</p></div><div class="diag-actions"><span class="lvl ${available?.locker?"lvl-ok":"lvl-ostrzezenie"}">Paczkomat ${available?.locker?"aktywny":"do sprawdzenia"}</span><span class="lvl ${available?.courier?"lvl-ok":"lvl-ostrzezenie"}">Kurier ${available?.courier?"aktywny":"do sprawdzenia"}</span></div></div><form id="inpostServiceForm" onsubmit="inpostServiceUtworz(event)"><input type="hidden" name="requestId" value="${esc(inpostServiceStan.requestId||inpostServiceNowyRequestId())}"><div class="inpost-form-top"><label>Referencja / numer klienta<input name="reference" required value="USL-${Date.now().toString(36).toUpperCase()}"></label><label>Stały klient / firma<input list="inpostServiceClients" placeholder="Wpisz e-mail lub NIP i wybierz" onchange="inpostServiceWypelnijKlienta(this)"><datalist id="inpostServiceClients">${clients.map(client=>`<option value="${esc(client.key)}">${esc(client.companyName||`${client.firstName} ${client.lastName}`.trim()||client.email)} • ${esc(client.email||client.taxCode)}</option>`).join("")}</datalist></label></div><div class="inpost-parties-grid">${inpostServiceOsobaFields("sender","Nadawca",sender,false)}${inpostServiceOsobaFields("receiver","Odbiorca",{},true)}</div><div class="inpost-options-layout"><fieldset><legend>Usługa i nadanie</legend><div class="inpost-form-grid"><label>Rodzaj dostawy<select name="deliveryType" onchange="inpostServiceUstawTyp(this.form)"><option value="locker">Paczkomat / PaczkoPunkt InPost</option><option value="courier">Kurier InPost</option></select></label><label>Sposób nadania<select name="sendingMethod" onchange="inpostServiceUstawTyp(this.form)"><option value="parcel_locker">Nadanie w Paczkomacie</option><option value="any_point">Dowolny punkt InPost</option><option value="pok">Punkt Obsługi Klienta</option><option value="pop">Punkt Obsługi Przesyłek</option><option value="branch">Oddział InPost</option><option value="dispatch_order">Odbiór przez kuriera</option></select></label><div class="wide" data-inpost-only="locker"><label>Paczkomat / punkt odbiorcy *<div class="inpost-inline"><input id="inpostServiceTargetPoint" name="targetPoint" placeholder="np. BOJ01N"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape()">Mapa</button></div><small id="inpostServiceTargetPointLabel">Wybierz punkt na mapie, z wyszukiwarki albo wpisz kod.</small></label><div class="inpost-point-search"><input id="inpostServicePointSearch" placeholder="Miasto, kod pocztowy lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow()">Szukaj</button></div><div id="inpostServicePointResults"></div></div><label>Punkt nadania (opcjonalnie)<input name="dropoffPoint" placeholder="kod punktu, jeśli wybrano konkretny"></label><label class="check" data-inpost-only="courier"><input type="checkbox" name="pickupRequested"> Zleć odbiór przez kuriera po potwierdzeniu</label></div></fieldset><fieldset><legend>Paczka i usługi dodatkowe</legend><div class="inpost-form-grid"><label>Gabaryt<select name="template"><option value="small">A / small</option><option value="medium">B / medium</option><option value="large">C / large</option><option value="">Wymiary własne</option></select></label><label>Waga (kg)<input name="weight" type="number" min=".01" max="50" step=".01" value="1"></label><label>Długość (cm)<input name="length" type="number" min="1" step=".1" value="30"></label><label>Szerokość (cm)<input name="width" type="number" min="1" step=".1" value="20"></label><label>Wysokość (cm)<input name="height" type="number" min="1" step=".1" value="15"></label><label class="check"><input type="checkbox" name="nonStandard"> Element niestandardowy</label><label class="check wide"><input type="checkbox" name="codEnabled"> Pobranie <input name="codAmount" type="number" min="0" step=".01" placeholder="kwota PLN"></label><label class="check wide"><input type="checkbox" name="insuranceEnabled"> Dodatkowa ochrona <input name="insuranceAmount" type="number" min="0" step=".01" placeholder="wartość PLN"></label><label class="check" data-inpost-only="locker"><input type="checkbox" name="weekend"> Paczka w Weekend</label><label class="check" data-inpost-only="locker"><input type="checkbox" name="additionalServices" value="labelless"> Nadanie bez etykiety</label><label class="check" data-inpost-only="courier"><input type="checkbox" name="additionalServices" value="sms"> Powiadomienie SMS</label><label class="check" data-inpost-only="courier"><input type="checkbox" name="additionalServices" value="email"> Powiadomienie e-mail</label><label class="check" data-inpost-only="courier"><input type="checkbox" name="additionalServices" value="saturday"> Doręczenie w sobotę</label><label class="check" data-inpost-only="courier"><input type="checkbox" name="additionalServices" value="dor1720"> Doręczenie 17:00–20:00</label><label class="check" data-inpost-only="courier"><input type="checkbox" name="additionalServices" value="rod"> Zwrot dokumentów</label><label class="wide">Uwagi do przesyłki<input name="comments" maxlength="100"></label></div></fieldset><fieldset class="inpost-billing-card"><legend>Rozliczenie klienta</legend><div class="inpost-form-grid"><label>Sposób rozliczenia<select name="billingMode"><option value="none">Bez faktury</option><option value="single">FV od razu po nadaniu</option><option value="monthly">Dopisz do FV miesięcznej</option></select></label><label>Miesiąc rozliczenia<input name="billingMonth" type="month" value="${esc(month)}"></label><label>Prowizja za nadanie<input name="commissionGross" type="number" min="0" step=".01" value="${esc(fee)}" oninput="inpostServicePrzelicz(this.form)"></label><div class="inpost-fee-summary"><small>Do rozliczenia za tę usługę</small><strong data-inpost-commission-total>${zl(fee)}</strong></div></div><div class="backend-note"><b>Koszt umowny InPost jest ukryty.</b> Panel i odpowiedź API pokazują wyłącznie prowizję Artway-TM. Dla FV miesięcznej każda przesyłka trafia do jednej paczki rozliczeniowej klienta.</div></fieldset></div><div class="inpost-create-footer"><button class="btn" type="submit">🟡 Utwórz przesyłkę InPost</button><small>Jedno kliknięcie rezerwuje operację — ponowne kliknięcie nie utworzy duplikatu.</small></div></form></section>`;
 }
 function panelWysylkiUslugowejInpost(){
@@ -884,7 +950,8 @@ function panelWysylkiUslugowejInpost(){
   return `<div class="inpost-service-workspace"><section class="inpost-service-stats"><article><span>📦</span><b>${inpostServiceStan.items.length}</b><small>nadań usługowych</small></article><article><span>🧾</span><b>${billing.pendingMonthly||0}</b><small>do FV miesięcznej</small></article><article><span>💰</span><b>${zl(billing.commissionPendingGross||0)}</b><small>prowizji oczekującej</small></article><article><span>🔐</span><b>ukryty</b><small>koszt umowny InPost</small></article></section>${inpostServiceStan.error?`<div class="backend-note error"><b>Błąd:</b> ${esc(inpostServiceStan.error)}</div>`:""}${inpostServiceFormHTML()}${inpostServiceMiesieczneHTML()}${inpostServiceHistoriaHTML()}<details class="panel inpost-service-settings"><summary>⚙️ Domyślny nadawca i prowizja</summary><form onsubmit="inpostServiceZapiszUstawienia(event)">${inpostServiceOsobaFields("sender","Stałe dane nadawcy",inpostServiceNadawca(),false)}<div class="inpost-settings-footer"><label>Domyślna prowizja brutto<input name="commissionGross" type="number" min="0" step=".01" value="${esc(inpostServiceStan.settings?.commissionGross??4)}"></label><button class="btn" type="submit">Zapisz ustawienia</button><a class="btn ghost" href="#/admin/infakt/wysylki">Rozliczenia inFakt</a></div></form></details></div>`;
 }
 
-let inpostServiceWycenaTimer=0,inpostServiceWycenaToken=0;
+let inpostServiceWycenaTimer=0;
+const inpostServiceKodPocztowyTimery={sender:0,receiver:0},inpostServiceKodPocztowyCache=new Map();
 const inpostServiceKsiazkaStan={
   sender:{role:"sender",q:"",postCode:"",city:"",street:"",page:1,selectedKey:"",targetFormId:""},
   receiver:{role:"receiver",q:"",postCode:"",city:"",street:"",page:1,selectedKey:"",targetFormId:""},
@@ -899,7 +966,7 @@ function inpostServiceNazwaKontaktu(contact={}){
 }
 function inpostServiceAdresy(){
   const saved=(inpostServiceStan.addressBook||[]).map(contact=>({...contact,key:contact.id,stored:true}));
-  const known=inpostServiceKlienci().map(contact=>({...contact,key:`client:${contact.key}`,stored:false,roles:["sender","receiver"]}));
+  const known=inpostServiceKlienci().map(contact=>({...contact,key:`client:${contact.key}`,stored:false,roles:["receiver"]}));
   const map=new Map();
   [...saved,...known].forEach(contact=>{
     const fingerprint=[contact.taxCode,contact.email,contact.phone,inpostServiceAdresKsiazki(contact)].map(value=>String(value||"").trim().toLowerCase()).join("|");
@@ -924,6 +991,44 @@ function inpostServiceAdresDane(contact={}){
     city:String(address.city||"").trim(),
     street:String(address.street||"").trim(),
   };
+}
+function inpostServiceKodPocztowy(value=""){
+  const digits=String(value||"").replace(/\D/g,"").slice(0,5);
+  return digits.length===5?`${digits.slice(0,2)}-${digits.slice(2)}`:digits;
+}
+function inpostServiceUliceDlaAdresu(form,prefix){
+  const code=inpostServiceKodPocztowy(form?.elements?.[`${prefix}PostCode`]?.value),city=inpostServiceAdresNormal(form?.elements?.[`${prefix}City`]?.value);
+  const streets=inpostServiceAdresUnikalne(inpostServiceAdresy().filter(contact=>{
+    const address=inpostServiceAdresDane(contact);
+    return (!code||inpostServiceKodPocztowy(address.postCode)===code)&&(!city||inpostServiceAdresNormal(address.city)===city);
+  }).map(contact=>inpostServiceAdresDane(contact).street),250);
+  const list=document.getElementById(`inpostService${prefix}StreetHints`);if(list)list.innerHTML=streets.map(street=>`<option value="${esc(street)}"></option>`).join("");
+  return streets;
+}
+function inpostServiceMiastoWpis(input,prefix){inpostServiceUliceDlaAdresu(input?.form,prefix);}
+function inpostServiceKodPocztowyWpis(input,prefix){
+  const code=inpostServiceKodPocztowy(input?.value),form=input?.form,hint=form?.querySelector?.(`[data-inpost-postcode-hint="${prefix}"]`);
+  if(input&&input.value!==code)input.value=code;
+  clearTimeout(inpostServiceKodPocztowyTimery[prefix]);
+  if(!/^\d{2}-\d{3}$/.test(code)){if(hint){hint.hidden=true;hint.textContent="";}return;}
+  if(hint){hint.hidden=false;hint.className="backend-note wide";hint.textContent="Sprawdzam kod pocztowy…";}
+  inpostServiceKodPocztowyTimery[prefix]=setTimeout(()=>inpostServiceSprawdzKodPocztowy(form,prefix,code),350);
+}
+async function inpostServiceSprawdzKodPocztowy(form,prefix,code){
+  if(!form||inpostServiceKodPocztowy(form.elements[`${prefix}PostCode`]?.value)!==code)return;
+  const hint=form.querySelector(`[data-inpost-postcode-hint="${prefix}"]`);
+  try{
+    let d=inpostServiceKodPocztowyCache.get(code);
+    if(!d){d=await chmura("inpost-service-postcode",{params:{code},timeout:9000});inpostServiceKodPocztowyCache.set(code,d);}
+    if(inpostServiceKodPocztowy(form.elements[`${prefix}PostCode`]?.value)!==code)return;
+    const localCities=inpostServiceAdresy().filter(contact=>inpostServiceKodPocztowy(inpostServiceAdresDane(contact).postCode)===code).map(contact=>inpostServiceAdresDane(contact).city);
+    const cities=inpostServiceAdresUnikalne([...(d.cities||[]),...localCities],50),cityInput=form.elements[`${prefix}City`],cityList=document.getElementById(`inpostService${prefix}CityHints`);
+    if(cityList)cityList.innerHTML=cities.map(city=>`<option value="${esc(city)}"></option>`).join("");
+    if(cityInput&&!String(cityInput.value||"").trim()&&cities.length===1)cityInput.value=cities[0];
+    const streets=inpostServiceUliceDlaAdresu(form,prefix);
+    if(hint){hint.hidden=false;hint.className="backend-note wide";hint.textContent=cities.length?`Kod rozpoznany: ${cities.join(", ")}. ${streets.length?"Możesz wybrać zapisaną ulicę z podpowiedzi.":"Wpisz ulicę i numer budynku."}`:"Nie znaleziono miejscowości dla tego kodu. Sprawdź kod albo wpisz miasto ręcznie.";}
+    inpostServiceZaplanujWycene(form);
+  }catch(e){if(hint){hint.hidden=false;hint.className="backend-note wide";hint.textContent="Nie udało się teraz sprawdzić kodu. Miasto i ulicę możesz wpisać ręcznie.";}}
 }
 function inpostServiceRoleKontaktu(contact={},role="all"){
   return role==="all"||(contact.roles||[]).includes(role);
@@ -964,8 +1069,8 @@ function inpostServiceAdresPodpowiedzi(source,prefix){
 }
 function inpostServiceRolaEtykieta(contact={}){
   const sender=(contact.roles||[]).includes("sender"),receiver=(contact.roles||[]).includes("receiver");
-  if(sender&&receiver)return '<span class="inpost-role both">Klient zlecający i odbiorca</span>';
-  if(sender)return '<span class="inpost-role sender">Klient zlecający</span>';
+  if(sender&&receiver)return '<span class="inpost-role both">Nadawca i odbiorca</span>';
+  if(sender)return '<span class="inpost-role sender">Nadawca</span>';
   return '<span class="inpost-role receiver">Odbiorca</span>';
 }
 function inpostServiceRenderujKsiazke(prefix){
@@ -1015,7 +1120,7 @@ function inpostServiceOtworzKsiazke(prefix,source=null){
   state.targetFormId=form.id;state.role=prefix;state.page=1;state.selectedKey=String(form.elements[`${prefix}ContactId`]?.value||"");
   document.getElementById("inpostAddressBookModal")?.remove();
   const layer=document.createElement("div");layer.id="inpostAddressBookModal";layer.className="inpost-book-modal-layer";layer.dataset.prefix=prefix;
-  layer.innerHTML=`<button class="inpost-book-backdrop" type="button" onclick="inpostServiceZamknijKsiazke()" aria-label="Zamknij książkę adresową"></button><section class="inpost-book-dialog" role="dialog" aria-modal="true" aria-labelledby="inpostBookTitle"><header><div><span class="order-pro-label">Książka adresowa InPost</span><h2 id="inpostBookTitle">Wybierz ${prefix==="sender"?"klienta zlecającego":"odbiorcę"}</h2></div><div class="diag-actions"><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres(${jsArg(prefix)},this)">＋ Nowy adres</button><button class="inpost-book-close" type="button" onclick="inpostServiceZamknijKsiazke()" aria-label="Zamknij">✕</button></div></header><div class="inpost-book-toolbar"><div class="inpost-address-tabs"><button type="button" data-inpost-book-role="sender" onclick="inpostServiceKsiazkaFiltr(${jsArg(prefix)},'sender',this)">Klienci zlecający</button><button type="button" data-inpost-book-role="receiver" onclick="inpostServiceKsiazkaFiltr(${jsArg(prefix)},'receiver',this)">Odbiorcy</button><button type="button" data-inpost-book-role="all" onclick="inpostServiceKsiazkaFiltr(${jsArg(prefix)},'all',this)">Wszyscy</button></div><label class="inpost-address-main-search"><span>🔎</span><input type="search" value="${esc(state.q)}" placeholder="Firma, osoba, NIP, telefon, e-mail lub adres…" oninput="inpostServiceKsiazkaSzukaj(this,${jsArg(prefix)})"></label><div class="inpost-address-search-fields"><label>Kod pocztowy<input list="inpostBook${prefix}PostCodeHints" value="${esc(state.postCode)}" placeholder="00-000" oninput="inpostServiceKsiazkaPole(this,${jsArg(prefix)},'postCode')"><datalist id="inpostBook${prefix}PostCodeHints"></datalist></label><label>Miejscowość<input list="inpostBook${prefix}CityHints" value="${esc(state.city)}" placeholder="Wpisz miejscowość" oninput="inpostServiceKsiazkaPole(this,${jsArg(prefix)},'city')"><datalist id="inpostBook${prefix}CityHints"></datalist></label><label>Ulica<input list="inpostBook${prefix}StreetHints" value="${esc(state.street)}" placeholder="Wpisz ulicę" oninput="inpostServiceKsiazkaPole(this,${jsArg(prefix)},'street')"><datalist id="inpostBook${prefix}StreetHints"></datalist></label></div></div><div class="inpost-book-content"><div class="inpost-book-list-panel"><div class="inpost-address-match-head"><b data-inpost-book-count></b><small>Kliknij kontakt, aby zobaczyć szczegóły</small></div><div class="inpost-book-results" data-inpost-book-results></div><div class="inpost-book-pager" data-inpost-book-pager></div></div><aside class="inpost-book-preview" data-inpost-book-preview></aside></div><footer><button class="btn ghost" type="button" onclick="inpostServiceZamknijKsiazke()">Anuluj</button><button class="btn" type="button" data-inpost-book-use onclick="inpostServiceKsiazkaZatwierdz(${jsArg(prefix)})">Użyj wybranego adresu</button></footer></section>`;
+  layer.innerHTML=`<button class="inpost-book-backdrop" type="button" onclick="inpostServiceZamknijKsiazke()" aria-label="Zamknij książkę adresową"></button><section class="inpost-book-dialog" role="dialog" aria-modal="true" aria-labelledby="inpostBookTitle"><header><div><span class="order-pro-label">Książka adresowa InPost</span><h2 id="inpostBookTitle">Wybierz ${prefix==="sender"?"nadawcę":"odbiorcę"}</h2></div><div class="diag-actions"><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres(${jsArg(prefix)},this)">＋ Nowy adres</button><button class="inpost-book-close" type="button" onclick="inpostServiceZamknijKsiazke()" aria-label="Zamknij">✕</button></div></header><div class="inpost-book-toolbar"><div class="inpost-address-tabs"><button type="button" data-inpost-book-role="sender" onclick="inpostServiceKsiazkaFiltr(${jsArg(prefix)},'sender',this)">Nadawcy</button><button type="button" data-inpost-book-role="receiver" onclick="inpostServiceKsiazkaFiltr(${jsArg(prefix)},'receiver',this)">Odbiorcy</button><button type="button" data-inpost-book-role="all" onclick="inpostServiceKsiazkaFiltr(${jsArg(prefix)},'all',this)">Wszyscy</button></div><label class="inpost-address-main-search"><span>🔎</span><input type="search" value="${esc(state.q)}" placeholder="Firma, osoba, NIP, telefon, e-mail lub adres…" oninput="inpostServiceKsiazkaSzukaj(this,${jsArg(prefix)})"></label><div class="inpost-address-search-fields"><label>Kod pocztowy<input list="inpostBook${prefix}PostCodeHints" value="${esc(state.postCode)}" placeholder="00-000" oninput="inpostServiceKsiazkaPole(this,${jsArg(prefix)},'postCode')"><datalist id="inpostBook${prefix}PostCodeHints"></datalist></label><label>Miejscowość<input list="inpostBook${prefix}CityHints" value="${esc(state.city)}" placeholder="Wpisz miejscowość" oninput="inpostServiceKsiazkaPole(this,${jsArg(prefix)},'city')"><datalist id="inpostBook${prefix}CityHints"></datalist></label><label>Ulica<input list="inpostBook${prefix}StreetHints" value="${esc(state.street)}" placeholder="Wpisz ulicę" oninput="inpostServiceKsiazkaPole(this,${jsArg(prefix)},'street')"><datalist id="inpostBook${prefix}StreetHints"></datalist></label></div></div><div class="inpost-book-content"><div class="inpost-book-list-panel"><div class="inpost-address-match-head"><b data-inpost-book-count></b><small>Kliknij kontakt, aby zobaczyć szczegóły</small></div><div class="inpost-book-results" data-inpost-book-results></div><div class="inpost-book-pager" data-inpost-book-pager></div></div><aside class="inpost-book-preview" data-inpost-book-preview></aside></div><footer><button class="btn ghost" type="button" onclick="inpostServiceZamknijKsiazke()">Anuluj</button><button class="btn" type="button" data-inpost-book-use onclick="inpostServiceKsiazkaZatwierdz(${jsArg(prefix)})">Użyj wybranego adresu</button></footer></section>`;
   layer.addEventListener("keydown",event=>{if(event.key==="Escape")inpostServiceZamknijKsiazke();});
   document.body.appendChild(layer);document.body.classList.add("has-dialog");inpostServiceAdresPodpowiedzi(null,prefix);requestAnimationFrame(()=>layer.querySelector('input[type="search"]')?.focus());
 }
@@ -1028,7 +1133,7 @@ function inpostServiceNowyAdres(prefix,source=null){
   inpostServiceZamknijKsiazke();
   if(form.elements[`${prefix}ContactId`])form.elements[`${prefix}ContactId`].value="";
   inpostServiceUstawPolaOsoby(form,prefix,{roles:[prefix]});
-  toast(`Nowy adres ${prefix==="sender"?"klienta zlecającego":"odbiorcy"}`);
+  toast(`Nowy adres ${prefix==="sender"?"nadawcy":"odbiorcy"}`);
 }
 function inpostServiceWybierzAdresWynik(prefix,key,targetFormId=""){
   const form=document.getElementById(targetFormId)||inpostServiceKsiazkaForm(prefix),contact=inpostServiceAdresy().find(item=>String(item.key)===String(key));if(!form||!contact)return;
@@ -1037,7 +1142,7 @@ function inpostServiceWybierzAdresWynik(prefix,key,targetFormId=""){
   inpostServiceUstawPolaOsoby(form,prefix,contact);
   inpostServiceAdresPodpowiedzi(form,prefix);
   inpostServiceZaplanujWycene(form);
-  toast(`Wybrano adres ${prefix==="sender"?"klienta zlecającego":"odbiorcy"} ✅`);
+  toast(`Wybrano adres ${prefix==="sender"?"nadawcy":"odbiorcy"} ✅`);
 }
 function inpostServiceUstawPolaOsoby(form,prefix,contact={}){
   const address=contact.address||{},roles=Array.isArray(contact.roles)?contact.roles:[prefix],fields={
@@ -1054,31 +1159,26 @@ function inpostServiceUstawPolaOsoby(form,prefix,contact={}){
   const summary=form.querySelector(`[data-inpost-selected-contact="${prefix}"]`);
   if(summary)summary.innerHTML=inpostServiceWybranyKontaktHTML(contact,prefix);
   inpostServiceAdresPodpowiedzi(form,prefix);
-  if(prefix==="sender")inpostServiceReferencja(form);
 }
 function inpostServiceWybranyKontaktHTML(contact={},prefix="receiver"){
   const hasData=!!(contact.id||contact.companyName||contact.firstName||contact.lastName||contact.email||contact.phone||inpostServiceAdresKsiazki(contact));
-  if(!hasData)return `<span class="inpost-selected-icon">＋</span><span><b>Nie wybrano ${prefix==="sender"?"klienta zlecającego":"odbiorcy"}</b><small>Wybierz zapisany kontakt albo wpisz nowy adres.</small></span>`;
-  return `<span class="inpost-selected-icon">${prefix==="sender"?"📤":"📥"}</span><span><b>${esc(inpostServiceNazwaKontaktu(contact))}</b><small>${esc(inpostServiceAdresKsiazki(contact)||[contact.email,contact.phone].filter(Boolean).join(" • ")||"Adres do uzupełnienia")}</small></span>${inpostServiceRolaEtykieta(contact)}`;
+  if(!hasData)return `<span class="inpost-selected-icon">＋</span><span><b>Nie wybrano ${prefix==="sender"?"nadawcy":"odbiorcy"}</b><small>Wybierz zapisany kontakt albo wpisz nowy adres.</small></span>`;
+  const withRole={...contact,roles:Array.isArray(contact.roles)&&contact.roles.length?contact.roles:[prefix]};
+  return `<span class="inpost-selected-icon">${prefix==="sender"?"📤":"📥"}</span><span><b>${esc(inpostServiceNazwaKontaktu(contact))}</b><small>${esc(inpostServiceAdresKsiazki(contact)||[contact.email,contact.phone].filter(Boolean).join(" • ")||"Adres do uzupełnienia")}</small></span>${inpostServiceRolaEtykieta(withRole)}`;
 }
 function inpostServicePunktOpis(point={}){
   const distance=Number(point.distance);
   return [opisPunktuInpost(point),Number.isFinite(distance)?`${distance<1000?Math.round(distance)+" m":(distance/1000).toFixed(1).replace(".",",")+" km"}`:"",point.location247?"czynny 24/7":point.openingHours].filter(Boolean).join(" • ");
 }
-function inpostServicePunktElementy(purpose="target"){
-  if(purpose==="default-dropoff")return {search:"inpostServiceDefaultDropoffSearch",results:"inpostServiceDefaultDropoffResults"};
-  if(purpose==="dropoff")return {search:"inpostServiceDropoffSearch",results:"inpostServiceDropoffResults"};
-  return {search:"inpostServicePointSearch",results:"inpostServicePointResults"};
-}
 async function inpostServicePobierzPunkty(params={},caption="",purpose="target"){
-  const ids=inpostServicePunktElementy(purpose),box=document.getElementById(ids.results);if(box)box.innerHTML="<small>Szukam najbliższych punktów InPost…</small>";
+  const dropoff=purpose==="dropoff",box=document.getElementById(dropoff?"inpostServiceDropoffResults":"inpostServicePointResults");if(box)box.innerHTML="<small>Szukam najbliższych punktów InPost…</small>";
   try{
     const d=await chmura("inpost-points",{params:{limit:15,...params},timeout:15000}),points=d.points||[];
     if(box)box.innerHTML=`${caption?`<div class="inpost-point-caption">${esc(caption)}</div>`:""}${points.map(point=>`<button type="button" class="inpost-point-result" onclick="inpostServiceWybierzPunkt(${jsArg(point.name)},${jsArg(opisPunktuInpost(point))},${jsArg(purpose)})"><b>${esc(point.name)}</b><span>${esc(inpostServicePunktOpis(point))}</span></button>`).join("")||"<small>Nie znaleziono punktów dla tego adresu.</small>"}`;
   }catch(e){if(box)box.innerHTML=`<small class="error">${esc(e.message||e)}</small>`;}
 }
 async function inpostServiceSzukajPunktow(purpose="target"){
-  const ids=inpostServicePunktElementy(purpose),query=String(document.getElementById(ids.search)?.value||"").trim();
+  const dropoff=purpose==="dropoff",query=String(document.getElementById(dropoff?"inpostServiceDropoffSearch":"inpostServicePointSearch")?.value||"").trim();
   if(!query)return toast("Wpisz miasto, kod pocztowy albo kod punktu");
   return inpostServicePobierzPunkty(/^\d{2}-?\d{3}$/.test(query)?{post_code:query}:{q:query},`Wyniki dla: ${query}`,purpose);
 }
@@ -1099,7 +1199,7 @@ async function inpostServiceZapiszKontakt(prefix,button=null){
   const form=button?.closest("form")||document.getElementById("inpostServiceForm");if(!form)return;
   const contact=inpostServiceStronaOsoby(form,prefix),id=form.elements[`${prefix}ContactId`]?.value||"";
   contact.roles=[form.elements[`${prefix}RoleSender`]?.checked?"sender":"",form.elements[`${prefix}RoleReceiver`]?.checked?"receiver":""].filter(Boolean);
-  if(!contact.roles.length)return toast("Zaznacz rolę: klient zlecający, odbiorca albo obie");
+  if(!contact.roles.length)return toast("Zaznacz rolę: nadawca, odbiorca albo obie");
   contact.id=id;contact.label=contact.companyName||`${contact.firstName} ${contact.lastName}`.trim()||contact.email;
   try{
     const d=await chmura("inpost-service-contact-save",{method:"POST",body:{role:prefix,contact},timeout:20000});
@@ -1125,55 +1225,53 @@ async function inpostServiceUsunKontakt(prefix,button=null){
   }catch(e){toast("Nie usunięto adresu: "+(e.message||e));}
 }
 function inpostServiceMozeWycenic(payload){
-  const receiver=payload.receiver||{};
-  if(!receiver.email||String(receiver.phone||"").replace(/\D/g,"").length<9)return false;
+  const people=[payload.sender,payload.receiver];
+  if(people.some(person=>!person?.email||String(person.phone||"").replace(/\D/g,"").length<9))return false;
+  if(!payload.sender?.companyName&&!payload.sender?.firstName)return false;
+  if(!String(payload.sendingMethod||"").trim())return false;
+  const senderAddress=payload.sender?.address||{};
+  if(!senderAddress.street||!senderAddress.buildingNumber||!senderAddress.postCode||!senderAddress.city)return false;
   if(payload.deliveryType==="locker"&&!payload.targetPoint)return false;
   if(payload.deliveryType==="courier"){
-    if(!receiver.companyName&&!receiver.firstName)return false;
-    const address=receiver.address||{};
+    const address=payload.receiver?.address||{};
+    if(!payload.receiver?.companyName&&!payload.receiver?.firstName)return false;
     if(!address.street||!address.buildingNumber||!address.postCode||!address.city)return false;
   }
   if(inpostServiceMetodyWymagajacePunktu.has(String(payload.sendingMethod||""))&&!String(payload.dropoffPoint||"").trim())return false;
   return true;
 }
 function inpostServiceWycenaKwota(pricing={}){
-  const value=pricing.totalGross;
-  if(value==null||String(value).trim()==="")return null;
-  return Number.isFinite(Number(value))?Number(value):null;
+  if(pricing.totalGross==null||String(pricing.totalGross).trim()==="")return null;
+  return Number.isFinite(Number(pricing.totalGross))?Number(pricing.totalGross):null;
 }
-function inpostServiceProgiProwizji(){
-  const defaults=[{upToGross:20,commissionGross:4},{upToGross:30,commissionGross:6},{upToGross:40,commissionGross:8},{upToGross:50,commissionGross:10}],saved=inpostServiceStan.settings?.commissionTiers;
-  if(!Array.isArray(saved)||saved.length<4)return defaults;
-  const tiers=saved.map(tier=>({upToGross:Number(tier.upToGross),commissionGross:Number(tier.commissionGross)})).filter(tier=>tier.upToGross>0&&tier.commissionGross>0).sort((a,b)=>a.upToGross-b.upToGross);
-  return tiers.length>=4?tiers:defaults;
-}
-function inpostServiceProwizjaDlaKosztu(total){
-  const tiers=inpostServiceProgiProwizji(),index=tiers.findIndex(tier=>Number(total)<=tier.upToGross),selectedIndex=index<0?tiers.length-1:index;
-  return {...tiers[selectedIndex],index:selectedIndex,overflow:index<0};
+function inpostServicePelnaCenaKlienta(totalGross){
+  const carrier=Math.round((Number(totalGross)||0)*100)/100,customer=Math.ceil((carrier+4)-1e-9),commission=Math.round((customer-carrier)*100)/100;
+  return {customerTotalGross:customer,commissionGross:commission,minimumCommissionGross:4,maximumCommissionGross:5};
 }
 function inpostServiceAktualizujWyceneUI(form,pricing=inpostServiceStan.pricing){
   const box=form?.querySelector("[data-inpost-pricing]");if(!box)return;
   if(!pricing){
-    box.innerHTML='<div class="inpost-price-empty"><b>Uzupełnij odbiorcę i paczkę</b><small>Klient zlecający jest opcjonalny. Test kosztu nie tworzy przesyłki.</small></div>';
+    box.innerHTML='<div class="inpost-price-empty"><b>Uzupełnij dane paczki i adresy</b><small>Koszt zostanie sprawdzony automatycznie w InPost.</small></div>';
     return;
   }
   if(pricing.loading){
-    box.innerHTML='<div class="inpost-price-empty inpost-live-price"><b><span class="inpost-live-dot"></span> Sprawdzam usługę w InPost…</b><small>Dla konta umownego koszt rozliczeniowy pochodzi z zapisanego cennika; odpowiedź ShipX służy kontroli technicznej. Ta operacja nie tworzy przesyłki.</small></div>';
+    box.innerHTML='<div class="inpost-price-empty"><b>Sprawdzam koszt w ShipX…</b><small>Wycena nie tworzy przesyłki.</small></div>';
     return;
   }
-  const total=inpostServiceWycenaKwota(pricing);
-  const contract=pricing.contractComparison||{},api=pricing.apiComparison||{},contractTotal=inpostServiceWycenaKwota({totalGross:contract.totalGross}),apiTotal=inpostServiceWycenaKwota({totalGross:api.totalGross}),difference=Number.isFinite(Number(contract.differenceGross))?Number(contract.differenceGross):null;
+  const total=inpostServiceWycenaKwota(pricing),rounded=total==null?null:inpostServicePelnaCenaKlienta(total),fee=Number.isFinite(Number(pricing.commissionGross))?Number(pricing.commissionGross):(rounded?.commissionGross||0),dataReady=inpostServiceMozeWycenic(inpostServicePayload(form));
   if(total==null){
-    box.innerHTML=`<div class="inpost-price-empty warning"><b>Brak bezpiecznej pełnej wyceny</b><small>${esc(pricing.apiWarning||pricing.message||"Uzupełnij brakujące stawki w cenniku umownym albo wybierz właściwy tryb rozliczenia.")}</small></div>${contractTotal==null?"":`<div class="inpost-contract-check"><span><b>Cennik umowny</b><small>${esc(contract.rateLabel||"stawka umowna")}${contract.complete===false?` • brak dopłat: ${esc((contract.unpricedOptions||[]).join(", ")||"uzupełnij cennik")}`:""}</small></span><strong>${zl(contractTotal)}</strong><em>${contract.complete===false?"niepełny":"gotowy"}</em></div>`}`;
+    box.innerHTML=`<div class="inpost-price-empty warning"><b>Brak pasującej stawki w cenniku umownym</b><small>${esc(pricing.message||"Uzupełnij właściwą stawkę w cenniku albo podaj pełny koszt ręcznie. ShipX pozostaje wyłącznie kontrolą porównawczą.")}</small></div>`;
     return;
   }
-  const tier=pricing.commissionTier||inpostServiceProwizjaDlaKosztu(total),fee=Math.max(0,Number(pricing.commissionGross??tier.commissionGross)||0),customer=Math.round((total+fee)*100)/100,b=pricing.breakdown||{},source=pricing.source==="manual"?"koszt awaryjny wpisany ręcznie":pricing.source==="contract_postpaid"?"cennik umowny InPost • postpaid":"bieżąca cena InPost / ShipX • prepaid";
-  if(form?.commissionGross)form.commissionGross.value=fee;
+  const customer=Number.isFinite(Number(pricing.customerTotalGross))?Number(pricing.customerTotalGross):rounded.customerTotalGross,b=pricing.breakdown||{},source=pricing.source==="manual"?"pełny koszt wpisany ręcznie":"Twój cennik umowny";
+  const api=pricing.apiComparison||{},difference=Number.isFinite(Number(api.differenceGross))?Number(api.differenceGross):null;
   box.innerHTML=`<div class="inpost-price-main"><span><small>Koszt nadania</small><strong>${zl(total)}</strong></span><span><small>Prowizja Artway-TM</small><strong>${zl(fee)}</strong></span><span class="total"><small>Kwota na FV klienta</small><strong>${zl(customer)}</strong></span></div>
-    <div class="inpost-price-meta"><span class="lvl ${pricing.source==="manual"?"lvl-ostrzezenie":"lvl-ok"}">${esc(source)}</span><span class="lvl lvl-info inpost-tier-badge">Próg: ${tier.overflow?`powyżej ${zl(tier.upToGross)}`:`do ${zl(tier.upToGross)}`} → ${zl(fee)}</span>${b.fuelGross!=null?`<small>Paliwo: ${zl(b.fuelGross)}</small>`:""}${b.codGross!=null?`<small>Pobranie: ${zl(b.codGross)}</small>`:""}</div>
-    ${pricing.apiWarning?`<div class="inpost-price-warning"><b>Ostatnia próba połączenia z ShipX:</b> ${esc(pricing.apiWarning)}.</div>`:""}
-    ${api.trusted===false&&apiTotal!=null?`<div class="inpost-price-warning"><b>Wynik techniczny ShipX ${zl(apiTotal)} został pominięty.</b> ${esc(api.message||"Dla konta postpaid nie jest to cena umowna i nie może trafić na fakturę.")}</div>`:""}
-    <div class="inpost-contract-check"><span><b>${pricing.source==="contract_postpaid"?"Zastosowana stawka umowna":"Cennik umowny — kontrola"}</b><small>${esc(contract.rateLabel||"brak stawki umownej")}${contract.complete===false&&contractTotal!=null?` • brak dopłat: ${esc((contract.unpricedOptions||[]).join(", ")||"uzupełnij cennik")}`:""}</small></span><strong>${contractTotal==null?"—":zl(contractTotal)}</strong><em>${difference==null?"potwierdzenie":`ShipX ${difference>0?"+":""}${zl(difference)}`}</em></div>`;
+    ${pricing.complete&&!pricing.apiWarning&&dataReady?'<div class="inpost-price-meta"><span class="lvl lvl-ok">Dane są poprawne</span><small>Formularz jest gotowy do utworzenia przesyłki.</small></div>':""}
+    ${pricing.complete&&!pricing.apiWarning?'<div class="inpost-price-meta"><span class="lvl lvl-ok">Cena dopasowana do pełnej kwoty</span><small>Prowizja pierwszego przedziału jest automatycznie dobierana w zakresie 4–5 zł.</small></div>':""}
+    <div class="inpost-price-meta"><span class="lvl ${pricing.complete?"lvl-ok":"lvl-ostrzezenie"}">${esc(source)}</span><small>${esc(pricing.rateLabel||"stawka indywidualna")}</small>${Number(b.extrasGross)>0?`<small>Dopłaty: ${zl(b.extrasGross)}</small>`:""}<small>Opłata paliwowa: w cenie</small></div>
+    ${pricing.complete?"":`<div class="inpost-price-warning"><b>Niepełna wycena opcji dodatkowych:</b> ${esc((pricing.unpricedOptions||[]).join(", ")||"brak stawki")}. Uzupełnij dopłaty w cenniku albo wpisz pełny koszt ręcznie — do tego czasu FV jest zablokowana.</div>`}
+    ${pricing.apiWarning?`<div class="inpost-price-warning"><b>Cennik umowny działa, ale ShipX odrzucił kontrolę:</b> ${esc(pricing.apiWarning)}. Popraw wskazane dane przed utworzeniem przesyłki.</div>`:""}
+    <div class="inpost-api-comparison"><span><b>Kontrola ShipX:</b> ${pricing.apiWarning?"niepotwierdzona":api.totalGross==null?"brak ceny API":zl(api.totalGross)}</span>${difference==null?"":`<span>Różnica: ${difference>0?"+":""}${zl(difference)}</span>`}<small>Dla konta postpaid wynik ShipX jest tylko kontrolą i nie zastępuje cennika umownego.</small></div>`;
 }
 function inpostServiceLokalnaWycena(form){
   const list=inpostServiceStan.settings?.priceList||{},type=String(form?.deliveryType?.value||"locker"),weight=Number(form?.weight?.value)||0,template=String(form?.template?.value||"");
@@ -1185,6 +1283,8 @@ function inpostServiceLokalnaWycena(form){
       if(dimensions[0]<=64&&dimensions[1]<=38){if(dimensions[2]<=8)size="small";else if(dimensions[2]<=19)size="medium";else if(dimensions[2]<=41)size="large";}
     }
     rate=list.locker?.[size]||null;rateKey=size?`locker.${size}`:"";
+  }else if(String(form?.elements?.sendingMethod?.value||"")==="parcel_locker"){
+    rate=list.courierManager?.[template]||null;rateKey=rate?`courierManager.${template}`:"";
   }else{
     rate=(list.courierStandard||[]).find(item=>weight<=Number(item.maxKg))||null;rateKey=rate?`courierStandard.${rate.maxKg}`:"";
   }
@@ -1192,58 +1292,52 @@ function inpostServiceLokalnaWycena(form){
   if(Number(form?.codAmount?.value)>0)selected.push(["Pobranie","codGross"]);
   if(Number(form?.insuranceAmount?.value)>0)selected.push(["Dodatkowa ochrona","insuranceGross"]);
   if(String(form?.elements?.weekend?.value||"")==="true")selected.push(["Paczka w Weekend","weekendGross"]);
-  if(form?.elements?.pickupRequested?.checked)selected.push(["Odbiór przez kuriera","pickupGross"]);
+  if(form?.elements?.sendingMethod?.value==="dispatch_order")selected.push(["Odbiór przez kuriera","pickupGross"]);
   if(form?.nonStandard?.checked)selected.push(["Element niestandardowy","nonStandardGross"]);
   form?.querySelectorAll('[name="additionalServices"]:checked').forEach(input=>{const labels={sms:["Powiadomienie SMS","smsGross"],email:["Powiadomienie e-mail","emailGross"],saturday:["Doręczenie w sobotę","saturdayGross"],dor1720:["Doręczenie 17:00–20:00","dor1720Gross"],rod:["Zwrot dokumentów","rodGross"]};if(labels[input.value])selected.push(labels[input.value]);});
   const unpricedOptions=selected.filter(([,key])=>extras[key]==null||extras[key]==="").map(([label])=>label),extrasGross=selected.reduce((sum,[,key])=>sum+(extras[key]==null||extras[key]===""?0:Number(extras[key])||0),0);
-  const totalGross=rate?Math.round((Number(rate.gross||0)+extrasGross)*100)/100:null,contractComplete=totalGross!=null&&unpricedOptions.length===0,pricingMode=inpostServiceStan.settings?.pricingMode==="prepaid"?"prepaid":"contract_postpaid",useContract=pricingMode==="contract_postpaid"&&contractComplete,tier=totalGross==null?null:inpostServiceProwizjaDlaKosztu(totalGross),fee=tier?.commissionGross||inpostServiceProgiProwizji()[0].commissionGross;
-  return {totalGross:useContract?totalGross:null,currency:"PLN",source:useContract?"contract_postpaid":"awaiting_shipx",pricingMode,available:useContract,complete:useContract,billingSafe:useContract,estimated:useContract,commissionGross:fee,commissionTier:tier,customerTotalGross:useContract?Math.round((totalGross+fee)*100)/100:null,breakdown:useContract?{baseGross:rate?.gross??null,extrasGross:Math.round(extrasGross*100)/100}:{},apiComparison:{totalGross:null,trusted:false,usedForBilling:false},contractComparison:{totalGross,baseGross:rate?.gross??null,extrasGross:Math.round(extrasGross*100)/100,rateKey,rateLabel:rate?.label||"",complete:contractComplete,unpricedOptions,fuelIncluded:true},message:useContract?"Koszt z zapisanego cennika umownego InPost.":pricingMode==="prepaid"?"Oczekuję na cenę ShipX dla konta prepaid.":"Uzupełnij brakujące stawki cennika umownego.",checkedAt:new Date().toISOString()};
+  const totalGross=rate?Math.round((Number(rate.gross||0)+extrasGross)*100)/100:null,rounded=totalGross==null?null:inpostServicePelnaCenaKlienta(totalGross);
+  return {totalGross,currency:"PLN",source:rate?"contract_price_list":"unavailable",available:totalGross!=null,complete:totalGross!=null&&unpricedOptions.length===0,rateKey,rateLabel:rate?.label||"",contractNet:rate?.net??null,commissionGross:rounded?.commissionGross||0,customerTotalGross:rounded?.customerTotalGross??null,minimumCommissionGross:4,maximumCommissionGross:5,breakdown:{baseGross:rate?.gross??null,extrasGross:Math.round(extrasGross*100)/100,fuelIncluded:true},unpricedOptions,apiComparison:inpostServiceStan.pricing?.apiComparison||{totalGross:null},checkedAt:new Date().toISOString()};
 }
 function inpostServicePrzelicz(form){
-  const manual=Math.max(0,Number(String(form?.carrierCostOverride?.value||"").replace(",","."))||0),tier=manual>0?inpostServiceProwizjaDlaKosztu(manual):null,fee=tier?.commissionGross||inpostServiceProgiProwizji()[0].commissionGross;
-  if(manual>0){const local=inpostServiceLokalnaWycena(form);inpostServiceStan.pricing={totalGross:manual,commissionGross:fee,commissionTier:tier,customerTotalGross:Math.round((manual+fee)*100)/100,currency:"PLN",source:"manual",estimated:false,available:true,complete:true,breakdown:{},unpricedOptions:[],apiComparison:{totalGross:null},contractComparison:local.contractComparison};}
+  const manual=Math.max(0,Number(String(form?.carrierCostOverride?.value||"").replace(",","."))||0),rounded=manual>0?inpostServicePelnaCenaKlienta(manual):null;
+  if(manual>0)inpostServiceStan.pricing={totalGross:manual,commissionGross:rounded.commissionGross,customerTotalGross:rounded.customerTotalGross,minimumCommissionGross:4,maximumCommissionGross:5,currency:"PLN",source:"manual",estimated:false,available:true,complete:true,breakdown:{},unpricedOptions:[],apiComparison:{totalGross:null}};
   else inpostServiceStan.pricing=inpostServiceLokalnaWycena(form);
   inpostServiceAktualizujWyceneUI(form);
 }
 function inpostServiceZaplanujWycene(form){
   clearTimeout(inpostServiceWycenaTimer);
-  inpostServiceWycenaToken+=1;
+  inpostServiceNormalizujNadawceKlienta(form);
+  inpostServiceAktualizujKartyStron(form);
+  inpostServiceAktualizujAdresZwrotu(form);
   inpostServicePrzelicz(form);
   inpostServiceWycenaTimer=setTimeout(()=>inpostServiceWycena(form,false),650);
 }
+function inpostServiceAktualizujKartyStron(form){
+  ["sender","receiver"].forEach(prefix=>{
+    const summary=form?.querySelector?.(`[data-inpost-selected-contact="${prefix}"]`);if(!summary)return;
+    summary.innerHTML=inpostServiceWybranyKontaktHTML(inpostServiceStronaOsoby(form,prefix),prefix);
+  });
+}
 async function inpostServiceWycena(form=document.getElementById("inpostServiceForm"),force=true){
-  if(!form)return null;
+  if(!form)return;
   const payload=inpostServicePayload(form);
   if(!inpostServiceMozeWycenic(payload)){
-    if(force)toast("Uzupełnij dane odbiorcy, paczki i sposób dostawy, aby wykonać test");
-    inpostServicePrzelicz(form);return inpostServiceStan.pricing;
+    if(force)toast("Uzupełnij adresy, kontakt i sposób dostawy, aby sprawdzić koszt");
+    inpostServicePrzelicz(form);return;
   }
-  const token=++inpostServiceWycenaToken,local=inpostServiceLokalnaWycena(form);
-  inpostServiceStan.pricing={loading:true,contractComparison:local.contractComparison};inpostServiceAktualizujWyceneUI(form);
+  inpostServiceStan.pricing={loading:true};inpostServiceAktualizujWyceneUI(form);
   try{
     const d=await chmura("inpost-service-quote",{method:"POST",body:payload,timeout:30000});
-    if(token!==inpostServiceWycenaToken)return inpostServiceStan.pricing;
     inpostServiceStan.pricing=d.pricing||null;
   }catch(e){
-    if(token!==inpostServiceWycenaToken)return inpostServiceStan.pricing;
     if(e.code==="inpost_quote_validation"){inpostServiceBladPol(e.details,form,false);inpostServiceStan.pricing={available:false,totalGross:null,message:e.message||"Uzupełnij dane nadania.",source:"validation"};}
     else inpostServiceStan.pricing={available:false,totalGross:null,message:e.message||String(e),source:"unavailable"};
   }
   inpostServiceAktualizujWyceneUI(form);
-  return inpostServiceStan.pricing;
 }
-async function inpostServiceTestuj(form=document.getElementById("inpostServiceForm"),button=null){
-  const result=form?.querySelector("[data-inpost-test-result]");
-  if(button){button.disabled=true;button.textContent="⏳ Testuję bez tworzenia…";}
-  try{
-    const pricing=await inpostServiceWycena(form,true);
-    const apiPrice=pricing.apiComparison?.totalGross,apiNoPrice=apiPrice==null,message=pricing.apiWarning?`ShipX zgłosił: ${pricing.apiWarning}`:pricing.source==="contract_postpaid"?`Test zakończony. Koszt ${zl(pricing.totalGross)} pochodzi z cennika umownego; techniczny wynik ShipX${apiNoPrice?" nie zawierał ceny":` ${zl(apiPrice)} nie został użyty do rozliczenia`}.`:apiNoPrice?"ShipX przyjął dane, ale nie zwrócił ceny prepaid.":"Test ShipX zakończony poprawnie. Cena prepaid pochodzi z InPost; nie utworzono przesyłki, etykiety ani numeru nadania.";
-    if(result)result.innerHTML=`<b>${pricing.apiWarning||apiNoPrice?"⚠️":"✅"} ${esc(message)}</b><br><small>Możesz poprawiać dane i powtarzać test dowolną liczbę razy.</small>`;
-    toast(message);
-  }finally{if(button){button.disabled=false;button.textContent="🧪 Test bez tworzenia";}}
-}
-function inpostServiceUstawTyp(form){
-  inpostServiceZastosujZgodnoscTypu(form);
+function inpostServiceUstawTyp(form,source=null){
+  inpostServiceZastosujZgodnoscTypu(form,source?.name==="deliveryType");
   inpostServiceZaplanujWycene(form);
 }
 function inpostServiceOsobaFields(prefix,title,person={}){
@@ -1265,13 +1359,14 @@ function inpostServiceOsobaFields(prefix,title,person={}){
       <label>Nazwisko<input name="${prefix}LastName" value="${esc(person.lastName||"")}"></label>
       <label>E-mail *<input name="${prefix}Email" type="email" required value="${esc(person.email||"")}"></label>
       <label>Telefon *<input name="${prefix}Phone" inputmode="tel" required value="${esc(person.phone||"")}"></label>
-      <label class="wide">Ulica ${prefix==="sender"?"*":""}<input name="${prefix}Street" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.street||"")}"></label>
+      <label>Kod pocztowy ${prefix==="sender"?"*":""}<input name="${prefix}PostCode" ${prefix==="sender"?"required":"data-receiver-address"} pattern="\\d{2}-?\\d{3}" inputmode="numeric" autocomplete="postal-code" value="${esc(a.postCode||a.post_code||"")}" oninput="inpostServiceKodPocztowyWpis(this,${jsArg(prefix)})"></label>
+      <label>Miasto ${prefix==="sender"?"*":""}<input name="${prefix}City" ${prefix==="sender"?"required":"data-receiver-address"} list="inpostService${prefix}CityHints" autocomplete="address-level2" value="${esc(a.city||"")}" oninput="inpostServiceMiastoWpis(this,${jsArg(prefix)})"><datalist id="inpostService${prefix}CityHints"></datalist></label>
+      <div class="backend-note wide" data-inpost-postcode-hint="${prefix}" hidden></div>
+      <label class="wide">Ulica ${prefix==="sender"?"*":""}<input name="${prefix}Street" ${prefix==="sender"?"required":"data-receiver-address"} list="inpostService${prefix}StreetHints" autocomplete="address-line1" value="${esc(a.street||"")}"><datalist id="inpostService${prefix}StreetHints"></datalist></label>
       <label>Nr budynku ${prefix==="sender"?"*":""}<input name="${prefix}Building" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.buildingNumber||a.building_number||"")}"></label>
       <label>Nr lokalu<input name="${prefix}Flat" value="${esc(a.flatNumber||a.flat_number||"")}"></label>
-      <label>Kod pocztowy ${prefix==="sender"?"*":""}<input name="${prefix}PostCode" ${prefix==="sender"?"required":"data-receiver-address"} pattern="\\d{2}-?\\d{3}" value="${esc(a.postCode||a.post_code||"")}"></label>
-      <label>Miasto ${prefix==="sender"?"*":""}<input name="${prefix}City" ${prefix==="sender"?"required":"data-receiver-address"} value="${esc(a.city||"")}"></label>
       ${prefix==="receiver"?'<button class="btn ghost wide" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie(\'receiver\')">📍 Znajdź Paczkomaty przy tym adresie</button>':""}
-      <div class="inpost-contact-roles wide"><b>Używaj tego adresu jako</b><label><input type="checkbox" name="${prefix}RoleSender" ${prefix==="sender"?"checked":""}> Klient zlecający</label><label><input type="checkbox" name="${prefix}RoleReceiver" ${prefix==="receiver"?"checked":""}> Odbiorca</label></div>
+      <div class="inpost-contact-roles wide"><b>Używaj tego adresu jako</b><label><input type="checkbox" name="${prefix}RoleSender" ${prefix==="sender"?"checked":""}> Nadawca</label><label><input type="checkbox" name="${prefix}RoleReceiver" ${prefix==="receiver"?"checked":""}> Odbiorca</label></div>
       <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt(${jsArg(prefix)},this)">💾 Zapisz w książce</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt(${jsArg(prefix)},this)">Usuń zapis</button></div>
       <label class="check wide"><input type="checkbox" name="save${prefix==="sender"?"Sender":"Receiver"}" checked> Zapamiętaj lub zaktualizuj ten adres po utworzeniu przesyłki</label>
     </div>
@@ -1302,127 +1397,101 @@ function inpostServiceCennikZForm(form){
   const extras={};["codGross","insuranceGross","weekendGross","pickupGross","smsGross","emailGross","saturdayGross","dor1720Gross","rodGross","nonStandardGross"].forEach(key=>{extras[key]=read(`extra_${key}`,null);});
   return {...current,locker:readGroup("locker",current.locker),courierStandard:(current.courierStandard||[]).map((rate,index)=>({...rate,net:read(`price_courier_${index}_net`,rate.net),gross:read(`price_courier_${index}_gross`,rate.gross)})),courierManager:readGroup("courierManager",current.courierManager),handoff:readGroup("handoff",current.handoff),quickReturns:readGroup("quickReturns",current.quickReturns),extras};
 }
-function inpostServiceProgProwizjiHTML(tier={upToGross:20,commissionGross:4},allowRemove=true){
-  return `<div class="inpost-commission-tier inpost-form-grid" data-inpost-commission-tier><label>Koszt wysyłki do (zł)<input data-tier-max type="number" min="0.01" step=".01" value="${esc(tier.upToGross)}"></label><label>Moja prowizja (zł)<input data-tier-fee type="number" min="0.01" step=".01" value="${esc(tier.commissionGross)}"></label>${allowRemove?'<button type="button" class="btn ghost inpost-tier-remove" onclick="inpostServiceUsunProgProwizji(this)">Usuń próg</button>':""}</div>`;
-}
-function inpostServiceProgiProwizjiHTML(){
-  const tiers=inpostServiceProgiProwizji(),allowRemove=tiers.length>4;
-  return `<section class="backend-note inpost-commission-settings inpost-service-workspace"><div class="order-section-head"><div><span class="order-pro-label">Automatyczne rozliczenie</span><h3>Progi mojej prowizji</h3></div><span class="lvl lvl-ok">minimum 4</span></div><div class="inpost-commission-tier-list inpost-form-grid" data-inpost-commission-tiers>${tiers.map(tier=>inpostServiceProgProwizjiHTML(tier,allowRemove)).join("")}</div><button class="btn ghost" type="button" onclick="inpostServiceDodajProgProwizji(this)">＋ Dodaj kolejny próg</button><small>Powyżej ostatniego progu obowiązuje ostatnia prowizja.</small></section>`;
-}
-function inpostServiceDodajProgProwizji(button){
-  const list=button?.closest(".inpost-commission-settings")?.querySelector("[data-inpost-commission-tiers]"),rows=list?.querySelectorAll("[data-inpost-commission-tier]")||[];if(!list)return;
-  if(rows.length>=10)return toast("Możesz ustawić maksymalnie 10 progów prowizji");
-  const last=rows[rows.length-1],upTo=(Number(last?.querySelector("[data-tier-max]")?.value)||0)+10,fee=(Number(last?.querySelector("[data-tier-fee]")?.value)||0)+2;
-  list.insertAdjacentHTML("beforeend",inpostServiceProgProwizjiHTML({upToGross:upTo,commissionGross:fee}));
-}
-function inpostServiceUsunProgProwizji(button){
-  const list=button?.closest("[data-inpost-commission-tiers]");if(!list)return;
-  if(list.querySelectorAll("[data-inpost-commission-tier]").length<=4)return toast("Muszą pozostać co najmniej 4 progi prowizji");
-  button.closest("[data-inpost-commission-tier]")?.remove();
-}
-function inpostServiceProgiZForm(form){
-  return [...form.querySelectorAll("[data-inpost-commission-tier]")].map(row=>({upToGross:Number(String(row.querySelector("[data-tier-max]")?.value||"").replace(",",".")),commissionGross:Number(String(row.querySelector("[data-tier-fee]")?.value||"").replace(",","."))})).filter(tier=>tier.upToGross>0&&tier.commissionGross>0).sort((a,b)=>a.upToGross-b.upToGross);
-}
-function inpostServiceOtworzUstawienia(){
-  location.hash="#/admin/wysylki/inpost-ustawienia";
-}
-function inpostServiceUstawDomyslneNadanie(form){
-  const method=String(form?.defaultSendingMethod?.value||"parcel_locker"),panel=form?.querySelector("[data-inpost-default-dropoff]");
-  if(panel)panel.hidden=method!=="parcel_locker";
-}
 async function inpostServiceZapiszUstawienia(event){
-  event.preventDefault();const form=event.currentTarget,button=form.querySelector('[type="submit"]'),commissionTiers=inpostServiceProgiZForm(form);
-  if(commissionTiers.length<4)return toast("Ustaw co najmniej 4 poprawne progi prowizji");
-  const body={commissionGross:commissionTiers[0].commissionGross,commissionTiers,pricingMode:form.pricingMode?.value||"contract_postpaid",defaultDeliveryType:form.defaultDeliveryType?.value||"locker",defaultSendingMethod:form.defaultSendingMethod?.value||"parcel_locker",defaultDropoffPoint:form.defaultDropoffPoint?.value||"",defaultParcelTemplate:form.defaultParcelTemplate?.value||"small",defaultParcelWeight:form.defaultParcelWeight?.value||1,defaultBillingMode:form.defaultBillingMode?.value||"none",defaultWeekend:form.defaultWeekend?.checked===true,labelDefaultFormat:form.labelDefaultFormat?.value||"A6",labelOpenMode:form.labelOpenMode?.value||"preview",labelAutoPrint:form.labelAutoPrint?.checked===true,sender:inpostServiceStronaOsoby(form,"sender"),priceList:inpostServiceCennikZForm(form)};
+  event.preventDefault();const form=event.currentTarget,button=form.querySelector('[type="submit"]'),body={commissionGross:form.commissionGross?.value||4,defaultDeliveryType:form.defaultDeliveryType?.value||"locker",defaultSendingMethod:form.defaultSendingMethod?.value||"parcel_locker",defaultDropoffPoint:form.defaultDropoffPoint?.value||"",labelDefaultFormat:form.labelDefaultFormat?.value||"A6",labelOpenMode:form.labelOpenMode?.value||"preview",labelAutoPrint:form.labelAutoPrint?.checked===true,sender:inpostServiceStronaOsoby(form,"sender"),priceList:inpostServiceCennikZForm(form)};
   if(button){button.disabled=true;button.textContent="Zapisuję cennik…";}
-  try{const d=await chmura("inpost-service-settings",{method:"POST",body,timeout:30000});inpostServiceStan.settings=d.settings||inpostServiceStan.settings;inpostServiceStan.pricing=null;toast("Ustawienia wysyłek zapisane ✅");renderuj();}catch(e){toast("Nie zapisano ustawień: "+(e.message||e));}
+  try{const d=await chmura("inpost-service-settings",{method:"POST",body,timeout:30000});inpostServiceStan.settings=d.settings||inpostServiceStan.settings;inpostServiceStan.pricing=null;toast("Cennik umowny, nadawca i prowizja zapisane ✅");renderuj();}catch(e){toast("Nie zapisano ustawień: "+(e.message||e));}
   finally{if(button){button.disabled=false;button.textContent="Zapisz cennik i ustawienia";}}
 }
+function inpostServicePrzejdzDoEtapu(id){
+  const target=document.getElementById(String(id||""));if(!target)return;
+  target.scrollIntoView({behavior:"smooth",block:"start"});
+  try{target.focus({preventScroll:true});}catch(e){}
+}
 function inpostServiceFormHTML(){
-  const settings=inpostServiceStan.settings||{},customer={},fee=inpostServiceProgiProwizji()[0].commissionGross,month=new Date().toISOString().slice(0,7),available=inpostServiceStan.serviceAvailability,requestId=inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference=`USL-${String(requestId).replace(/[^a-z0-9]/gi,"").slice(-10).toUpperCase()}`,defaultDelivery=settings.defaultDeliveryType==="courier"?"courier":"locker",defaultMethod=["parcel_locker","dispatch_order","pop"].includes(settings.defaultSendingMethod)?settings.defaultSendingMethod:"parcel_locker",defaultDropoff=String(settings.defaultDropoffPoint||"").toUpperCase(),savedTemplate=["small","medium","large","xlarge"].includes(settings.defaultParcelTemplate)?settings.defaultParcelTemplate:"small",defaultTemplate=defaultDelivery==="locker"&&savedTemplate==="xlarge"?"small":savedTemplate,defaultWeight=Math.max(.01,Math.min(30,Number(settings.defaultParcelWeight)||1)),defaultBilling=["none","single","monthly"].includes(settings.defaultBillingMode)?settings.defaultBillingMode:"none",defaultWeekend=settings.defaultWeekend===true;
+  const sender=inpostServicePustyNadawcaKlienta(),settings=inpostServiceStan.settings||{},month=new Date().toISOString().slice(0,7),available=inpostServiceStan.serviceAvailability,defaultDelivery=settings.defaultDeliveryType==="courier"?"courier":"locker",defaultMethod=["parcel_locker","dispatch_order","pop"].includes(settings.defaultSendingMethod)?settings.defaultSendingMethod:"parcel_locker";
   return `<section class="panel inpost-service-create">
-    <div class="order-section-head"><div><span class="order-pro-label">Wyślij przesyłkę</span><h2>Przesyłka InPost</h2><p class="order-detail-lead">Ten sam układ co w Managerze InPost: doręczenie, rozmiar, odbiorca, usługi i zawsze trzy sposoby nadania.</p></div><div class="inpost-main-actions"><span class="lvl ${available?.locker&&available?.courier?"lvl-ok":"lvl-ostrzezenie"}">${available?.locker&&available?.courier?"● ShipX połączony":"● Sprawdź usługi"}</span><a class="btn ghost" href="#/admin/wysylki/inpost-rejestr">📚 Rejestr nadań</a><a class="btn ghost" href="#/admin/wysylki/inpost-ustawienia">⚙️ Ustawienia</a></div></div>
-    <form id="inpostServiceForm" class="inpost-simple-form" onsubmit="inpostServiceUtworz(event)" oninput="inpostServiceReferencja(this);inpostServiceZaplanujWycene(this)" onchange="inpostServiceReferencja(this);inpostServiceZaplanujWycene(this)">
-      <input type="hidden" name="requestId" value="${esc(requestId)}">
+    <div class="order-section-head"><div><span class="order-pro-label">Nadanie klienta</span><h2>Utwórz przesyłkę InPost</h2></div><div class="diag-actions"><span class="lvl ${available?.locker?"lvl-ok":"lvl-ostrzezenie"}">Paczkomat ${available?.locker?"aktywny":"sprawdź"}</span><span class="lvl ${available?.courier?"lvl-ok":"lvl-ostrzezenie"}">Kurier ${available?.courier?"aktywny":"sprawdź"}</span></div></div>
+    <form id="inpostServiceForm" onsubmit="inpostServiceUtworz(event)" oninput="inpostServiceZaplanujWycene(this)" onchange="inpostServiceZaplanujWycene(this)">
+      <input type="hidden" name="requestId" value="${esc(inpostServiceStan.requestId||inpostServiceNowyRequestId())}">
+      <nav class="inpost-process-steps" aria-label="Etapy nadania"><button type="button" onclick="inpostServicePrzejdzDoEtapu('inpost-delivery')"><b>1</b><span>Doręczenie</span></button><button type="button" onclick="inpostServicePrzejdzDoEtapu('inpost-party-receiver')"><b>2</b><span>Odbiorca</span></button><button type="button" onclick="inpostServicePrzejdzDoEtapu('inpost-shipment-options')"><b>3</b><span>Paczka i nadanie</span></button><button type="button" onclick="inpostServicePrzejdzDoEtapu('inpost-settlement')"><b>4</b><span>Koszt i faktura</span></button></nav>
       <div class="inpost-shipment-builder">
-        <fieldset id="inpost-delivery" class="inpost-flow-delivery"><legend>Sposób doręczenia</legend>
+        <fieldset id="inpost-delivery"><legend>Sposób doręczenia</legend>
           <div class="inpost-delivery-choice">
-            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="locker" ${defaultDelivery==="locker"?"checked":""} onchange="inpostServiceUstawTyp(this.form)"><span><b>Paczkomat® 24/7</b><small>Doręczenie do automatu lub PaczkoPunktu</small></span></label>
-            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="courier" ${defaultDelivery==="courier"?"checked":""} onchange="inpostServiceUstawTyp(this.form)"><span><b>InPost Kurier</b><small>Doręczenie bezpośrednio pod adres</small></span></label>
+            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="locker" ${defaultDelivery==="locker"?"checked":""} onchange="inpostServiceUstawTyp(this.form,this)"><span><b>Paczkomat® 24/7</b><small>Doręczenie do automatu lub PaczkoPunktu</small></span></label>
+            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="courier" ${defaultDelivery==="courier"?"checked":""} onchange="inpostServiceUstawTyp(this.form,this)"><span><b>InPost Kurier</b><small>Doręczenie bezpośrednio pod adres</small></span></label>
           </div>
-          <div class="inpost-reference-row"><label>Numer referencyjny<input name="reference" required readonly maxlength="30" value="${esc(reference)}"><small>Krótki numer zlecenia do wyszukania przesyłki. Dane nadawcy są automatycznie przenoszone do pola „Uwagi”.</small></label></div>
+          <div class="inpost-reference-row"><label>Numer referencyjny<input name="reference" required value="USL-${Date.now().toString(36).toUpperCase()}" placeholder="Nazwij swoją przesyłkę"></label><span><b>📒 ${inpostServiceStan.addressBook?.length||0}</b><small>adresów w książce</small></span></div>
         </fieldset>
 
-        <fieldset id="inpost-party-customer" class="inpost-sender-context inpost-flow-customer"><legend>Klient zlecający — opcjonalnie</legend>
-          <input type="hidden" name="senderContactId" value="${esc(customer.id||"")}">
+        <fieldset id="inpost-party-sender" class="inpost-sender-context"><legend>Nadawca</legend>
+          <input type="hidden" name="senderContactId" value="${esc(sender.id||"")}">
           <input type="checkbox" name="senderRoleSender" checked hidden>
-          <div class="inpost-contact-selector"><div class="inpost-selected-contact" data-inpost-selected-contact="sender">${inpostServiceWybranyKontaktHTML(customer,"sender")}</div><div class="inpost-contact-selector-actions"><button class="btn" type="button" onclick="inpostServiceOtworzKsiazke('sender',this)">📒 Wybierz klienta</button><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres('sender',this)">＋ Nowy klient</button></div></div>
-          <details><summary>Opcjonalne dane do uwag ShipX, książki adresowej lub faktury — rozwiń</summary><div class="inpost-form-grid">
-            <label>Firma<input name="senderCompany" value="${esc(customer.companyName||"")}"></label><label>NIP<input name="senderTaxCode" inputmode="numeric" maxlength="10" value="${esc(customer.taxCode||"")}"></label><label>Imię<input name="senderFirstName" value="${esc(customer.firstName||"")}"></label><label>Nazwisko<input name="senderLastName" value="${esc(customer.lastName||"")}"></label><label>E-mail<input name="senderEmail" type="email" value="${esc(customer.email||"")}"></label><label>Telefon<input name="senderPhone" inputmode="tel" value="${esc(customer.phone||"")}"></label>
-            <label class="wide">Ulica<input name="senderStreet" value="${esc(customer.address?.street||"")}"></label><label>Nr budynku<input name="senderBuilding" value="${esc(customer.address?.buildingNumber||customer.address?.building_number||"")}"></label><label>Nr lokalu<input name="senderFlat" value="${esc(customer.address?.flatNumber||customer.address?.flat_number||"")}"></label><label>Kod pocztowy<input name="senderPostCode" pattern="\\d{2}-?\\d{3}" value="${esc(customer.address?.postCode||customer.address?.post_code||"")}"></label><label>Miasto<input name="senderCity" value="${esc(customer.address?.city||"")}"></label>
-            <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt('sender',this)">💾 Zapisz klienta w książce</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt('sender',this)">Usuń zapis</button></div><label class="check wide"><input type="checkbox" name="saveSender"> Zapamiętaj lub zaktualizuj klienta zlecającego</label>
+          <div class="inpost-contact-selector"><div class="inpost-selected-contact" data-inpost-selected-contact="sender">${inpostServiceWybranyKontaktHTML(sender,"sender")}</div><div class="inpost-contact-selector-actions"><button class="btn" type="button" onclick="inpostServiceOtworzKsiazke('sender',this)">📒 Wybierz z książki</button><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres('sender',this)">＋ Nowy adres</button></div></div>
+          <details><summary>Sprawdź lub popraw dane nadawcy</summary><div class="inpost-form-grid">
+            <label>Firma<input name="senderCompany" value="${esc(sender.companyName||"")}"></label><label>NIP<input name="senderTaxCode" inputmode="numeric" maxlength="10" value="${esc(sender.taxCode||"")}"></label><label>Imię<input name="senderFirstName" value="${esc(sender.firstName||"")}"></label><label>Nazwisko<input name="senderLastName" value="${esc(sender.lastName||"")}"></label><label>E-mail *<input name="senderEmail" type="email" required value="${esc(sender.email||"")}"></label><label>Telefon *<input name="senderPhone" inputmode="tel" required value="${esc(sender.phone||"")}"></label><small class="wide inpost-technical-contact-note"><b>Na etykiecie nadawcą jest wybrany klient.</b> Dane firmowe Artway-TM nie są wstawiane do pola nadawcy. Brakujący e-mail lub telefon może być uzupełniony kontaktem technicznym Artway-TM. Uwagi pozostają puste, chyba że poniżej świadomie włączysz wyjątkowy tryb Artway-TM.</small>
+            <label>Kod pocztowy *<input name="senderPostCode" required pattern="\\d{2}-?\\d{3}" inputmode="numeric" autocomplete="postal-code" value="${esc(sender.address?.postCode||sender.address?.post_code||"")}" oninput="inpostServiceKodPocztowyWpis(this,'sender')"></label><label>Miasto *<input name="senderCity" required list="inpostServicesenderCityHints" autocomplete="address-level2" value="${esc(sender.address?.city||"")}" oninput="inpostServiceMiastoWpis(this,'sender')"><datalist id="inpostServicesenderCityHints"></datalist></label><div class="backend-note wide" data-inpost-postcode-hint="sender" hidden></div><label class="wide">Ulica *<input name="senderStreet" required list="inpostServicesenderStreetHints" autocomplete="address-line1" value="${esc(sender.address?.street||"")}"><datalist id="inpostServicesenderStreetHints"></datalist></label><label>Nr budynku *<input name="senderBuilding" required value="${esc(sender.address?.buildingNumber||sender.address?.building_number||"")}"></label><label>Nr lokalu<input name="senderFlat" value="${esc(sender.address?.flatNumber||sender.address?.flat_number||"")}"></label>
+            <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt('sender',this)">💾 Zapisz w książce</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt('sender',this)">Usuń zapis</button></div><label class="check wide"><input type="checkbox" name="saveSender" checked> Zapamiętaj lub zaktualizuj nadawcę</label>
           </div></details>
         </fieldset>
 
-        <fieldset id="inpost-party-receiver" class="inpost-flow-receiver"><legend>Dane odbiorcy</legend>
+        <fieldset id="inpost-party-receiver"><legend>Dane odbiorcy</legend>
           <input type="hidden" name="receiverContactId">
           <input type="checkbox" name="receiverRoleReceiver" checked hidden>
           <div class="inpost-contact-selector"><div class="inpost-selected-contact" data-inpost-selected-contact="receiver">${inpostServiceWybranyKontaktHTML({},"receiver")}</div><div class="inpost-contact-selector-actions"><button class="btn" type="button" onclick="inpostServiceOtworzKsiazke('receiver',this)">📒 Wybierz z książki</button><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres('receiver',this)">＋ Nowy adres</button></div></div>
           <div class="inpost-form-grid">
-            <label>E-mail *<input name="receiverEmail" type="email" required placeholder="Adres e-mail odbiorcy"></label><label>Telefon *<input name="receiverPhone" inputmode="tel" required placeholder="9 cyfr"></label>
+            <label>E-mail *<input name="receiverEmail" type="email" required placeholder="Adres e-mail odbiorcy"></label><label>Telefon *<input name="receiverPhone" inputmode="tel" required placeholder="9 cyfr"></label><small class="wide inpost-technical-contact-note">Jeśli klient nie poda tych danych, formularz użyje kontaktu Artway-TM i oznaczy go jako techniczny.</small>
             <div class="wide" data-inpost-only="locker"><label>Punkt odbioru *<div class="inpost-inline"><input id="inpostServiceTargetPoint" name="targetPoint" required placeholder="Nazwa lub lokalizacja punktu"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape('target')">Mapa</button></div></label><div class="inpost-point-search"><input id="inpostServicePointSearch" placeholder="Miasto, kod, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow('target')">Szukaj</button><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie('receiver','target')">Przy adresie</button></div><div id="inpostServicePointResults"></div></div>
-            <div class="wide inpost-courier-address" data-inpost-only="courier"><div class="inpost-form-grid"><label>Imię i nazwisko<input name="receiverFirstName" placeholder="Imię"><input name="receiverLastName" placeholder="Nazwisko"></label><label>Nazwa firmy<input name="receiverCompany"></label><label>NIP<input name="receiverTaxCode" inputmode="numeric" maxlength="10"></label><label>Kod pocztowy *<input name="receiverPostCode" data-receiver-address pattern="\\d{2}-?\\d{3}"></label><label>Miasto *<input name="receiverCity" data-receiver-address></label><label class="wide">Ulica *<input name="receiverStreet" data-receiver-address></label><label>Nr budynku *<input name="receiverBuilding" data-receiver-address></label><label>Nr lokalu<input name="receiverFlat"></label></div></div>
+            <div class="wide inpost-courier-address" data-inpost-only="courier"><div class="inpost-form-grid"><label>Imię i nazwisko<input name="receiverFirstName" placeholder="Imię"><input name="receiverLastName" placeholder="Nazwisko"></label><label>Nazwa firmy<input name="receiverCompany"></label><label>NIP<input name="receiverTaxCode" inputmode="numeric" maxlength="10"></label><label>Kod pocztowy *<input name="receiverPostCode" data-receiver-address pattern="\\d{2}-?\\d{3}" inputmode="numeric" autocomplete="postal-code" oninput="inpostServiceKodPocztowyWpis(this,'receiver')"></label><label>Miasto *<input name="receiverCity" data-receiver-address list="inpostServicereceiverCityHints" autocomplete="address-level2" oninput="inpostServiceMiastoWpis(this,'receiver')"><datalist id="inpostServicereceiverCityHints"></datalist></label><div class="backend-note wide" data-inpost-postcode-hint="receiver" hidden></div><label class="wide">Ulica *<input name="receiverStreet" data-receiver-address list="inpostServicereceiverStreetHints" autocomplete="address-line1"><datalist id="inpostServicereceiverStreetHints"></datalist></label><label>Nr budynku *<input name="receiverBuilding" data-receiver-address></label><label>Nr lokalu<input name="receiverFlat"></label></div></div>
             <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt('receiver',this)">💾 Dodaj odbiorcę do książki</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt('receiver',this)">Usuń zapis</button></div><label class="check wide"><input type="checkbox" name="saveReceiver" checked> Zapamiętaj lub zaktualizuj odbiorcę</label>
           </div>
         </fieldset>
 
-        <fieldset id="inpost-shipment-options" class="inpost-flow-size"><legend>Rozmiar paczki</legend>
+        <fieldset id="inpost-shipment-options"><legend>Rozmiar paczki</legend>
           <div class="inpost-size-choice">
-            ${[["small","A","maks. 8 × 38 × 64 cm"],["medium","B","maks. 19 × 38 × 64 cm"],["large","C","maks. 41 × 38 × 64 cm"],["xlarge","D","maks. 80 × 50 × 50 cm"]].map(([value,label,description])=>`<label class="inpost-choice-card" ${value==="xlarge"?'data-inpost-size="xlarge" data-inpost-only="courier"':""}><input type="radio" name="template" value="${value}" ${value===defaultTemplate?"checked":""} onchange="inpostServiceUstawGabaryt(this.form,'${value}')"><span><b>${label}</b><small>${description}</small></span></label>`).join("")}
+            ${[["small","A","maks. 8 × 38 × 64 cm"],["medium","B","maks. 19 × 38 × 64 cm"],["large","C","maks. 41 × 38 × 64 cm"],["xlarge","D","maks. 80 × 50 × 50 cm"]].map(([value,label,description],index)=>`<label class="inpost-choice-card" ${value==="xlarge"?'data-inpost-size="xlarge" data-inpost-only="courier"':""}><input type="radio" name="template" value="${value}" ${index===0?"checked":""} onchange="inpostServiceUstawGabaryt(this.form,'${value}')"><span><b>${label}</b><small>${description}</small></span></label>`).join("")}
           </div>
           <input type="hidden" name="length" value="64"><input type="hidden" name="width" value="38"><input type="hidden" name="height" value="8">
-          <div class="inpost-form-grid inpost-parcel-details"><label>Waga (kg)<input name="weight" type="number" min=".01" max="30" step=".01" value="${esc(defaultWeight)}"></label><label class="check" data-inpost-only="courier"><input type="checkbox" name="nonStandard"> Element niestandardowy</label><label class="wide">Uwagi dla InPost — nadawca klienta<textarea name="comments" rows="2" maxlength="100" readonly placeholder="Uzupełnią się po podaniu klienta zlecającego"></textarea><small>Automatycznie: nazwa nadawcy i pełny adres. ShipX dopuszcza tutaj maksymalnie 100 znaków.</small></label></div>
+          <div class="inpost-form-grid inpost-parcel-details"><label>Waga (kg)<input name="weight" type="number" min=".01" max="30" step=".01" value="1"></label><label class="check" data-inpost-only="courier"><input type="checkbox" name="nonStandard"> Element niestandardowy</label><label class="wide">Dodatkowe uwagi (opcjonalne)<input name="comments" maxlength="100" placeholder="Domyślnie pozostają puste"></label><label class="check wide"><input type="checkbox" name="technicalSenderRequired" onchange="inpostServiceAktualizujAdresZwrotu(this.form);inpostServiceZaplanujWycene(this.form)"> Wyjątkowo: InPost wymaga danych Artway-TM jako nadawcy na etykiecie</label><small class="wide inpost-technical-contact-note">Zaznacz tylko wtedy, gdy InPost wymaga Artway-TM na etykiecie. W tym trybie dane wybranego klienta zostaną dopisane do uwag.</small><div class="backend-note wide inpost-return-address"><b>Automatyczny dopisek do uwag</b><span data-inpost-return-address>Domyślnie nic nie dopisujemy do uwag.</span></div></div>
         </fieldset>
 
-        <fieldset class="inpost-flow-extras"><legend>Dodatkowe usługi</legend>
+        <fieldset><legend>Dodatkowe usługi</legend>
           <div class="inpost-extra-services">
             <label>Wartość pobrania<input name="codAmount" type="number" min="0" step=".01" placeholder="Wpisz kwotę, aby nadać za pobraniem"></label>
             <div><span>Dodatkowa ochrona</span><div class="inpost-protection-choice">${[[0,"Brak"],[5000,"Do 5 000 zł"],[10000,"Do 10 000 zł"],[20000,"Do 20 000 zł"]].map(([value,label],index)=>`<label class="inpost-choice-card compact"><input type="radio" name="insuranceAmount" value="${value}" ${index===0?"checked":""}><span><b>${label}</b></span></label>`).join("")}</div></div>
-            <div data-inpost-only="locker"><span>Paczka w Weekend</span><div class="inpost-weekend-choice"><label class="inpost-choice-card compact"><input type="radio" name="weekend" value="false" ${defaultWeekend?"":"checked"}><span><b>Nie</b></span></label><label class="inpost-choice-card compact"><input type="radio" name="weekend" value="true" ${defaultWeekend?"checked":""}><span><b>Tak</b></span></label></div></div>
+            <div data-inpost-only="locker"><span>Paczka w Weekend</span><div class="inpost-weekend-choice"><label class="inpost-choice-card compact"><input type="radio" name="weekend" value="false" checked><span><b>Nie</b></span></label><label class="inpost-choice-card compact"><input type="radio" name="weekend" value="true"><span><b>Tak</b></span></label></div></div>
             <div class="inpost-courier-extras" data-inpost-only="courier"><label class="check"><input type="checkbox" name="additionalServices" value="sms"> SMS</label><label class="check"><input type="checkbox" name="additionalServices" value="email"> E-mail</label><label class="check"><input type="checkbox" name="additionalServices" value="saturday"> Sobota</label><label class="check"><input type="checkbox" name="additionalServices" value="dor1720"> 17:00–20:00</label><label class="check"><input type="checkbox" name="additionalServices" value="rod"> Zwrot dokumentów</label></div>
           </div>
         </fieldset>
 
-        <fieldset class="inpost-flow-method"><legend>Sposób nadania</legend>
-          <div class="inpost-method-choice">${inpostServiceMetodyNadania.locker.map(([value,label])=>`<label class="inpost-method-card" data-inpost-method-card><input type="radio" name="sendingMethod" value="${value}" ${value===defaultMethod?"checked":""} onchange="inpostServiceUstawTyp(this.form)"><span><b>${esc(label)}</b><small>${value==="parcel_locker"?"Wybierz automat nadawczy":value==="dispatch_order"?"Odbiór ze stałego adresu Artway‑TM":"Nadaj w obsługiwanym punkcie"}</small></span></label>`).join("")}</div>
-          <div class="inpost-dropoff-panel" data-inpost-dropoff-panel hidden><label><span data-inpost-dropoff-label>Automat nadawczy *</span><div class="inpost-inline"><input id="inpostServiceDropoffPoint" name="dropoffPoint" value="${esc(defaultDropoff)}" placeholder="Wybierz automat nadawczy"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape('dropoff')">Mapa</button></div><small data-inpost-dropoff-hint></small></label><div class="inpost-point-search"><input id="inpostServiceDropoffSearch" placeholder="Miasto, kod, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow('dropoff')">Szukaj</button></div><div id="inpostServiceDropoffResults"></div></div>
-          <div class="backend-note"><b>Odbiór przez kuriera zamawiasz osobno.</b> Po utworzeniu przesyłki przejdź do podstrony <a href="#/admin/wysylki/odbior-kuriera">Odbiór kuriera</a>.</div>
+        <fieldset><legend>Sposób nadania</legend>
+          <div class="backend-note inpost-method-compatibility" data-inpost-method-compatibility hidden><b>Domyślny Paczkomat nie jest dostępny dla Kuriera Standard.</b> InPost dopuszcza tutaj PaczkoPunkt/POP albo odbiór przez kuriera. Wybierz świadomie jedną z tych metod — formularz nie przełączy jej automatycznie.</div>
+          <div class="inpost-method-choice">${inpostServiceMetodyNadania.locker.map(([value,label])=>`<label class="inpost-method-card" data-inpost-method-card><input type="radio" name="sendingMethod" value="${value}" ${value===defaultMethod?"checked":""} onchange="inpostServiceUstawTyp(this.form)"><span><b>${esc(label)}</b><small>${value==="parcel_locker"?"Wybierz automat nadawczy":value==="dispatch_order"?"Odbiór z adresu nadawcy":"Nadaj w obsługiwanym punkcie"}</small></span></label>`).join("")}</div>
+          <div class="inpost-dropoff-panel" data-inpost-dropoff-panel hidden><label><span data-inpost-dropoff-label>Automat nadawczy *</span><div class="inpost-inline"><input id="inpostServiceDropoffPoint" name="dropoffPoint" value="${esc(settings.defaultDropoffPoint||"")}" placeholder="Wybierz automat nadawczy"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape('dropoff')">Mapa</button></div><small data-inpost-dropoff-hint></small></label><div class="inpost-point-search"><input id="inpostServiceDropoffSearch" placeholder="Miasto, kod, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow('dropoff')">Szukaj</button></div><div id="inpostServiceDropoffResults"></div></div>
         </fieldset>
 
-        <div class="inpost-options-layout inpost-flow-settlement">
+        <div class="inpost-options-layout">
         <fieldset class="inpost-billing-card" id="inpost-settlement"><legend>💰 Koszt i faktura Artway‑TM</legend>
-          <div class="inpost-pricing-layout"><div data-inpost-pricing></div><div class="inpost-pricing-controls"><label>Koszt ręczny — tylko awaryjnie<input name="carrierCostOverride" type="number" min="0" step=".01" placeholder="gdy brak pełnej stawki"></label><button class="btn ghost" type="button" onclick="inpostServiceWycena(this.form,true)">↻ Sprawdź wycenę InPost</button><a class="btn ghost" href="#/admin/wysylki/inpost-ustawienia">⚙️ Źródło cen i cennik</a></div></div>
+          <div class="inpost-pricing-layout"><div data-inpost-pricing></div><div class="inpost-pricing-controls"><label>Pełny koszt ręczny — tylko awaryjnie<input name="carrierCostOverride" type="number" min="0" step=".01" placeholder="zastępuje cennik umowny"></label><button class="btn ghost" type="button" onclick="inpostServiceWycena(this.form,true)">↻ Przelicz według umowy</button><a class="btn ghost" href="#/admin/wysylki/inpost-ustawienia">Otwórz cennik</a></div></div>
           <div class="inpost-settlement-grid">
-            <label class="inpost-settlement-option"><input type="radio" name="billingMode" value="none" ${defaultBilling==="none"?"checked":""}><span><b>Bez faktury</b><small>Tylko nadanie i rejestr kosztu</small></span></label>
-            <label class="inpost-settlement-option"><input type="radio" name="billingMode" value="single" ${defaultBilling==="single"?"checked":""}><span><b>FV od razu</b><small>Artway‑TM wystawia koszt nadania + prowizję</small></span></label>
-            <label class="inpost-settlement-option"><input type="radio" name="billingMode" value="monthly" ${defaultBilling==="monthly"?"checked":""}><span><b>FV miesięczna</b><small>Dopisz całe nadanie do rozliczenia klienta</small></span></label>
+            <label class="inpost-settlement-option"><input type="radio" name="billingMode" value="none" checked><span><b>Bez faktury</b><small>Tylko nadanie i rejestr kosztu</small></span></label>
+            <label class="inpost-settlement-option"><input type="radio" name="billingMode" value="single"><span><b>FV od razu</b><small>Artway‑TM wystawia koszt nadania + prowizję</small></span></label>
+            <label class="inpost-settlement-option"><input type="radio" name="billingMode" value="monthly"><span><b>FV miesięczna</b><small>Dopisz całe nadanie do rozliczenia klienta</small></span></label>
           </div>
-          <input name="commissionGross" type="hidden" value="${esc(fee)}"><div class="inpost-form-grid"><label>Miesiąc rozliczenia<input name="billingMonth" type="month" value="${esc(month)}"></label><div class="backend-note inpost-auto-fee"><small>Prowizja</small><b>Dobierana automatycznie do kosztu wysyłki</b></div></div>
-          <div class="backend-note"><b>FV: Artway‑TM → klient zlecający.</b> Firma i NIP są wymagane tylko dla faktury miesięcznej.</div>
+          <div class="inpost-form-grid"><label>Miesiąc rozliczenia<input name="billingMonth" type="month" value="${esc(month)}"></label><label>Pierwszy przedział prowizji<input value="4–5 zł" readonly><input name="commissionGross" type="hidden" value="4"><small>Cena końcowa jest zawsze zaokrąglana w górę do pełnej złotówki.</small></label></div>
+          <div class="backend-note"><b>FV: Artway‑TM → nadawca.</b> Odbiorca pozostaje wyłącznie stroną doręczenia.</div>
         </fieldset>
       </div>
       </div>
       <div class="inpost-form-errors" data-inpost-form-errors hidden></div>
-      <div class="backend-note inpost-test-note" data-inpost-test-result><b>Test niczego nie tworzy.</b> Sprawdza dane i wycenę przed prawdziwym nadaniem.</div>
-      <div class="inpost-create-footer"><button class="btn" type="button" data-inpost-test onclick="inpostServiceTestuj(this.form,this)">🧪 Test bez tworzenia</button><button class="btn danger" type="submit">🔴 Utwórz prawdziwą przesyłkę</button><small>Utworzenie wymaga jeszcze potwierdzenia w osobnym oknie.</small></div>
+      <div class="inpost-create-footer"><button class="btn" type="submit">🟡 Utwórz przesyłkę InPost</button></div>
     </form>
   </section>`;
 }
 function inpostServiceKosztHTML(item={}){
   const pricing=item.pricing||{},amount=inpostServiceWycenaKwota(pricing);
   if(amount==null)return '<span class="lvl lvl-ostrzezenie">cena niedostępna</span>';
-  const source=pricing.source==="manual"?"koszt awaryjny":pricing.source==="contract_postpaid"?"cennik umowny • postpaid":"InPost / ShipX • prepaid";
-  return `<b>${zl(amount)}</b><br><small>${source} • na FV ${zl(pricing.customerTotalGross??amount+(item.billing?.commissionGross||0))}</small>${pricing.apiComparison?.trusted===false&&pricing.apiComparison?.totalGross!=null?`<br><small>ShipX ${zl(pricing.apiComparison.totalGross)} pominięte jako techniczne</small>`:""}`;
+  return `<b>${zl(amount)}</b><br><small>${pricing.source==="manual"?"koszt ręczny":"cennik umowny"} • na FV ${zl(pricing.customerTotalGross??amount+(item.billing?.commissionGross||0))}</small>${pricing.complete===false?'<br><span class="lvl lvl-ostrzezenie">uzupełnij dopłaty</span>':""}`;
 }
 function inpostServiceHistoriaHTML(){
   const rows=inpostServiceLista();
@@ -1430,65 +1499,53 @@ function inpostServiceHistoriaHTML(){
   const row=item=>{
     const events=Array.isArray(item.trackingHistory)?item.trackingHistory:[];
     const label=item.labelReady?`${inpostServiceStatusLabel(item)}<br><small>${esc(inpostServiceStatusNazwa(item.inpostStatus))}</small>`:inpostServiceStatusLabel(item);
-    const customer=item.customer||item.sender||{};
     return `<tr data-stable-key="${esc(item.id)}">
+      <td data-label="Wybór"><label class="inpost-confirm-checkbox"><input type="checkbox" data-inpost-confirm-checkbox ${inpostServicePotwierdzenieWybrane.has(item.id)?"checked":""} onchange="inpostServiceZaznaczPotwierdzenie(${jsArg(item.id)},this.checked,this)"><span>Do wspólnego potwierdzenia</span></label></td>
       <td data-label="Nadanie"><b>${esc(item.reference||item.id)}</b><br><small>${esc(item.trackingNumber||"numer oczekuje")}</small><br><small>${esc(allegroDataTxt(item.createdAt))}</small></td>
-      <td data-label="Klient zlecający"><b>${esc(inpostServiceNazwaKontaktu(customer))}</b><br><small>${esc(inpostServiceAdresKsiazki(customer))}</small><br><small>${esc(customer.email||"")}</small></td>
       <td data-label="Odbiorca"><b>${esc(inpostServiceNazwaKontaktu(item.receiver))}</b><br><small>${esc(inpostServiceAdresKsiazki(item.receiver))}</small><br><small>${esc(item.receiver?.email||"")}</small></td>
       <td data-label="Usługa">${item.deliveryType==="locker"?"📮 Paczkomat":"🚚 Kurier"}${item.targetPoint?`<br><small>${esc(item.targetPoint)}</small>`:""}${item.weekend?'<br><span class="lvl lvl-info">Weekend</span>':""}${item.cod?.enabled?`<br><span class="lvl lvl-info">pobranie ${zl(item.cod.amount)}</span>`:""}</td>
       <td data-label="Koszt">${inpostServiceKosztHTML(item)}</td>
       <td data-label="Status">${label}<br><small>${events.length} zdarzeń • aktualizacja ${esc(inpostServiceDataPotwierdzenia(item.trackingUpdatedAt||item.updatedAt))}</small></td>
       <td data-label="Rozliczenie">${inpostServiceBillingLabel(item)}<br><small>FV klienta: ${item.billing?.mode==="none"?"—":zl(item.pricing?.customerTotalGross||0)}</small></td>
-      <td data-label="Akcje"><div class="inpost-row-actions"><button class="btn receipt" onclick="inpostServicePotwierdzenie(${jsArg(item.id)})">🖨️ Potwierdzenie</button><button class="btn ghost" onclick="inpostServiceHistoriaPrzesylki(${jsArg(item.id)})">📍 Historia paczki</button>${item.labelReady?`<button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A6')">A6</button><button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A4')">A4</button>`:""}${item.billing?.mode==="single"&&!["processing","created"].includes(String(item.billing?.link?.status||item.billing?.status))?`<button class="btn" ${item.pricing?.complete===true?"":"disabled title='Uzupełnij koszt przesyłki'"} onclick="inpostServiceFaktura(${jsArg(item.id)})">FV inFakt</button>`:""}${["creating","created"].includes(item.status)?`<button class="btn danger" onclick="inpostServiceAnuluj(${jsArg(item.id)})">Anuluj</button>`:""}</div></td>
+      <td data-label="Akcje"><div class="inpost-row-actions"><button class="btn receipt" onclick="inpostServicePotwierdzenie(${jsArg(item.id)})">🖨️ Potwierdzenie</button><button class="btn ghost" onclick="inpostServiceStatus(${jsArg(item.id)})">↻ Status</button>${item.labelReady?`<button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A6')">A6</button><button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A4')">A4</button>`:""}${item.labelReady&&!item.pickup?.id?`<button class="btn ghost" onclick="inpostServiceOdbior(${jsArg(item.id)})">🚚 Zamów kuriera</button>`:""}${item.billing?.mode==="single"&&!["processing","created"].includes(String(item.billing?.link?.status||item.billing?.status))?`<button class="btn" ${item.pricing?.complete===true?"":"disabled title='Uzupełnij koszt przesyłki'"} onclick="inpostServiceFaktura(${jsArg(item.id)})">FV inFakt</button>`:""}${["creating","created"].includes(item.status)?`<button class="btn danger" onclick="inpostServiceAnuluj(${jsArg(item.id)})">Anuluj</button>`:""}</div></td>
     </tr>`;
   };
-  return `<section class="panel inpost-service-history"><div class="order-section-head"><div><span class="order-pro-label">Rejestr</span><h2>Nadania i tracking</h2></div><button class="btn ghost" onclick="inpostServiceLaduj(true,false)">↻ Odśwież</button></div>${adminWyszukiwaniePanelHTML({id:"inpost-service-history",description:"Numer, klient, tracking lub rozliczenie.",fields,results:rows.length,active:!!(inpostServiceSzukaj||inpostServiceFiltr!=="wszystkie"||inpostServiceBillingFiltr!=="wszystkie"),open:true})}<div class="warehouse-worktable-wrap"><table class="log-table inpost-service-table admin-responsive-table"><thead><tr><th>Nadanie</th><th>Klient zlecający</th><th>Odbiorca</th><th>Usługa</th><th>Koszt</th><th>Status i historia</th><th>Rozliczenie</th><th>Akcje</th></tr></thead><tbody>${rows.map(row).join("")||'<tr><td colspan="8">Brak nadań pasujących do filtrów.</td></tr>'}</tbody></table></div></section>`;
+  return `<section class="panel inpost-service-history"><div class="order-section-head"><div><span class="order-pro-label">Rejestr</span><h2>Nadania i tracking</h2></div><button class="btn ghost" onclick="inpostServiceLaduj(true,false)">↻ Odśwież</button></div>${adminWyszukiwaniePanelHTML({id:"inpost-service-history",description:"Numer, klient, tracking lub rozliczenie.",fields,results:rows.length,active:!!(inpostServiceSzukaj||inpostServiceFiltr!=="wszystkie"||inpostServiceBillingFiltr!=="wszystkie"),open:true})}<div class="inpost-batch-confirmation"><div><b>Jedno potwierdzenie dla wielu paczek</b><small>Zaznacz przesyłki tego samego zleceniodawcy. Wybrano: <strong data-inpost-confirm-count>${inpostServicePotwierdzenieWybrane.size}</strong></small></div><div><button class="btn receipt" data-inpost-confirm-selected ${inpostServicePotwierdzenieWybrane.size?"":"disabled"} onclick="inpostServicePotwierdzenieZbiorcze()">🖨️ Potwierdzenie zbiorcze A4</button><button class="btn ghost" data-inpost-confirm-clear ${inpostServicePotwierdzenieWybrane.size?"":"disabled"} onclick="inpostServiceWyczyscWyborPotwierdzenia()">Wyczyść wybór</button></div></div><div class="warehouse-worktable-wrap"><table class="log-table inpost-service-table admin-responsive-table"><thead><tr><th>Wybór</th><th>Nadanie</th><th>Odbiorca</th><th>Usługa</th><th>Koszt</th><th>Status i historia</th><th>Rozliczenie</th><th>Akcje</th></tr></thead><tbody>${rows.map(row).join("")||'<tr><td colspan="8">Brak nadań pasujących do filtrów.</td></tr>'}</tbody></table></div></section>`;
 }
 function inpostServiceMiesieczneHTML(){
   const groups=inpostServiceStan.billing?.groups||[];if(!groups.length)return "";
   return `<section class="panel inpost-monthly-billing"><div class="order-section-head"><div><span class="order-pro-label">Faktury Artway‑TM</span><h2>Rozliczenia miesięczne</h2></div><a class="btn ghost" href="#/admin/infakt/wysylki">Otwórz w inFakt</a></div><div class="inpost-monthly-grid">${groups.map(group=>`<article><div><b>${esc(group.companyName||group.clientKey)}</b><small>${esc(group.month)} • ${group.count} nadań${group.taxCode?` • NIP ${esc(group.taxCode)}`:""}</small><small>Koszt nadań ${zl(group.carrierGross||0)} + prowizja ${zl(group.commissionGross||0)}</small>${group.incompletePrices?`<span class="lvl lvl-ostrzezenie">${group.incompletePrices} niepełnych wycen</span>`:""}</div><strong>${zl(group.customerTotalGross||0)}</strong><button class="btn" ${group.incompletePrices?"disabled title='Najpierw uzupełnij koszty'":""} onclick="inpostServiceFakturaMiesieczna(${jsArg(group.month)},${jsArg(group.clientKey)})">Utwórz FV Artway‑TM</button></article>`).join("")}</div></section>`;
 }
-function inpostServiceUstawieniaHTML(){
-  const settings=inpostServiceStan.settings||{},defaultMethod=["parcel_locker","dispatch_order","pop"].includes(settings.defaultSendingMethod)?settings.defaultSendingMethod:"parcel_locker";
-  return `<section class="panel inpost-service-settings"><div class="order-section-head"><div><span class="order-pro-label">Konfiguracja usługi</span><h2>Ustawienia nadań InPost</h2><p class="order-detail-lead">Domyślne wartości formularza, druk, prowizje i cennik kontrolny w jednym miejscu.</p></div><div class="inpost-main-actions"><a class="btn ghost" href="#/admin/wysylki/inpost-rejestr">📚 Rejestr nadań</a><a class="btn ghost" href="#/admin/wysylki/inpost">← Wróć do nadania</a></div></div><form id="inpostServiceSettingsForm" onsubmit="inpostServiceZapiszUstawienia(event)">
-    <details class="backend-note inpost-settings-group" open><summary><span>💰 Źródło kosztu InPost</span><small>Chroni faktury przed techniczną ceną domyślną ShipX</small></summary><div class="inpost-form-grid"><label class="wide">Rodzaj rozliczenia konta<select name="pricingMode"><option value="contract_postpaid" ${settings.pricingMode!=="prepaid"?"selected":""}>Umowa / postpaid — zalecane dla Artway‑TM</option><option value="prepaid" ${settings.pricingMode==="prepaid"?"selected":""}>Prepaid — cena bezpośrednio z ShipX</option></select><small>Na koncie postpaid endpoint kalkulacji może zwrócić brak ceny albo wartość domyślną. Wtedy podstawą jest pełny zapisany cennik umowny, a wynik ShipX pozostaje kontrolą techniczną.</small></label></div><div class="backend-note inpost-control-price-note"><b>Aktualnie: ${settings.pricingMode==="prepaid"?"prepaid — ShipX jest podstawą":"postpaid — cennik umowny jest podstawą"}.</b><span>Ręczna kwota jest jawnym trybem awaryjnym. Niepełna stawka lub brak dopłaty blokuje automatyczne rozliczenie zamiast zaniżać koszt.</span></div></details>
-    <details class="backend-note inpost-settings-group" open><summary><span>📮 Domyślne nadanie</span><small>Automatycznie uzupełnia każdy nowy formularz</small></summary><div class="inpost-form-grid">
-      <label>Domyślne doręczenie<select name="defaultDeliveryType"><option value="locker" ${settings.defaultDeliveryType!=="courier"?"selected":""}>Paczkomat® 24/7</option><option value="courier" ${settings.defaultDeliveryType==="courier"?"selected":""}>InPost Kurier</option></select></label>
-      <label>Domyślny sposób nadania<select name="defaultSendingMethod" onchange="inpostServiceUstawDomyslneNadanie(this.form)">${inpostServiceMetodyNadania.locker.map(([value,label])=>`<option value="${value}" ${value===defaultMethod?"selected":""}>${esc(label)}</option>`).join("")}</select></label>
-      <label>Domyślny gabaryt<select name="defaultParcelTemplate">${[["small","A — 8 × 38 × 64 cm"],["medium","B — 19 × 38 × 64 cm"],["large","C — 41 × 38 × 64 cm"],["xlarge","D — 80 × 50 × 50 cm"]].map(([value,label])=>`<option value="${value}" ${settings.defaultParcelTemplate===value?"selected":""}>${label}</option>`).join("")}</select></label>
-      <label>Domyślna waga (kg)<input name="defaultParcelWeight" type="number" min=".01" max="30" step=".01" value="${esc(settings.defaultParcelWeight||1)}"></label>
-      <label>Domyślne rozliczenie<select name="defaultBillingMode"><option value="none" ${settings.defaultBillingMode!=="single"&&settings.defaultBillingMode!=="monthly"?"selected":""}>Bez faktury</option><option value="single" ${settings.defaultBillingMode==="single"?"selected":""}>FV od razu</option><option value="monthly" ${settings.defaultBillingMode==="monthly"?"selected":""}>FV miesięczna</option></select></label>
-      <label class="check"><input type="checkbox" name="defaultWeekend" ${settings.defaultWeekend?"checked":""}><span><b>Domyślnie Paczka w Weekend</b><small>Tylko dla doręczenia Paczkomat®.</small></span></label>
-      <div class="wide" data-inpost-default-dropoff ${defaultMethod==="parcel_locker"?"":"hidden"}><label>Domyślny automat nadawczy<div class="inpost-inline"><input id="inpostServiceDefaultDropoffPoint" name="defaultDropoffPoint" value="${esc(settings.defaultDropoffPoint||"")}" placeholder="np. BOJ01N"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape('default-dropoff')">Mapa</button></div><small id="inpostServiceDefaultDropoffPointLabel">Ten punkt będzie wpisywany automatycznie w każdym nowym nadaniu do automatu.</small></label><div class="inpost-point-search"><input id="inpostServiceDefaultDropoffSearch" placeholder="Miasto, kod, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow('default-dropoff')">Szukaj</button></div><div id="inpostServiceDefaultDropoffResults"></div></div>
-    </div></details>
-    <details class="backend-note inpost-settings-group inpost-label-settings" open><summary><span>🏷️ Podgląd i druk etykiet</span><small>Jedne ustawienia dla sklepu, nadań InPost i Von Halsky</small></summary><div class="inpost-form-grid"><label>Domyślny format<select name="labelDefaultFormat"><option value="A6" ${settings.labelDefaultFormat!=="A4"?"selected":""}>A6 — drukarka etykiet</option><option value="A4" ${settings.labelDefaultFormat==="A4"?"selected":""}>A4 — zwykła drukarka</option></select><small>Używany przez główny przycisk etykiety na każdej podstronie.</small></label><label>Po kliknięciu etykiety<select name="labelOpenMode"><option value="preview" ${settings.labelOpenMode!=="browser"?"selected":""}>Podgląd w panelu — zalecane</option><option value="browser" ${settings.labelOpenMode==="browser"?"selected":""}>PDF w nowej karcie</option></select><small>Podgląd daje osobne przyciski drukowania i pobrania.</small></label><label class="check wide"><input type="checkbox" name="labelAutoPrint" ${settings.labelAutoPrint?"checked":""}><span><b>Automatycznie otwieraj okno drukowania</b><small>W zwykłym Chrome nadal zatwierdzasz druk. Cichy wydruk działa dopiero po włączeniu polityki Chrome dla stanowiska.</small></span></label></div><div class="inpost-printer-policy"><span>🖨️</span><div><b>Drukarka domyślna: Chrome / system operacyjny</b><small>Strona internetowa nie może samodzielnie przełączyć fizycznej drukarki. Na stanowisku pakowania wybiera ją ustawienie Chrome <code>DefaultPrinterSelection</code>; bez niego używana jest ostatnia lub systemowa drukarka.</small></div><em>${settings.labelAutoPrint?"automatyczny dialog włączony":"podgląd przed drukiem"}</em></div></details>
-    ${inpostServiceProgiProwizjiHTML()}
-    <details class="backend-note inpost-settings-group" ${settings.pricingMode!=="prepaid"?"open":""}><summary><span>🚚 Cennik umowny InPost</span><small>${settings.pricingMode==="prepaid"?"Kontrola ceny ShipX":"Podstawa rozliczenia konta postpaid"}</small></summary><div class="backend-note inpost-control-price-note"><b>${settings.pricingMode==="prepaid"?"W trybie prepaid cena podstawowa pochodzi z ShipX.":"W trybie postpaid pełna stawka umowna jest ceną podstawową."}</b><span>Każda wybrana dopłata musi mieć wpisaną stawkę. Brak stawki zatrzyma rozliczenie i pokaże konkretny problem.</span></div>${inpostServiceCennikHTML()}</details>
-    <details class="backend-note inpost-settings-group"><summary><span>🏢 Dane Artway‑TM</span><small>Adres odbioru przesyłek przez kuriera</small></summary><div class="backend-note"><b>Przy tworzeniu paczki nie wysyłamy pola nadawcy.</b> ShipX pobiera nadawcę z organizacji Artway‑TM. Te dane służą do zamawiania odbioru przez kuriera.</div>${inpostServiceOsobaFields("sender","Adres odbioru przez kuriera",inpostServiceNadawca())}</details>
-    <div class="inpost-settings-footer"><button class="btn" type="submit">💾 Zapisz ustawienia wysyłek</button><a class="btn ghost" href="#/admin/infakt/wysylki">Rozliczenia inFakt</a></div>
-  </form></section>`;
+function inpostServicePanelLadowania(){
+  if(!inpostServiceStan.loaded&&!inpostServiceStan.loading)setTimeout(()=>inpostServiceLaduj(false,true),0);
+  if(inpostServiceStan.loading&&!inpostServiceStan.loaded)return '<div class="panel"><div class="admin-loading-state">⏳ Pobieram konfigurację i rejestr InPost…</div></div>';
+  return "";
+}
+function inpostServiceStatystykiHTML(){
+  const billing=inpostServiceStan.billing||{};
+  return `<section class="inpost-service-stats"><article><span>📦</span><b>${inpostServiceStan.items.length}</b><small>nadań</small></article><article><span>📤</span><b>${inpostServiceAdresy().filter(c=>(c.roles||[]).includes("sender")).length}</b><small>nadawców</small></article><article><span>📥</span><b>${inpostServiceAdresy().filter(c=>(c.roles||[]).includes("receiver")).length}</b><small>odbiorców</small></article><article><span>🧾</span><b>${zl(billing.customerPendingGross||0)}</b><small>do FV miesięcznych</small></article></section>`;
+}
+function inpostServiceBladHTML(){return inpostServiceStan.error?`<div class="backend-note error"><b>Błąd:</b> ${esc(inpostServiceStan.error)}</div>`:"";}
+function panelRejestruWysylekInpost(){
+  const loading=inpostServicePanelLadowania();if(loading)return loading;
+  return `<div class="inpost-service-workspace">${inpostServiceStatystykiHTML()}${inpostServiceBladHTML()}${inpostServiceMiesieczneHTML()}${inpostServiceHistoriaHTML()}</div>`;
+}
+function inpostServiceUstawieniaGlowneHTML(){
+  const settings=inpostServiceStan.settings||{},delivery=settings.defaultDeliveryType==="courier"?"courier":"locker",method=["parcel_locker","dispatch_order","pop"].includes(settings.defaultSendingMethod)?settings.defaultSendingMethod:"parcel_locker";
+  return `<section class="panel inpost-service-defaults"><div class="order-section-head"><div><span class="order-pro-label">Domyślne wartości</span><h2>Nadanie i etykiety</h2><p class="order-detail-lead">Te ustawienia są używane przy każdym nowym formularzu. Nadal można je zmienić dla konkretnej paczki.</p></div></div><div class="inpost-form-grid"><label>Domyślne doręczenie<select name="defaultDeliveryType"><option value="locker" ${delivery==="locker"?"selected":""}>Paczkomat / PaczkoPunkt</option><option value="courier" ${delivery==="courier"?"selected":""}>Kurier InPost</option></select></label><label>Domyślny sposób nadania<select name="defaultSendingMethod"><option value="parcel_locker" ${method==="parcel_locker"?"selected":""}>Nadanie w Paczkomacie</option><option value="dispatch_order" ${method==="dispatch_order"?"selected":""}>Odbiór przez kuriera</option><option value="pop" ${method==="pop"?"selected":""}>Nadanie w PaczkoPunkcie</option></select></label><label>Domyślny automat nadawczy<input name="defaultDropoffPoint" value="${esc(settings.defaultDropoffPoint||"")}" placeholder="np. BOJ01N"></label><label>Domyślny format etykiety<select name="labelDefaultFormat"><option value="A6" ${settings.labelDefaultFormat!=="A4"?"selected":""}>A6 — drukarka etykiet</option><option value="A4" ${settings.labelDefaultFormat==="A4"?"selected":""}>A4 — Brother</option></select></label><label>Otwieranie etykiety<select name="labelOpenMode"><option value="preview" ${settings.labelOpenMode!=="browser"?"selected":""}>Podgląd przed drukiem</option><option value="browser" ${settings.labelOpenMode==="browser"?"selected":""}>Nowa karta PDF</option></select></label><label class="check"><input name="labelAutoPrint" type="checkbox" ${settings.labelAutoPrint===true?"checked":""}> Otwieraj okno drukowania automatycznie</label></div></section>`;
 }
 function panelUstawienWysylkiInpost(){
-  if(!inpostServiceStan.loaded&&!inpostServiceStan.loading)setTimeout(()=>inpostServiceLaduj(false,true),0);
-  if(inpostServiceStan.loading&&!inpostServiceStan.loaded)return '<div class="panel"><div class="admin-loading-state">⏳ Pobieram ustawienia InPost…</div></div>';
-  return `<div class="inpost-service-workspace">${inpostServiceStan.error?`<div class="backend-note error"><b>Błąd:</b> ${esc(inpostServiceStan.error)}</div>`:""}${inpostServiceUstawieniaHTML()}</div>`;
-}
-function panelRejestruWysylekInpost(){
-  if(!inpostServiceStan.loaded&&!inpostServiceStan.loading)setTimeout(()=>inpostServiceLaduj(false,true),0);
-  if(inpostServiceStan.loading&&!inpostServiceStan.loaded)return '<div class="panel"><div class="admin-loading-state">⏳ Pobieram rejestr nadań InPost…</div></div>';
-  const items=inpostServiceStan.items||[],active=items.filter(item=>!["cancelled","delivered","returned_to_sender"].includes(String(item.inpostStatus||item.status))),labels=items.filter(item=>item.labelReady),errors=items.filter(item=>item.status==="error"||item.error),monthly=Number(inpostServiceStan.billing?.pendingMonthly||0);
-  return `<div class="inpost-service-workspace"><section class="inpost-service-stats"><article><span>📦</span><b>${items.length}</b><small>wszystkich nadań</small></article><article><span>🚚</span><b>${active.length}</b><small>aktywnych przesyłek</small></article><article><span>🏷️</span><b>${labels.length}</b><small>gotowych etykiet</small></article><article><span>⚠️</span><b>${errors.length}</b><small>wymaga uwagi</small></article></section><section class="panel inpost-register-intro"><div class="order-section-head"><div><span class="order-pro-label">Osobna podstrona operacyjna</span><h2>Rejestr nadań InPost</h2><p class="order-detail-lead">Tracking, etykiety, potwierdzenia i rozliczenia bez mieszania z formularzem nowej przesyłki.</p></div><div class="inpost-main-actions">${monthly?`<span class="lvl lvl-ostrzezenie">${monthly} do FV miesięcznej</span>`:""}<a class="btn" href="#/admin/wysylki/inpost">＋ Nowa przesyłka</a><button class="btn ghost" type="button" onclick="inpostServiceLaduj(true,false)">↻ Synchronizuj</button></div></div></section>${inpostServiceStan.error?`<div class="backend-note error"><b>Błąd:</b> ${esc(inpostServiceStan.error)}</div>`:""}${inpostServiceMiesieczneHTML()}${inpostServiceHistoriaHTML()}</div>`;
+  const loading=inpostServicePanelLadowania();if(loading)return loading;
+  return `<div class="inpost-service-workspace">${inpostServiceBladHTML()}<form id="inpostServiceSettingsForm" class="inpost-service-settings-page" onsubmit="inpostServiceZapiszUstawienia(event)">${inpostServiceUstawieniaGlowneHTML()}<section class="panel">${inpostServiceCennikHTML()}</section><section class="panel">${inpostServiceOsobaFields("sender","Stałe dane nadawcy",inpostServiceNadawca())}</section><div class="panel inpost-settings-footer"><label>Pierwszy przedział prowizji<input value="4–5 zł" readonly><input name="commissionGross" type="hidden" value="4"><small>Cena końcowa jest zawsze zaokrąglana w górę do pełnej złotówki.</small></label><button class="btn" type="submit">💾 Zapisz ustawienia InPost</button></div></form></div>`;
 }
 function panelOdbioruKurieraInpost(){
-  if(!inpostServiceStan.loaded&&!inpostServiceStan.loading)setTimeout(()=>inpostServiceLaduj(false,true),0);
-  if(inpostServiceStan.loading&&!inpostServiceStan.loaded)return '<div class="panel"><div class="admin-loading-state">⏳ Pobieram przesyłki do odbioru…</div></div>';
-  const rows=(inpostServiceStan.items||[]).filter(item=>item.sendingMethod==="dispatch_order"),ordered=rows.filter(item=>item.pickup?.id),ready=rows.filter(item=>!item.pickup?.id&&item.inpostId&&!['cancelled','error'].includes(item.status)),waiting=rows.filter(item=>!item.pickup?.id&&!ready.includes(item));
-  const row=item=>`<tr data-stable-key="${esc(item.id)}"><td data-label="Przesyłka"><b>${esc(item.reference||item.id)}</b><br><small>${esc(item.trackingNumber||"numer oczekuje")}</small></td><td data-label="Odbiorca"><b>${esc(item.receiver?.companyName||`${item.receiver?.firstName||""} ${item.receiver?.lastName||""}`.trim()||"Klient")}</b><br><small>${esc(item.receiver?.city||item.receiver?.address?.city||"")}</small></td><td data-label="Stan">${inpostServiceStatusLabel(item)}${item.pickup?.id?`<br><span class="lvl lvl-ok">kurier zamówiony</span>`:""}</td><td data-label="Akcja"><div class="inpost-row-actions">${item.pickup?.id?`<span class="lvl lvl-ok">Odbiór ${esc(item.pickup.id)}</span>`:item.inpostId&&!['cancelled','error'].includes(item.status)?`<button class="btn" type="button" onclick="inpostServiceOdbior(${jsArg(item.id)})">🚚 Zamów kuriera</button><button class="btn ghost" type="button" onclick="inpostServiceStatus(${jsArg(item.id)})">↻ Sprawdź gotowość</button>`:'<button class="btn" type="button" disabled>Najpierw utwórz przesyłkę</button>'}</div></td></tr>`;
-  return `<div class="inpost-service-workspace"><section class="inpost-service-stats"><article><span>🚚</span><b>${ready.length}</b><small>możliwych do zlecenia</small></article><article><span>✅</span><b>${ordered.length}</b><small>odbiorów zamówionych</small></article><article><span>⏳</span><b>${waiting.length}</b><small>oczekuje na przesyłkę</small></article><article><span>📦</span><b>${rows.length}</b><small>paczek kurierskich</small></article></section><section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Odbiór ze stałego adresu Artway‑TM</span><h2>Odbiór kuriera InPost</h2><p class="order-detail-lead">Tutaj zamawiasz kuriera tylko do paczek oznaczonych „Przesyłkę odbierze kurier InPost”.</p></div><div class="diag-actions"><a class="btn ghost" href="#/admin/wysylki/inpost">＋ Nowe nadanie</a><button class="btn ghost" type="button" onclick="inpostServiceLaduj(true,false)">↻ Odśwież</button></div></div><div class="backend-note"><b>Bezpieczne potwierdzenie:</b> kliknięcie „Zamów kuriera” zawsze pokaże dodatkowe pytanie przed wysłaniem prawdziwego zlecenia do InPost.</div><div class="warehouse-worktable-wrap"><table class="log-table admin-responsive-table"><thead><tr><th>Przesyłka</th><th>Odbiorca</th><th>Stan</th><th>Akcja</th></tr></thead><tbody>${rows.map(row).join("")||'<tr><td colspan="4">Brak paczek z wybranym odbiorem przez kuriera.</td></tr>'}</tbody></table></div></section></div>`;
+  const loading=inpostServicePanelLadowania();if(loading)return loading;
+  const active=(inpostServiceStan.items||[]).filter(item=>item.labelReady&&item.status!=="cancelled"),waiting=active.filter(item=>!item.pickup?.id),booked=active.filter(item=>item.pickup?.id);
+  const rows=items=>items.map(item=>`<tr><td data-label="Nadanie"><b>${esc(item.reference||item.id)}</b><br><small>${esc(item.trackingNumber||"")}</small></td><td data-label="Nadawca"><b>${esc(inpostServiceNazwaKontaktu(item.sender))}</b><br><small>${esc(inpostServiceAdresKsiazki(item.sender))}</small></td><td data-label="Paczka">${item.deliveryType==="courier"?"Kurier":"Paczkomat"} • ${esc(item.parcel?.template||"")} • ${esc(item.parcel?.weight||1)} kg</td><td data-label="Odbiór">${item.pickup?.id?`<span class="lvl lvl-ok">zlecony</span><br><small>${esc(item.pickup.status||item.pickup.id)}</small>`:`<button class="btn" type="button" onclick="inpostServiceOdbior(${jsArg(item.id)})">🚚 Zamów kuriera</button>`}</td></tr>`).join("");
+  return `<div class="inpost-service-workspace">${inpostServiceBladHTML()}<section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Gotowe etykiety</span><h2>Paczki do zgłoszenia kurierowi</h2><p class="order-detail-lead">Kliknięcie „Zamów kuriera” wysyła osobne zlecenie odbioru do InPost dopiero dla wybranej paczki.</p></div><button class="btn ghost" type="button" onclick="inpostServiceLaduj(true,false)">↻ Odśwież</button></div><div class="warehouse-worktable-wrap"><table class="log-table admin-responsive-table"><thead><tr><th>Nadanie</th><th>Nadawca</th><th>Paczka</th><th>Odbiór</th></tr></thead><tbody>${rows(waiting)||'<tr><td colspan="4">Brak paczek oczekujących na zlecenie odbioru.</td></tr>'}</tbody></table></div></section>${booked.length?`<section class="panel"><h2>Odbiory już zlecone</h2><div class="warehouse-worktable-wrap"><table class="log-table admin-responsive-table"><thead><tr><th>Nadanie</th><th>Nadawca</th><th>Paczka</th><th>Odbiór</th></tr></thead><tbody>${rows(booked)}</tbody></table></div></section>`:""}</div>`;
 }
 function panelWysylkiUslugowejInpost(){
-  if(!inpostServiceStan.loaded&&!inpostServiceStan.loading)setTimeout(()=>inpostServiceLaduj(false,true),0);
-  if(inpostServiceStan.loading&&!inpostServiceStan.loaded)return '<div class="panel"><div class="admin-loading-state">⏳ Pobieram książkę adresową, konfigurację i rejestr nadań…</div></div>';
-  setTimeout(()=>{const form=document.getElementById("inpostServiceForm");inpostServiceReferencja(form);inpostServiceUstawGabaryt(form,form?.elements?.template?.value||"small",false);inpostServiceUstawTyp(form);inpostServiceAktualizujWyceneUI(form);inpostServiceAdresPodpowiedzi(form,"sender");inpostServiceAdresPodpowiedzi(form,"receiver");},0);
-  return `<div class="inpost-service-workspace">${inpostServiceStan.error?`<div class="backend-note error"><b>Błąd:</b> ${esc(inpostServiceStan.error)}</div>`:""}${inpostServiceFormHTML()}</div>`;
+  const loading=inpostServicePanelLadowania();if(loading)return loading;
+  setTimeout(()=>{const form=document.getElementById("inpostServiceForm");inpostServiceUstawTyp(form);inpostServiceAktualizujWyceneUI(form);inpostServiceAdresPodpowiedzi(form,"sender");inpostServiceAdresPodpowiedzi(form,"receiver");},0);
+  return `<div class="inpost-service-workspace">${inpostServiceStatystykiHTML()}${inpostServiceBladHTML()}${inpostServiceFormHTML()}${inpostServiceMiesieczneHTML()}</div>`;
 }

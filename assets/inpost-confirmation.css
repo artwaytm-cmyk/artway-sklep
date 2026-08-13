@@ -1,0 +1,437 @@
+@page {
+  size: A4 portrait;
+  margin: 8mm;
+}
+
+:root {
+  color: #000;
+  background: #fff;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 16px;
+  background: #fff;
+}
+
+.sheet {
+  width: 100%;
+  max-width: 194mm;
+  min-height: 281mm;
+  margin: 0 auto;
+  border: 1.5px solid #000;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+}
+
+.head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 18px;
+  align-items: start;
+  padding: 16px 18px;
+  border-bottom: 2px solid #000;
+}
+
+.brand {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.head h1 {
+  margin: 8px 0 2px;
+  font-size: 21px;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.head small,
+.head-meta small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+.head-meta {
+  font-size: 12px;
+  text-align: right;
+}
+
+.status {
+  padding: 11px 18px;
+  border-bottom: 1px solid #000;
+}
+
+.status b {
+  display: block;
+  font-size: 15px;
+}
+
+.status span {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.content {
+  flex: 1;
+  padding: 14px 18px;
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-bottom: 12px;
+  border: 1px solid #000;
+}
+
+.meta div {
+  min-height: 54px;
+  padding: 9px 10px;
+  border-right: 1px solid #000;
+}
+
+.meta div:last-child {
+  border-right: 0;
+}
+
+.meta small,
+.party small,
+.parcel small,
+.final-price small {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.meta b {
+  font-size: 12px;
+}
+
+.parties {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 12px;
+  border: 1px solid #000;
+}
+
+.party {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  min-height: 118px;
+  padding: 10px;
+}
+
+.party:first-child {
+  border-right: 1px solid #000;
+}
+
+.party span {
+  font-size: 11px;
+}
+
+.party.issuer {
+  background: #f5f5f5;
+}
+
+.shipments {
+  width: 100%;
+  margin: 0 0 12px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 9px;
+}
+
+.shipments th,
+.shipments td {
+  padding: 6px;
+  border: 1px solid #000;
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.shipments th {
+  background: #efefef;
+  font-size: 8px;
+  letter-spacing: .025em;
+  text-transform: uppercase;
+}
+
+.shipments th:first-child,
+.shipments td:first-child {
+  width: 7mm;
+  text-align: center;
+}
+
+.shipments th:nth-child(2) { width: 34mm; }
+.shipments th:nth-child(3) { width: 42mm; }
+.shipments th:nth-child(4) { width: 43mm; }
+
+.shipments b,
+.shipments small {
+  display: block;
+}
+
+.shipments small {
+  margin-top: 3px;
+  font-size: 8px;
+  line-height: 1.35;
+}
+
+.shipments tr {
+  break-inside: avoid;
+}
+
+.final-price {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 14px;
+  align-items: end;
+  margin: 12px 0;
+  padding: 11px 12px;
+  border: 2px solid #000;
+  break-inside: avoid;
+}
+
+.final-price small {
+  margin: 0;
+}
+
+.final-price b {
+  grid-row: 1 / 3;
+  grid-column: 2;
+  font-size: 22px;
+  white-space: nowrap;
+}
+
+.final-price span {
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.parcel {
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid #000;
+}
+
+.parcel b,
+.parcel span {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+}
+
+.section-title {
+  margin: 16px 0 7px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #000;
+  font-size: 13px;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+}
+
+.timeline {
+  margin: 0;
+  padding: 0;
+  border: 1px solid #000;
+  list-style: none;
+}
+
+.timeline li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 7px 9px;
+  border-bottom: 1px solid #000;
+  break-inside: avoid;
+}
+
+.timeline li:last-child {
+  border-bottom: 0;
+}
+
+.timeline b {
+  font-size: 11px;
+}
+
+.timeline span,
+.timeline small {
+  font-size: 10px;
+}
+
+.timeline small {
+  grid-column: 1 / -1;
+}
+
+.track-link {
+  display: inline-block;
+  margin-top: 10px;
+  color: #000;
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.warning {
+  margin: 0 18px 12px;
+  padding: 9px;
+  border: 1.5px solid #000;
+  font-size: 11px;
+}
+
+.signatures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 22px;
+}
+
+.signature-box {
+  height: 74px;
+  padding-top: 50px;
+  border-bottom: 1px solid #000;
+  font-size: 10px;
+  text-align: center;
+}
+
+.stamp-box {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 74px;
+  padding: 7px;
+  border: 1px solid #000;
+  font-size: 10px;
+}
+
+.formal-note {
+  margin: 14px 0 0;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 10px 18px;
+  border-top: 1px solid #000;
+  font-size: 8px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 18px;
+}
+
+.actions > div {
+  display: grid;
+  margin-right: 8px;
+  font-size: 11px;
+}
+
+.actions > div small {
+  margin-top: 2px;
+}
+
+.actions button {
+  padding: 9px 15px;
+  border: 1px solid #000;
+  background: #000;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.actions button:last-child {
+  background: #fff;
+  color: #000;
+}
+
+@media (max-width: 650px) {
+  body {
+    padding: 0;
+  }
+
+  .sheet {
+    border-right: 0;
+    border-left: 0;
+  }
+
+  .head {
+    grid-template-columns: 1fr;
+  }
+
+  .head-meta {
+    text-align: left;
+  }
+
+  .meta,
+  .parties,
+  .signatures {
+    grid-template-columns: 1fr;
+  }
+
+  .meta div,
+  .party:first-child {
+    border-right: 0;
+    border-bottom: 1px solid #000;
+  }
+
+  .shipments {
+    display: block;
+    overflow-x: auto;
+    table-layout: auto;
+  }
+
+  .final-price {
+    grid-template-columns: 1fr;
+  }
+
+  .final-price b {
+    grid-row: auto;
+    grid-column: auto;
+  }
+
+  .foot {
+    display: block;
+  }
+
+  .foot span {
+    display: block;
+    margin-top: 4px;
+  }
+}
+
+@media print {
+  body {
+    padding: 0;
+  }
+
+  .sheet {
+    width: 194mm;
+    max-width: 194mm;
+    min-height: 281mm;
+    margin: 0;
+  }
+
+  .actions {
+    display: none;
+  }
+}

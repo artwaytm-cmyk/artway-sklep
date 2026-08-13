@@ -150,27 +150,7 @@ export function createInpostRoute(deps = {}) {
       const order = (Array.isArray(rec.items) ? rec.items : []).find((item) => item.nr === nr);
       if (!order) return respond({ ok: false, error: 'Nie znaleziono zamówienia', code: 'not_found' }, 404);
       const validation = validateShipment(order);
-      if (!validation.ok) return respond({ ok: false, error: 'Uzupełnij dane zamówienia potrzebne do wyceny InPost.', code: 'inpost_quote_validation', details: validation.errors }, 422);
-      const config = configure();
-      if (!config.configured) return respond({ ok: false, error: 'InPost nie jest skonfigurowany po stronie serwera.', code: 'inpost_not_configured' }, 503);
-      const payload = shipmentPayload(order, config, validation);
-      let shipxRaw = {};
-      try {
-        shipxRaw = await call(`/v1/organizations/${encodeURIComponent(config.orgId)}/shipments/calculate`, {
-          method: 'POST',
-          bodyObj: {
-            shipments: [{
-              id: nr,
-              ...payload,
-              parcels: Array.isArray(payload.parcels) ? payload.parcels[0] : payload.parcels,
-            }],
-          },
-        });
-      } catch (error) {
-        const pricing = await contractPricingForOrder(order, validation);
-        return respond({ ok: true, nr, pricing: { ...pricing, apiWarning: text(error.message, 500) } });
-      }
-      const pricing = await contractPricingForOrder(order, validation, shipxRaw);
+      const pricing = await contractPricingForOrder(order, validation);
       return respond({ ok: true, nr, pricing });
     }
 
@@ -228,11 +208,11 @@ export function createInpostRoute(deps = {}) {
       }
       const numer = trackingNumber(daneAktualne) || trackingNumber(dane);
       const statusShipX = shipmentStatus(daneAktualne) || shipmentStatus(dane);
-      const isLabelReady = labelReady(daneAktualne) || labelReady(dane);
+      const etykietaGotowa = labelReady(daneAktualne) || labelReady(dane);
       const ofertaId = offerId(daneAktualne) || offerId(dane);
       const contractPricing = await contractPricingForOrder(z, walidacja, daneAktualne || dane);
       const teraz = new Date().toLocaleString('pl-PL');
-      const opisGotowosci = isLabelReady ? 'etykieta gotowa' : 'czeka na potwierdzenie/opłacenie w InPost';
+      const opisGotowosci = etykietaGotowa ? 'etykieta gotowa' : 'czeka na potwierdzenie/opłacenie w InPost';
       const historia = [...(Array.isArray(z?.wysylka?.historia) ? z.wysylka.historia : []), { czas: teraz, status: 'Przesyłka utworzona w InPost', opis: `${inpostId ? 'ID ' + inpostId : ''}${numer ? ' • ' + numer : ''}${statusShipX ? ' • ' + statusShipX : ''}${ofertaId ? ' • oferta ' + ofertaId : ''} • ${opisGotowosci}`, zewnetrzneId: inpostId }];
       const patch = {
         przewoznik: 'inpost',
@@ -241,13 +221,13 @@ export function createInpostRoute(deps = {}) {
         inpostId,
         inpostStatus: statusShipX,
         inpostOfertaId: ofertaId,
-        etykietaGotowa: isLabelReady,
+        etykietaGotowa,
         numer: numer || z?.wysylka?.numer || '',
-        etap: isLabelReady ? 'etykieta' : (z?.wysylka?.etap && z.wysylka.etap !== 'problem' ? z.wysylka.etap : 'przygotowanie'),
+        etap: etykietaGotowa ? 'etykieta' : (z?.wysylka?.etap && z.wysylka.etap !== 'problem' ? z.wysylka.etap : 'przygotowanie'),
         bladIntegracji: '',
         ostatniaSynchronizacja: new Date().toISOString(),
         zaktualizowano: new Date().toISOString(),
-        zadania: { ...(z?.wysylka?.zadania || {}), dane: true, etykieta: isLabelReady },
+        zadania: { ...(z?.wysylka?.zadania || {}), dane: true, etykieta: etykietaGotowa },
         kosztUmowny: contractPricing,
         historia,
       };
@@ -257,54 +237,10 @@ export function createInpostRoute(deps = {}) {
       if (numer && !trackingNumber({ tracking_number: stary?.wysylka?.numer })) {
         try { email = await onOrderStatusTransition({ ...stary, wysylka: { ...(stary?.wysylka || {}), numer: '' } }, nowy); } catch (e) { email = { sent: false, error: e.message }; }
       }
-      return respond({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, labelReady: isLabelReady, offerId: ofertaId, pricing: contractPricing, email, order: { nr, status: nowy?.status, wysylka: nowy?.wysylka } }, 201);
+      return respond({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, labelReady: etykietaGotowa, offerId: ofertaId, pricing: contractPricing, email, order: { nr, status: nowy?.status, wysylka: nowy?.wysylka } }, 201);
     }
 
-    // ─── INPOST: bezpośredni PDF do wspólnego podglądu i druku (admin) ───
-    if (action === 'inpost-label-file') {
-      if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
-      const c = configure();
-      if (!c.configured) return respond({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany.', code: 'inpost_not_configured' }, 503);
-      const nr = orderNumber(url.searchParams.get('nr'));
-      let inpostId = text(url.searchParams.get('id'), 60).trim();
-      const typ = text(url.searchParams.get('type'), 10).trim().toUpperCase() === 'A4' ? 'A4' : 'A6';
-      if (!inpostId && nr) {
-        const rec = await read('orders', { items: [] });
-        const order = (rec.items || []).find((item) => item.nr === nr);
-        inpostId = text(order?.wysylka?.inpostId, 60).trim();
-      }
-      if (!inpostId) return respond({ ok: false, error: 'Brak ID przesyłki InPost — najpierw utwórz przesyłkę.', code: 'no_shipment' }, 422);
-      let current = null;
-      try { current = await waitForLabel(inpostId, { proby: 6, opoznienieMs: 900 }); } catch (e) { current = null; }
-      const status = shipmentStatus(current), tracking = trackingNumber(current);
-      if (!labelReady(current)) {
-        return respond({ ok: false, code: 'label_not_ready', error: `InPost jeszcze nie potwierdził etykiety${status ? ` (status: ${status})` : ''}.`, inpostId, status, trackingNumber: tracking, labelReady: false }, 409);
-      }
-      try {
-        const pdf = await call(`/v1/shipments/${encodeURIComponent(inpostId)}/label?format=pdf&type=${typ}`, { method: 'GET', accept: 'application/pdf' });
-        const bytes = Buffer.from(String(pdf?.base64 || ''), 'base64');
-        if (!bytes.length) return respond({ ok: false, error: 'InPost zwrócił pustą etykietę PDF.', code: 'empty_label' }, 502);
-        const filename = `etykieta-inpost-${text(nr || tracking || inpostId, 100).replace(/[^a-zA-Z0-9_-]/g, '-')}-${typ}.pdf`;
-        const disposition = url.searchParams.get('disposition') === 'attachment' ? 'attachment' : 'inline';
-        return new Response(bytes, {
-          status: 200,
-          headers: {
-            'content-type': 'application/pdf',
-            'content-length': String(bytes.length),
-            'content-disposition': `${disposition}; filename="${filename}"`,
-            'cache-control': 'private, no-store, max-age=0',
-            'x-content-type-options': 'nosniff',
-          },
-        });
-      } catch (e) {
-        if (e.code === 'invalid_action' || /invalid_action|statusie wcześniejszym niż|nieopłaconej/i.test(e.message || '')) {
-          return respond({ ok: false, code: 'label_not_ready', error: `InPost nie pozwala jeszcze pobrać etykiety${status ? ` (status: ${status})` : ''}.`, inpostId, status, trackingNumber: tracking, labelReady: false }, 409);
-        }
-        throw e;
-      }
-    }
-
-    // ─── INPOST: zgodne wstecznie pobranie etykiety jako JSON/base64 (admin) ───
+    // ─── INPOST: pobranie oficjalnej etykiety PDF (admin) ───
     if (action === 'inpost-label') {
       if (!isAdmin(req, url)) return respond({ ok: false, error: 'Brak uprawnień administratora', code: 'auth' }, 401);
       const c = configure();
@@ -312,6 +248,7 @@ export function createInpostRoute(deps = {}) {
       const nr = orderNumber(url.searchParams.get('nr'));
       let inpostId = text(url.searchParams.get('id'), 60).trim();
       const typ = text(url.searchParams.get('type'), 10).trim().toUpperCase() === 'A4' ? 'A4' : 'A6';
+      const shipxLabelType = typ === 'A4' ? 'normal' : 'A6';
       if (!inpostId && nr) {
         const rec = await read('orders', { items: [] });
         const z = (rec.items || []).find((x) => x.nr === nr);
@@ -322,8 +259,8 @@ export function createInpostRoute(deps = {}) {
       try { daneAktualne = await waitForLabel(inpostId, { proby: 6, opoznienieMs: 900 }); } catch (e) { daneAktualne = null; }
       const statusShipX = shipmentStatus(daneAktualne);
       const numer = trackingNumber(daneAktualne);
-      const isLabelReady = labelReady(daneAktualne);
-      if (!isLabelReady) {
+      const etykietaGotowa = labelReady(daneAktualne);
+      if (!etykietaGotowa) {
         if (nr && daneAktualne) {
           const rec = await read('orders', { items: [] });
           const z = (rec.items || []).find((x) => x.nr === nr);
@@ -354,7 +291,7 @@ export function createInpostRoute(deps = {}) {
         }, 409);
       }
       try {
-        const pdf = await call(`/v1/shipments/${encodeURIComponent(inpostId)}/label?format=pdf&type=${typ}`, { method: 'GET', accept: 'application/pdf' });
+        const pdf = await call(`/v1/shipments/${encodeURIComponent(inpostId)}/label?format=pdf&type=${shipxLabelType}`, { method: 'GET', accept: 'application/pdf' });
         return respond({ ok: true, format: 'pdf', type: typ, filename: `etykieta-inpost-${nr || inpostId}.pdf`, base64: pdf.base64, inpostId, status: statusShipX, trackingNumber: numer, labelReady: true });
       } catch (e) {
         if (e.code === 'invalid_action' || /invalid_action|statusie wcześniejszym niż|nieopłaconej/i.test(e.message || '')) {
@@ -385,7 +322,7 @@ export function createInpostRoute(deps = {}) {
       const dane = await call(`/v1/shipments/${encodeURIComponent(inpostId)}`, { method: 'GET' });
       const numer = trackingNumber(dane);
       const statusShipX = shipmentStatus(dane);
-      const isLabelReady = labelReady(dane);
+      const etykietaGotowa = labelReady(dane);
       const ofertaId = offerId(dane);
       const teraz = new Date().toLocaleString('pl-PL');
       const stareH = Array.isArray(z?.wysylka?.historia) ? z.wysylka.historia : [];
@@ -395,19 +332,19 @@ export function createInpostRoute(deps = {}) {
         inpostStatus: statusShipX,
         inpostOfertaId: ofertaId || z?.wysylka?.inpostOfertaId || '',
         numer: numer || z?.wysylka?.numer || '',
-        etykietaGotowa: isLabelReady,
+        etykietaGotowa,
         ostatniaSynchronizacja: new Date().toISOString(),
-        zadania: { ...(z?.wysylka?.zadania || {}), dane: true, etykieta: isLabelReady },
+        zadania: { ...(z?.wysylka?.zadania || {}), dane: true, etykieta: etykietaGotowa },
         historia,
       };
-      if (isLabelReady && (!z?.wysylka?.etap || z.wysylka.etap === 'przygotowanie' || z.wysylka.etap === 'problem')) patch.etap = 'etykieta';
-      if (isLabelReady) patch.bladIntegracji = '';
+      if (etykietaGotowa && (!z?.wysylka?.etap || z.wysylka.etap === 'przygotowanie' || z.wysylka.etap === 'problem')) patch.etap = 'etykieta';
+      if (etykietaGotowa) patch.bladIntegracji = '';
       const { stary, nowy } = await saveShipmentOnOrder(nr, patch);
       let email = null;
       if (numer && !(stary?.wysylka?.numer)) {
         try { email = await onOrderStatusTransition(stary, nowy); } catch (e) { email = { sent: false, error: e.message }; }
       }
-      return respond({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, labelReady: isLabelReady, offerId: ofertaId, email, order: { nr, wysylka: nowy?.wysylka } });
+      return respond({ ok: true, configured: true, inpostId, trackingNumber: numer, status: statusShipX, labelReady: etykietaGotowa, offerId: ofertaId, email, order: { nr, wysylka: nowy?.wysylka } });
     }
 
     // ─── INPOST: automatyczne sprawdzenie statusów WSZYSTKICH przesyłek (admin / harmonogram co 6h) ───

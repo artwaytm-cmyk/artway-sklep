@@ -10,10 +10,8 @@ import {
   inpostServicePricePayload,
   inpostServiceShipxPayload,
   normalizeInpostServiceContact,
-  normalizeInpostServiceCommissionTiers,
   normalizeInpostServiceDraft,
   normalizeInpostServicePriceList,
-  normalizeInpostServicePricingMode,
   safeInpostServiceRecord,
   summarizeInpostServiceBilling,
   validateInpostServiceDraft,
@@ -21,42 +19,19 @@ import {
 import { normalizeInpostServiceTracking } from './domain/inpost-service-tracking.mjs';
 
 const STORE_KEY = 'inpost_service_shipments';
-const DEFAULT_SENDING_METHODS = new Set(['parcel_locker', 'dispatch_order', 'pop']);
-const DEFAULT_DELIVERY_TYPES = new Set(['locker', 'courier']);
-const DEFAULT_PARCEL_TEMPLATES = new Set(['small', 'medium', 'large', 'xlarge']);
-const DEFAULT_BILLING_MODES = new Set(['none', 'single', 'monthly']);
-const LABEL_FORMATS = new Set(['A6', 'A4']);
-const LABEL_OPEN_MODES = new Set(['preview', 'browser']);
 
-function defaultSendingMethod(value, fallback = 'parcel_locker') {
-  const method = String(value || '').trim();
-  return DEFAULT_SENDING_METHODS.has(method) ? method : fallback;
-}
-
-function settingEnum(value, allowed, fallback) {
-  const normalized = String(value || '').trim().toLowerCase();
-  return allowed.has(normalized) ? normalized : fallback;
-}
-
-function defaultParcelWeight(value, fallback = 1) {
-  const raw = String(value ?? '').trim();
-  if (!raw) return fallback;
-  const weight = Number(raw.replace(',', '.'));
-  return Number.isFinite(weight) ? Math.max(0.01, Math.min(30, Math.round(weight * 100) / 100)) : fallback;
-}
-
-function defaultDropoffPoint(value) {
-  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 40);
-}
-
-function labelDefaultFormat(value, fallback = 'A6') {
-  const format = String(value || '').trim().toUpperCase();
-  return LABEL_FORMATS.has(format) ? format : fallback;
-}
-
-function labelOpenMode(value, fallback = 'preview') {
-  const mode = String(value || '').trim().toLowerCase();
-  return LABEL_OPEN_MODES.has(mode) ? mode : fallback;
+async function defaultPolishPostcodeLookup(code) {
+  const response = await globalThis.fetch(`https://api.zippopotam.us/PL/${encodeURIComponent(code)}`, {
+    headers: { accept: 'application/json' },
+    signal: AbortSignal.timeout(6_000),
+  });
+  if (response.status === 404) return { postCode: code, cities: [] };
+  if (!response.ok) throw new Error(`Usługa kodów pocztowych odpowiedziała statusem ${response.status}.`);
+  const data = await response.json();
+  const cities = [...new Set((Array.isArray(data?.places) ? data.places : [])
+    .map((place) => String(place?.['place name'] || place?.placeName || '').trim())
+    .filter(Boolean))];
+  return { postCode: String(data?.['post code'] || code), cities };
 }
 
 function initialStore() {
@@ -65,69 +40,29 @@ function initialStore() {
 
 function cleanStore(value = {}) {
   const defaults = inpostServiceDefaultSettings();
-  const savedSettings = value?.settings || {}, savedSender = savedSettings.sender || {};
-  const settings = {
-    ...defaults,
-    ...savedSettings,
-    sender: {
-      ...defaults.sender,
-      ...savedSender,
-      address: { ...defaults.sender.address, ...(savedSender.address || {}) },
-    },
-    priceList: normalizeInpostServicePriceList(savedSettings.priceList || defaults.priceList),
-    commissionTiers: normalizeInpostServiceCommissionTiers(savedSettings.commissionTiers || defaults.commissionTiers),
-    defaultDeliveryType: settingEnum(savedSettings.defaultDeliveryType, DEFAULT_DELIVERY_TYPES, defaults.defaultDeliveryType),
-    defaultSendingMethod: defaultSendingMethod(savedSettings.defaultSendingMethod, defaults.defaultSendingMethod),
-    defaultDropoffPoint: defaultDropoffPoint(savedSettings.defaultDropoffPoint),
-    defaultParcelTemplate: settingEnum(savedSettings.defaultParcelTemplate, DEFAULT_PARCEL_TEMPLATES, defaults.defaultParcelTemplate),
-    defaultParcelWeight: defaultParcelWeight(savedSettings.defaultParcelWeight, defaults.defaultParcelWeight),
-    defaultBillingMode: settingEnum(savedSettings.defaultBillingMode, DEFAULT_BILLING_MODES, defaults.defaultBillingMode),
-    defaultWeekend: savedSettings.defaultWeekend === true,
-    labelDefaultFormat: labelDefaultFormat(savedSettings.labelDefaultFormat, defaults.labelDefaultFormat),
-    labelOpenMode: labelOpenMode(savedSettings.labelOpenMode, defaults.labelOpenMode),
-    labelAutoPrint: savedSettings.labelAutoPrint === true,
-    pricingMode: normalizeInpostServicePricingMode(savedSettings.pricingMode, defaults.pricingMode),
-  };
-  const items = (Array.isArray(value?.items) ? value.items : []).map((record) => {
-    const previous = record?.pricing || {};
-    if (settings.pricingMode !== 'contract_postpaid' || !['shipx_calculation', 'shipx_offer'].includes(previous.source)) return record;
-    const recalculated = inpostServiceContractPricing(record, settings, { calculated_charge_amount: previous.totalGross });
-    const checkedAt = previous.checkedAt || record?.updatedAt || record?.createdAt || '';
-    return {
-      ...record,
-      pricing: {
-        ...recalculated,
-        checkedAt,
-        apiComparison: { ...recalculated.apiComparison, checkedAt },
-        correctedFromLegacyShipxPrice: true,
-      },
-    };
-  });
   return {
     ...value,
-    items,
+    items: Array.isArray(value?.items) ? value.items : [],
     contacts: (Array.isArray(value?.contacts) ? value.contacts : [])
       .map((contact) => normalizeInpostServiceContact(contact))
       .filter((contact) => contact.id && (
         contact.email || contact.phone || contact.taxCode
         || contact.address?.street || contact.address?.post_code || contact.address?.city
       )),
-    settings,
+    settings: {
+      ...defaults,
+      ...(value?.settings || {}),
+      priceList: normalizeInpostServicePriceList(value?.settings?.priceList || defaults.priceList),
+    },
   };
-}
-
-function hasContactData(person = {}) {
-  const value = person.address || {};
-  return !!(person.companyName || person.taxCode || person.firstName || person.lastName || person.email || person.phone
-    || value.street || value.building_number || value.post_code || value.city);
 }
 
 export function createInpostServiceShipmentRoute(deps = {}) {
   const {
     respond, isAdmin, text, readVersioned, writeIfVersion, publicConfig, configure,
-    call, waitForLabel, trackingNumber,
+    call, serviceAvailability, organization, waitForLabel, trackingNumber,
     shipmentStatus, labelReady, offerId, infaktPublicConfig, infaktCall,
-    infaktReference,
+    infaktReference, postcodeLookup = defaultPolishPostcodeLookup,
   } = deps;
 
   async function mutateStore(mutator) {
@@ -154,16 +89,19 @@ export function createInpostServiceShipmentRoute(deps = {}) {
     return updated;
   }
 
-  function configuredServices(config) {
-    return {
-      services: [config.lockerService, config.courierService].filter(Boolean),
-      locker: true,
-      courier: true,
-      lockerService: config.lockerService,
-      courierService: config.courierService,
-      configured: config.configured === true,
-      verified: false,
-    };
+  async function activeServices(config) {
+    try {
+      const org = await organization(config);
+      return serviceAvailability(config, org);
+    } catch {
+      return {
+        services: [],
+        locker: true,
+        courier: true,
+        lockerService: config.lockerService,
+        courierService: config.courierService,
+      };
+    }
   }
 
   function upsertContact(store, raw, role = 'receiver', options = {}) {
@@ -212,7 +150,8 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       return inpostServiceContractPricing(draft, settings, result);
     } catch (error) {
       const pricing = fallback();
-      return { ...pricing, apiWarning: text(error.message, 500) };
+      if (pricing.available) return { ...pricing, apiWarning: text(error.message, 500) };
+      throw error;
     }
   }
 
@@ -288,7 +227,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
     if (action === 'inpost-service-shipments') {
       const store = cleanStore((await readVersioned(STORE_KEY, initialStore())).value);
       const links = (await readVersioned('infakt_invoice_links', { items: {} })).value?.items || {};
-      const config = configure(), availability = config.configured ? configuredServices(config) : null;
+      const config = configure(), availability = config.configured ? await activeServices(config) : null;
       const limit = Math.max(1, Math.min(500, Number(url.searchParams.get('limit') || 200) || 200));
       const items = store.items.slice(-limit).reverse().map((record) => {
         const key = record.billing?.billingKey || inpostServiceBillingKey(record);
@@ -306,6 +245,22 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       });
     }
 
+    if (action === 'inpost-service-postcode') {
+      if (req.method !== 'GET') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
+      const rawCode = String(url.searchParams.get('code') || '').replace(/\s/g, '');
+      const match = rawCode.match(/^(\d{2})-?(\d{3})$/);
+      if (!match) return respond({ ok: false, error: 'Podaj kod pocztowy w formacie 00-000.', code: 'postcode_validation' }, 422);
+      const code = `${match[1]}-${match[2]}`;
+      try {
+        const result = await postcodeLookup(code);
+        const cities = [...new Set((Array.isArray(result?.cities) ? result.cities : [])
+          .map((city) => text(city, 100).trim()).filter(Boolean))];
+        return respond({ ok: true, postCode: code, cities, found: cities.length > 0, source: 'postal_directory' });
+      } catch {
+        return respond({ ok: false, error: 'Nie udało się teraz sprawdzić kodu pocztowego. Miasto można wpisać ręcznie.', code: 'postcode_unavailable' }, 502);
+      }
+    }
+
     if (action === 'inpost-service-contact-save') {
       if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const body = await req.json().catch(() => ({}));
@@ -315,7 +270,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         ? [...new Set(rawContact.roles.map((value) => text(value, 20)).filter((value) => ['sender', 'receiver'].includes(value)))]
         : [role];
       if (!requestedRoles.length) {
-        return respond({ ok: false, error: 'Adres musi być przypisany jako klient zlecający, odbiorca albo obie role.', code: 'contact_role_validation' }, 422);
+        return respond({ ok: false, error: 'Adres musi być przypisany jako nadawca, odbiorca albo obie role.', code: 'contact_role_validation' }, 422);
       }
       const candidate = normalizeInpostServiceContact({ ...rawContact, roles: requestedRoles }, { role });
       const hasAddress = !!(candidate.address?.street && candidate.address?.post_code && candidate.address?.city);
@@ -390,23 +345,21 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       }
       if (req.method !== 'POST') return respond({ ok: false, error: 'Metoda niedozwolona' }, 405);
       const body = await req.json().catch(() => ({}));
-      const commissionTiers = normalizeInpostServiceCommissionTiers(body.commissionTiers);
+      const commission = 4;
+      const defaultDeliveryType = body.defaultDeliveryType === 'courier' ? 'courier' : 'locker';
+      const defaultSendingMethod = ['parcel_locker', 'dispatch_order', 'pop'].includes(String(body.defaultSendingMethod || '')) ? String(body.defaultSendingMethod) : 'parcel_locker';
+      const labelDefaultFormat = String(body.labelDefaultFormat || '').toUpperCase() === 'A4' ? 'A4' : 'A6';
+      const labelOpenMode = body.labelOpenMode === 'browser' ? 'browser' : 'preview';
       const store = await mutateStore((current) => {
         current.settings = {
           ...current.settings,
-          commissionGross: commissionTiers[0].commissionGross,
-          commissionTiers,
-          defaultDeliveryType: settingEnum(body.defaultDeliveryType, DEFAULT_DELIVERY_TYPES, current.settings.defaultDeliveryType),
-          defaultSendingMethod: defaultSendingMethod(body.defaultSendingMethod, current.settings.defaultSendingMethod),
-          defaultDropoffPoint: defaultDropoffPoint(body.defaultDropoffPoint),
-          defaultParcelTemplate: settingEnum(body.defaultParcelTemplate, DEFAULT_PARCEL_TEMPLATES, current.settings.defaultParcelTemplate),
-          defaultParcelWeight: defaultParcelWeight(body.defaultParcelWeight, current.settings.defaultParcelWeight),
-          defaultBillingMode: settingEnum(body.defaultBillingMode, DEFAULT_BILLING_MODES, current.settings.defaultBillingMode),
-          defaultWeekend: typeof body.defaultWeekend === 'boolean' ? body.defaultWeekend : current.settings.defaultWeekend === true,
-          labelDefaultFormat: labelDefaultFormat(body.labelDefaultFormat, current.settings.labelDefaultFormat),
-          labelOpenMode: labelOpenMode(body.labelOpenMode, current.settings.labelOpenMode),
-          labelAutoPrint: typeof body.labelAutoPrint === 'boolean' ? body.labelAutoPrint : current.settings.labelAutoPrint === true,
-          pricingMode: normalizeInpostServicePricingMode(body.pricingMode, current.settings.pricingMode),
+          commissionGross: Number.isFinite(commission) ? commission : 4,
+          defaultDeliveryType,
+          defaultSendingMethod,
+          defaultDropoffPoint: text(body.defaultDropoffPoint, 40).toUpperCase(),
+          labelDefaultFormat,
+          labelOpenMode,
+          labelAutoPrint: body.labelAutoPrint === true,
           sender: body.sender && typeof body.sender === 'object' ? body.sender : current.settings.sender,
           priceList: body.priceList && typeof body.priceList === 'object'
             ? normalizeInpostServicePriceList({ ...body.priceList, updatedAt: new Date().toISOString() })
@@ -424,12 +377,12 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       if (!config.configured) return respond({ ok: false, configured: false, error: 'InPost nie jest skonfigurowany po stronie serwera.', code: 'inpost_not_configured' }, 503);
       const body = await req.json().catch(() => ({}));
       const store = cleanStore((await readVersioned(STORE_KEY, initialStore())).value);
-      const availability = configuredServices(config);
+      const availability = await activeServices(config);
       const draft = normalizeInpostServiceDraft(body, store.settings, availability);
       const validation = validateInpostServiceDraft(draft);
       if (!validation.ok) return respond({ ok: false, error: 'Uzupełnij dane potrzebne do wyceny.', code: 'inpost_quote_validation', details: validation.errors }, 422);
       const pricing = await calculatePricing(draft, config, store.settings);
-      return respond({ ok: true, configured: true, testOnly: true, created: false, pricing });
+      return respond({ ok: true, configured: true, pricing });
     }
 
     if (action === 'inpost-service-create') {
@@ -449,7 +402,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
           error: failed ? 'Poprzednia próba tego nadania zakończyła się błędem. Formularz otrzyma nowy identyfikator — sprawdź dane i ponów.' : creating ? 'To nadanie jest już tworzone.' : undefined,
         }, failed || creating ? 409 : 200);
       }
-      const availability = configuredServices(config);
+      const availability = await activeServices(config);
       const draft = normalizeInpostServiceDraft(body, store.settings, availability);
       const validation = validateInpostServiceDraft(draft);
       if (!validation.ok) return respond({ ok: false, error: 'Uzupełnij dane nadania.', code: 'inpost_service_validation', details: validation.errors }, 422);
@@ -460,6 +413,11 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         id,
         requestId: draft.requestId,
         reference: draft.reference || id,
+        comments: draft.comments,
+        returnAddress: draft.returnAddress,
+        returnAddressNote: draft.returnAddressNote,
+        technicalSenderRequired: draft.technicalSenderRequired,
+        labelSender: draft.technicalSenderRequired ? draft.technicalSender : draft.sender,
         createdAt: now,
         updatedAt: now,
         status: 'creating',
@@ -470,8 +428,8 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         trackingUpdatedAt: '',
         labelReady: false,
         offerId: '',
+        principal: draft.principal,
         sender: draft.sender,
-        customer: draft.customer,
         receiver: draft.receiver,
         deliveryType: draft.deliveryType,
         service: draft.service,
@@ -493,7 +451,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       await mutateStore((current) => {
         concurrentDuplicate = current.items.find((item) => item.requestId && item.requestId === requestId) || null;
         if (concurrentDuplicate) return null;
-        if ((body.saveCustomer === true || body.saveSender === true) && hasContactData(draft.customer)) upsertContact(current, draft.customer, 'sender');
+        if (body.saveSender === true) upsertContact(current, draft.sender, 'sender');
         if (body.saveReceiver === true) upsertContact(current, draft.receiver, 'receiver');
         current.items.push(record); current.items = current.items.slice(-5000); return current;
       });
@@ -511,12 +469,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       try {
         try {
           const pricing = await calculatePricing(draft, config, store.settings);
-          saved = await updateRecord(id, (item) => ({
-            ...item,
-            pricing,
-            billing: { ...item.billing, commissionGross: pricing.commissionGross },
-            updatedAt: new Date().toISOString(),
-          }));
+          saved = await updateRecord(id, (item) => ({ ...item, pricing, billing: { ...item.billing, commissionGross: pricing.commissionGross }, updatedAt: new Date().toISOString() }));
         } catch (error) {
           saved = await updateRecord(id, (item) => ({
             ...item,
@@ -538,7 +491,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
           labelReady: labelReady(current) || labelReady(created),
           offerId: offerId(current) || offerId(created),
           pricing: actualPricing.available ? actualPricing : item.pricing,
-          billing: { ...item.billing, commissionGross: (actualPricing.available ? actualPricing : item.pricing).commissionGross },
+          billing: actualPricing.available ? { ...item.billing, commissionGross: actualPricing.commissionGross } : item.billing,
           updatedAt: new Date().toISOString(),
           error: '',
         }));
@@ -586,7 +539,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         labelReady: labelReady(shipment),
         offerId: offerId(shipment) || item.offerId,
         pricing: refreshedPricing.available ? refreshedPricing : item.pricing,
-        billing: { ...item.billing, commissionGross: (refreshedPricing.available ? refreshedPricing : item.pricing).commissionGross },
+        billing: refreshedPricing.available ? { ...item.billing, commissionGross: refreshedPricing.commissionGross } : item.billing,
         updatedAt: checkedAt,
       }));
       return respond({ ok: true, configured: config.configured, item: safeInpostServiceRecord(saved) });

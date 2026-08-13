@@ -1,13 +1,11 @@
-import { inpostServiceCommissionFor, inpostServiceDefaultCommissionTiers } from './inpost-service-commission.mjs';
-export { inpostServiceCommissionFor, inpostServiceDefaultCommissionTiers, normalizeInpostServiceCommissionTiers } from './inpost-service-commission.mjs';
-
 const MONEY_MAX = 1_000_000;
+const FIRST_COMMISSION_MIN_GROSS = 4;
+const FIRST_COMMISSION_MAX_GROSS = 5;
 const BILLING_MODES = new Set(['none', 'single', 'monthly']);
-const PRICING_MODES = new Set(['contract_postpaid', 'prepaid']);
 const DELIVERY_TYPES = new Set(['locker', 'courier']);
 const SENDING_METHODS = new Set(['parcel_locker', 'any_point', 'pok', 'pop', 'courier_pok', 'branch', 'dispatch_order']);
 const LOCKER_SENDING_METHODS = new Set(['parcel_locker', 'any_point', 'pok', 'pop', 'branch', 'dispatch_order']);
-const COURIER_SENDING_METHODS = new Set(['parcel_locker', 'dispatch_order', 'pop']);
+const COURIER_SENDING_METHODS = new Set(['pop', 'dispatch_order']);
 const DROPOFF_POINT_REQUIRED_METHODS = new Set(['parcel_locker', 'pok', 'courier_pok']);
 const LOCKER_EXTRAS = new Set(['labelless']);
 const COURIER_EXTRAS = new Set(['sms', 'email', 'saturday', 'dor1720', 'rod', 'labelless']);
@@ -63,58 +61,55 @@ function party(raw = {}) {
   };
 }
 
-export function inpostServiceDefaultSender() {
-  return party({
-    companyName: 'ARTWAY-TM SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ',
-    taxCode: '5882468333',
-    firstName: 'Artway',
-    lastName: 'TM',
-    email: 'artwaytm@gmail.com',
-    phone: '530038914',
-    address: {
-      street: 'Gryfa Pomorskiego',
-      buildingNumber: '1/A',
-      postCode: '84-207',
-      city: 'Bojano',
-    },
-  });
+function normalizedText(value) {
+  return clean(value, 200).toLocaleLowerCase('pl-PL');
 }
 
-function fixedSender(settings = {}) {
-  const fallback = inpostServiceDefaultSender(), saved = settings?.sender || {};
-  return party({
-    ...fallback,
-    ...saved,
-    address: { ...fallback.address, ...(saved.address || {}) },
-  });
+function addressKey(value = {}) {
+  const current = value.address || value;
+  return [current.street, current.building_number || current.buildingNumber, current.flat_number || current.flatNumber, current.post_code || current.postCode, current.city]
+    .map(normalizedText)
+    .filter(Boolean)
+    .join('|');
 }
 
-function shipmentReference(rawReference, requestId) {
-  const provided = clean(rawReference, 100);
-  return clean(provided.split(' • ')[0] || `USL-${clean(requestId, 18) || Date.now().toString(36).toUpperCase()}`, 30);
-}
-
-export function inpostServiceSenderComment(rawCustomer = {}, rawComments = '') {
-  const customer = party(rawCustomer);
-  const value = customer.address || {};
-  const street = [value.street, [value.building_number, value.flat_number].filter(Boolean).join('/')].filter(Boolean).join(' ');
-  const customerAddress = clean([street, value.post_code, value.city].filter(Boolean).join(', '), 90);
-  const person = clean([customer.firstName, customer.lastName].filter(Boolean).join(' '), 80);
-  const senderLabel = clean(customer.companyName || person, 160);
-  const prefix = 'Nadawca: ';
-  let senderComment = '';
-  if (customerAddress) {
-    const labelLimit = Math.max(0, 100 - prefix.length - customerAddress.length - (senderLabel ? 2 : 0));
-    const visibleLabel = clean(senderLabel, labelLimit);
-    senderComment = clean(`${prefix}${visibleLabel ? `${visibleLabel}, ` : ''}${customerAddress}`, 100);
-  } else if (senderLabel) {
-    senderComment = clean(`${prefix}${senderLabel}`, 100);
+function senderWithTechnicalContact(raw = {}, technical = {}) {
+  const value = party(raw);
+  const personalIdentityChanged = !!(value.firstName || value.lastName)
+    && [normalizedText(value.firstName), normalizedText(value.lastName)].join('|') !== [normalizedText(technical.firstName), normalizedText(technical.lastName)].join('|');
+  const currentAddressKey = addressKey(value), technicalAddressKey = addressKey(technical);
+  const addressChanged = !!currentAddressKey && currentAddressKey !== technicalAddressKey;
+  if (personalIdentityChanged || addressChanged) {
+    if (technical.companyName && normalizedText(value.companyName) === normalizedText(technical.companyName)) value.companyName = '';
+    if (technical.taxCode && value.taxCode === technical.taxCode) value.taxCode = '';
   }
-  const manualComment = clean(rawComments, 100);
-  if (!senderComment) return manualComment;
-  if (!manualComment || manualComment === senderComment || /^Nadawca:\s/i.test(manualComment)) return senderComment;
-  const manualLimit = Math.max(0, 100 - senderComment.length - 3);
-  return manualLimit >= 3 ? clean(`${senderComment} • ${clean(manualComment, manualLimit)}`, 100) : senderComment;
+  return { ...value, email: value.email || technical.email, phone: value.phone || technical.phone };
+}
+
+function partyWithTechnicalContact(raw = {}, technical = {}) {
+  const value = party(raw);
+  return { ...value, email: value.email || technical.email, phone: value.phone || technical.phone };
+}
+
+function returnAddressNote(sender = {}) {
+  const value = party(sender), current = value.address || {};
+  const name = value.companyName || `${value.firstName} ${value.lastName}`.trim();
+  const building = [current.building_number, current.flat_number].filter(Boolean).join('/');
+  const street = [current.street, building].filter(Boolean).join(' ');
+  const city = [current.post_code, current.city].filter(Boolean).join(' ');
+  const destination = [name, street, city].filter(Boolean).join(', ');
+  return destination ? clean(`Zwroty kierować pod adres nadawcy: ${destination}.`, 100) : '';
+}
+
+function commentsForShipment(value, sender, technicalSenderRequired = false) {
+  const note = technicalSenderRequired ? returnAddressNote(sender) : '';
+  const entered = clean(value, technicalSenderRequired ? 500 : 100);
+  if (!technicalSenderRequired) return entered;
+  const custom = entered.replace(/(?:^|\s)Zwroty\s+kierować(?:\s+pod|\s+na)?\s+adres(?:\s+nadawcy)?\s*:?.*$/iu, '').trim();
+  if (!custom) return note;
+  const available = Math.max(0, 100 - note.length - 1);
+  const prefix = clean(custom, available).replace(/[\s,;:-]+$/u, '');
+  return clean([prefix, note].filter(Boolean).join(' '), 100);
 }
 
 function shipxParty(value, includeAddress = true) {
@@ -129,9 +124,9 @@ function shipxParty(value, includeAddress = true) {
   return result;
 }
 
-function parcel(raw = {}) {
+function parcel(raw = {}, { exactDimensions = false } = {}) {
   const template = clean(raw.template || raw.gabaryt, 20).toLowerCase();
-  if (['small', 'medium', 'large'].includes(template)) return { template };
+  if (!exactDimensions && ['small', 'medium', 'large'].includes(template)) return { template };
   return {
     dimensions: {
       length: String(Math.round((Number(raw.length || raw.dlugosc) || 30) * 10)),
@@ -235,27 +230,16 @@ export function normalizeInpostServicePriceList(raw = {}) {
 export function inpostServiceDefaultSettings() {
   return {
     commissionGross: 4,
-    commissionTiers: inpostServiceDefaultCommissionTiers(),
     defaultDeliveryType: 'locker',
     defaultSendingMethod: 'parcel_locker',
     defaultDropoffPoint: '',
-    defaultParcelTemplate: 'small',
-    defaultParcelWeight: 1,
-    defaultBillingMode: 'none',
-    defaultWeekend: false,
     labelDefaultFormat: 'A6',
     labelOpenMode: 'preview',
     labelAutoPrint: false,
-    pricingMode: 'contract_postpaid',
-    sender: inpostServiceDefaultSender(),
+    sender: {},
     priceList: inpostServiceDefaultPriceList(),
     updatedAt: null,
   };
-}
-
-export function normalizeInpostServicePricingMode(value, fallback = 'contract_postpaid') {
-  const normalized = clean(value, 40).toLowerCase();
-  return PRICING_MODES.has(normalized) ? normalized : fallback;
 }
 
 export function normalizeInpostServiceContact(raw = {}, options = {}) {
@@ -291,30 +275,46 @@ export function inpostServiceContactFingerprint(raw = {}) {
 export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = {}) {
   const deliveryType = DELIVERY_TYPES.has(clean(raw.deliveryType, 20)) ? clean(raw.deliveryType, 20) : 'locker';
   const requestedSendingMethod = SENDING_METHODS.has(clean(raw.sendingMethod, 40)) ? clean(raw.sendingMethod, 40) : '';
+  const courierC2CAvailable = Array.isArray(services.services) && services.services.includes('inpost_courier_c2c');
+  const courierLocker = deliveryType === 'courier' && requestedSendingMethod === 'parcel_locker' && courierC2CAvailable;
   const sendingMethod = deliveryType === 'locker'
-    ? (LOCKER_SENDING_METHODS.has(requestedSendingMethod) ? requestedSendingMethod : 'parcel_locker')
-    : (COURIER_SENDING_METHODS.has(requestedSendingMethod) ? requestedSendingMethod : 'dispatch_order');
+    ? (LOCKER_SENDING_METHODS.has(requestedSendingMethod) ? requestedSendingMethod : '')
+    : (COURIER_SENDING_METHODS.has(requestedSendingMethod) || courierLocker
+      ? requestedSendingMethod
+      : requestedSendingMethod === 'parcel_locker' ? 'pop' : '');
   const allowedExtras = deliveryType === 'locker' ? LOCKER_EXTRAS : COURIER_EXTRAS;
   const extras = [...new Set((Array.isArray(raw.additionalServices) ? raw.additionalServices : []).map((item) => clean(item, 30)).filter((item) => allowedExtras.has(item)))];
   const billingMode = BILLING_MODES.has(clean(raw.billingMode, 20)) ? clean(raw.billingMode, 20) : 'none';
-  const commissionGross = money(raw.commissionGross, money(settings.commissionGross, 4));
-  const sender = fixedSender(settings);
-  const customer = party(raw.customer || raw.sender || {});
-  const receiver = party(raw.receiver || {});
+  const commissionGross = FIRST_COMMISSION_MIN_GROSS;
+  const rawSender = raw.sender && typeof raw.sender === 'object' ? raw.sender : null;
+  const technical = party(settings.sender || {});
+  const sender = senderWithTechnicalContact(rawSender || {}, technical);
+  const principal = raw.principal || raw.requester
+    ? senderWithTechnicalContact(raw.principal || raw.requester, technical)
+    : sender;
+  const receiver = partyWithTechnicalContact(raw.receiver || {}, technical);
+  const technicalSenderRequired = raw.technicalSenderRequired === true;
+  const returnNote = technicalSenderRequired ? returnAddressNote(sender) : '';
   const service = deliveryType === 'locker'
     ? clean(services.lockerService || services.locker || 'inpost_locker_standard', 80)
-    : clean(services.courierService || services.courier || 'inpost_courier_standard', 80);
+    : courierLocker
+      ? 'inpost_courier_c2c'
+      : clean(services.courierService || services.courier || 'inpost_courier_standard', 80);
   return {
     requestId: clean(raw.requestId, 100),
-    reference: shipmentReference(raw.reference, raw.requestId),
-    comments: inpostServiceSenderComment(customer, raw.comments),
+    reference: clean(raw.reference, 80),
+    comments: commentsForShipment(raw.comments, sender, technicalSenderRequired),
+    returnAddress: { ...sender.address },
+    returnAddressNote: returnNote,
+    technicalSenderRequired,
+    technicalSender: technicalSenderRequired ? technical : null,
     deliveryType,
     service,
     sendingMethod,
     targetPoint: clean(raw.targetPoint, 40).toUpperCase(),
     dropoffPoint: clean(raw.dropoffPoint, 40).toUpperCase(),
+    principal,
     sender,
-    customer,
     receiver,
     parcel: {
       template: clean(raw.parcel?.template || raw.template, 20).toLowerCase(),
@@ -328,12 +328,12 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
     insurance: { enabled: raw.insurance?.enabled === true, amount: money(raw.insurance?.amount) },
     weekend: deliveryType === 'locker' && raw.weekend === true,
     additionalServices: extras,
-    pickupRequested: raw.pickupRequested === true,
+    pickupRequested: raw.pickupRequested === true || sendingMethod === 'dispatch_order',
     billing: {
       mode: billingMode,
       commissionGross,
       month: /^\d{4}-\d{2}$/.test(clean(raw.billingMonth, 7)) ? clean(raw.billingMonth, 7) : new Date().toISOString().slice(0, 7),
-      clientKey: customer.taxCode || customer.email,
+      clientKey: principal.taxCode || principal.email || sender.taxCode || sender.email,
     },
     pricing: {
       manualGross: money(raw.carrierCostOverride),
@@ -344,11 +344,12 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
 
 export function validateInpostServiceDraft(draft = {}) {
   const errors = [];
-  const receiver = draft.receiver || {};
-  if (!emailOk(receiver.email)) errors.push({ field: 'receiver.email', message: 'Podaj poprawny e-mail odbiorcy.' });
-  if (!/^\d{9}$/.test(receiver.phone || '')) errors.push({ field: 'receiver.phone', message: 'Podaj 9-cyfrowy telefon odbiorcy.' });
-  if (draft.deliveryType === 'courier' && !receiver.companyName && !receiver.firstName) errors.push({ field: 'receiver.firstName', message: 'Podaj imię albo firmę odbiorcy.' });
-  const requiredAddresses = draft.deliveryType === 'courier' ? [['receiver', receiver.address]] : [];
+  for (const [prefix, person] of [['sender', draft.sender], ['receiver', draft.receiver]]) {
+    if ((prefix === 'sender' || draft.deliveryType === 'courier') && !person?.companyName && !person?.firstName) errors.push({ field: `${prefix}.firstName`, message: `Podaj imię albo firmę ${prefix === 'sender' ? 'nadawcy' : 'odbiorcy'}.` });
+    if (!emailOk(person?.email)) errors.push({ field: `${prefix}.email`, message: `Podaj poprawny e-mail ${prefix === 'sender' ? 'nadawcy' : 'odbiorcy'}.` });
+    if (!/^\d{9}$/.test(person?.phone || '')) errors.push({ field: `${prefix}.phone`, message: `Podaj 9-cyfrowy telefon ${prefix === 'sender' ? 'nadawcy' : 'odbiorcy'}.` });
+  }
+  const requiredAddresses = [['sender', draft.sender?.address], ...(draft.deliveryType === 'courier' ? [['receiver', draft.receiver?.address]] : [])];
   for (const [prefix, value] of requiredAddresses) {
     if (!value?.street) errors.push({ field: `${prefix}.address.street`, message: 'Brak ulicy.' });
     if (!value?.building_number) errors.push({ field: `${prefix}.address.buildingNumber`, message: 'Brak numeru budynku.' });
@@ -356,13 +357,20 @@ export function validateInpostServiceDraft(draft = {}) {
     if (!value?.city) errors.push({ field: `${prefix}.address.city`, message: 'Brak miejscowości.' });
   }
   if (draft.deliveryType === 'locker' && !draft.targetPoint) errors.push({ field: 'targetPoint', message: 'Wybierz Paczkomat lub PaczkoPunkt odbiorcy.' });
+  if (!draft.sendingMethod) errors.push({ field: 'sendingMethod', message: draft.deliveryType === 'courier' ? 'Wybierz sposób przekazania paczki: PaczkoPunkt albo odbiór przez kuriera.' : 'Wybierz sposób nadania przesyłki.' });
   if (DROPOFF_POINT_REQUIRED_METHODS.has(draft.sendingMethod) && !draft.dropoffPoint) {
     errors.push({ field: 'dropoffPoint', message: 'Wybierz konkretny punkt nadania dla wybranego sposobu nadania.' });
   }
   if (draft.cod?.enabled && draft.cod.amount <= 0) errors.push({ field: 'cod.amount', message: 'Podaj kwotę pobrania.' });
   if (draft.insurance?.enabled && draft.insurance.amount <= 0) errors.push({ field: 'insurance.amount', message: 'Podaj wartość ubezpieczenia.' });
   if (draft.deliveryType === 'courier' && (draft.parcel?.weight <= 0 || draft.parcel?.weight > 30)) errors.push({ field: 'parcel.weight', message: 'Kurier Standard z tego cennika obsługuje wagę od 0,01 do 30 kg.' });
-  if (draft.billing?.mode === 'monthly' && (!draft.customer?.companyName || !/^\d{10}$/.test(draft.customer?.taxCode || ''))) errors.push({ field: 'customer.taxCode', message: 'Faktura miesięczna dla klienta zlecającego wymaga nazwy firmy i 10-cyfrowego NIP.' });
+  if (draft.technicalSenderRequired) {
+    const technical = draft.technicalSender || {}, technicalAddress = technical.address || {};
+    if ((!technical.companyName && !technical.firstName) || !emailOk(technical.email) || !/^\d{9}$/.test(technical.phone || '') || !technicalAddress.street || !technicalAddress.building_number || !/^\d{2}-\d{3}$/.test(technicalAddress.post_code || '') || !technicalAddress.city) {
+      errors.push({ field: 'technicalSenderRequired', message: 'Uzupełnij stałe dane Artway-TM w ustawieniach InPost albo wyłącz wyjątkowy tryb nadawcy.' });
+    }
+  }
+  if (draft.billing?.mode === 'monthly' && (!draft.sender?.companyName || !/^\d{10}$/.test(draft.sender?.taxCode || ''))) errors.push({ field: 'sender.taxCode', message: 'Faktura miesięczna dla nadawcy wymaga nazwy firmy i 10-cyfrowego NIP.' });
   if (draft.billing?.mode !== 'none' && draft.billing.commissionGross <= 0) errors.push({ field: 'commissionGross', message: 'Prowizja do faktury musi być większa od 0 zł.' });
   if (!draft.requestId) errors.push({ field: 'requestId', message: 'Brak identyfikatora operacji. Odśwież formularz.' });
   return { ok: errors.length === 0, errors };
@@ -373,12 +381,14 @@ export function inpostServiceShipxPayload(draft = {}) {
   if (draft.sendingMethod) customAttributes.sending_method = draft.sendingMethod;
   if (draft.deliveryType === 'locker') customAttributes.target_point = draft.targetPoint;
   if (draft.dropoffPoint && DROPOFF_POINT_REQUIRED_METHODS.has(draft.sendingMethod)) customAttributes.dropoff_point = draft.dropoffPoint;
+  const labelSender = draft.technicalSenderRequired ? draft.technicalSender : draft.sender;
   const payload = {
+    sender: shipxParty(labelSender, true),
     receiver: shipxParty(draft.receiver, draft.deliveryType === 'courier'),
-    parcels: [parcel(draft.parcel)],
+    parcels: [parcel(draft.parcel, { exactDimensions: draft.deliveryType === 'courier' })],
     service: draft.service,
     reference: draft.reference,
-    comments: draft.comments || `Nadanie usługowe ${draft.reference}`.slice(0, 100),
+    comments: draft.comments || undefined,
     only_choice_of_offer: false,
     ...(Object.keys(customAttributes).length ? { custom_attributes: customAttributes } : {}),
   };
@@ -407,17 +417,21 @@ function amount(value) {
   return Number.isFinite(number) && number >= 0 ? Math.round(number * 100) / 100 : null;
 }
 
+export function inpostServiceRoundedCustomerPrice(totalGross, range = {}) {
+  const carrierGross = amount(totalGross);
+  if (carrierGross == null) return { customerTotalGross: null, commissionGross: 0 };
+  const minimumGross = amount(range.minimumGross) ?? FIRST_COMMISSION_MIN_GROSS;
+  const maximumGross = Math.max(minimumGross, amount(range.maximumGross) ?? FIRST_COMMISSION_MAX_GROSS);
+  const customerTotalGross = Math.ceil((carrierGross + minimumGross) - 1e-9);
+  const commissionGross = Math.round((customerTotalGross - carrierGross) * 100) / 100;
+  if (commissionGross < minimumGross || commissionGross > maximumGross) {
+    throw new Error(`Nie można dopasować pełnej ceny do prowizji ${minimumGross}–${maximumGross} zł.`);
+  }
+  return { customerTotalGross, commissionGross, minimumGross, maximumGross };
+}
+
 export function inpostServicePricing(raw = {}, options = {}) {
-  const rows = Array.isArray(raw)
-    ? raw
-    : Array.isArray(raw?.shipments)
-      ? raw.shipments
-      : Array.isArray(raw?.calculations)
-        ? raw.calculations
-        : Array.isArray(raw?.items)
-          ? raw.items
-          : [raw || {}];
-  const value = rows[0] || {};
+  const value = Array.isArray(raw) ? (raw[0] || {}) : (raw || {});
   const selectedOffer = value.selected_offer || value.selectedOffer || {};
   const offer = selectedOffer.rate != null
     ? selectedOffer
@@ -427,18 +441,18 @@ export function inpostServicePricing(raw = {}, options = {}) {
   const manual = amount(options.manualGross);
   const totalGross = calculated ?? offerRate ?? (manual && manual > 0 ? manual : null);
   const source = calculated != null ? 'shipx_calculation' : offerRate != null ? 'shipx_offer' : totalGross != null ? 'manual' : 'unavailable';
-  const commissionGross = amount(options.commissionGross) || 0;
+  const roundedCustomer = totalGross == null ? null : inpostServiceRoundedCustomerPrice(totalGross);
+  const commissionGross = roundedCustomer?.commissionGross || 0;
   return {
     totalGross,
     currency: clean(value.currency || offer?.currency || options.currency || 'PLN', 8) || 'PLN',
     source,
-    status: totalGross == null ? 'no_price' : 'priced',
-    code: clean(value.key || value.code, 80),
-    message: clean(value.message || value.error || value.details?.message, 500),
     estimated: source === 'manual',
     available: totalGross != null,
-    customerTotalGross: totalGross == null ? null : Math.round((totalGross + commissionGross) * 100) / 100,
+    customerTotalGross: roundedCustomer?.customerTotalGross ?? null,
     commissionGross,
+    minimumCommissionGross: roundedCustomer?.minimumGross ?? FIRST_COMMISSION_MIN_GROSS,
+    maximumCommissionGross: roundedCustomer?.maximumGross ?? FIRST_COMMISSION_MAX_GROSS,
     breakdown: {
       baseGross: amount(value.calculated_charge_amount_non_commission),
       fuelGross: amount(value.fuel_charge_amount),
@@ -464,6 +478,11 @@ function contractRate(draft = {}, priceList = {}) {
     const selected = priceList.locker?.[template];
     return selected ? { ...selected, key: `locker.${template}` } : null;
   }
+  if (draft.service === 'inpost_courier_c2c' || draft.sendingMethod === 'parcel_locker') {
+    const template = ['small', 'medium', 'large', 'xlarge'].includes(draft.parcel?.template) ? draft.parcel.template : '';
+    const selected = priceList.courierManager?.[template];
+    return selected ? { ...selected, key: `courierManager.${template}` } : null;
+  }
   const weight = Number(draft.parcel?.weight) || 0;
   const selected = (priceList.courierStandard || []).find((rate) => weight <= Number(rate.maxKg));
   return selected ? { ...selected, key: `courierStandard.${selected.maxKg}` } : null;
@@ -471,8 +490,7 @@ function contractRate(draft = {}, priceList = {}) {
 
 export function inpostServiceContractPricing(draft = {}, settings = {}, shipxRaw = {}) {
   const priceList = normalizeInpostServicePriceList(settings.priceList || {});
-  const pricingMode = normalizeInpostServicePricingMode(settings.pricingMode);
-  const api = inpostServicePricing(shipxRaw);
+  const api = inpostServicePricing(shipxRaw, { commissionGross: draft.billing?.commissionGross });
   const manual = amount(draft.pricing?.manualGross);
   const rate = contractRate(draft, priceList);
   const extras = priceList.extras || {};
@@ -480,7 +498,7 @@ export function inpostServiceContractPricing(draft = {}, settings = {}, shipxRaw
   if (draft.cod?.enabled) selectedExtras.push(['Pobranie', 'codGross']);
   if (draft.insurance?.enabled) selectedExtras.push(['Dodatkowa ochrona', 'insuranceGross']);
   if (draft.weekend) selectedExtras.push(['Paczka w Weekend', 'weekendGross']);
-  if (draft.pickupRequested) selectedExtras.push(['Odbiór przez kuriera', 'pickupGross']);
+  if (draft.pickupRequested || draft.sendingMethod === 'dispatch_order') selectedExtras.push(['Odbiór przez kuriera', 'pickupGross']);
   if (draft.parcel?.nonStandard) selectedExtras.push(['Element niestandardowy', 'nonStandardGross']);
   for (const service of draft.additionalServices || []) {
     const labels = { sms: 'Powiadomienie SMS', email: 'Powiadomienie e-mail', saturday: 'Doręczenie w sobotę', dor1720: 'Doręczenie 17:00–20:00', rod: 'Zwrot dokumentów' };
@@ -489,68 +507,37 @@ export function inpostServiceContractPricing(draft = {}, settings = {}, shipxRaw
   const unpricedOptions = selectedExtras.filter(([, key]) => extras[key] == null).map(([label]) => label);
   const extraGross = selectedExtras.reduce((sum, [, key]) => sum + (extras[key] == null ? 0 : Number(extras[key]) || 0), 0);
   const contractGross = rate ? Math.round((Number(rate.gross || 0) + extraGross) * 100) / 100 : null;
-  const contractComplete = contractGross != null && unpricedOptions.length === 0;
-  // /shipments/calculate jest źródłem ceny wyłącznie dla kont prepaid. Oficjalna
-  // dokumentacja ShipX zastrzega, że konto postpaid może dostać brak ceny albo
-  // wartość domyślną, dlatego taki wynik zachowujemy tylko diagnostycznie.
-  const manualSelected = manual != null && manual > 0;
-  const apiTrusted = pricingMode === 'prepaid' && api.totalGross != null;
-  const contractSelected = pricingMode === 'contract_postpaid' && contractComplete;
-  const totalGross = manualSelected ? manual : apiTrusted ? api.totalGross : contractSelected ? contractGross : null;
-  const commissionTier = totalGross == null ? null : inpostServiceCommissionFor(totalGross, settings.commissionTiers);
-  const commissionGross = commissionTier?.commissionGross ?? amount(draft.billing?.commissionGross) ?? amount(settings.commissionGross) ?? 4;
-  const source = manualSelected ? 'manual' : apiTrusted ? api.source : contractSelected ? 'contract_postpaid' : 'unavailable';
-  const complete = totalGross != null && (manualSelected || apiTrusted || contractComplete);
-  const postpaidApiMessage = pricingMode === 'contract_postpaid'
-    ? 'Wynik /shipments/calculate nie jest ceną umowną konta postpaid i nie został użyty do rozliczenia.'
-    : '';
+  const totalGross = manual != null && manual > 0 ? manual : contractGross;
+  const roundedCustomer = totalGross == null ? null : inpostServiceRoundedCustomerPrice(totalGross);
+  const commissionGross = roundedCustomer?.commissionGross || 0;
+  const source = manual != null && manual > 0 ? 'manual' : rate ? 'contract_price_list' : 'unavailable';
+  const complete = totalGross != null && (source === 'manual' || unpricedOptions.length === 0);
   return {
     totalGross,
     currency: 'PLN',
     source,
     available: totalGross != null,
     complete,
-    estimated: source === 'contract_postpaid',
-    pricingMode,
-    billingSafe: complete,
+    estimated: false,
     rateKey: rate?.key || '',
     rateLabel: rate?.label || '',
     contractNet: rate?.net ?? null,
     commissionGross,
-    commissionTier,
-    customerTotalGross: totalGross == null ? null : Math.round((totalGross + commissionGross) * 100) / 100,
-    breakdown: apiTrusted ? api.breakdown : {
+    customerTotalGross: roundedCustomer?.customerTotalGross ?? null,
+    minimumCommissionGross: roundedCustomer?.minimumGross ?? FIRST_COMMISSION_MIN_GROSS,
+    maximumCommissionGross: roundedCustomer?.maximumGross ?? FIRST_COMMISSION_MAX_GROSS,
+    breakdown: {
       baseGross: rate?.gross ?? null,
       extrasGross: Math.round(extraGross * 100) / 100,
+      fuelIncluded: true,
     },
     unpricedOptions,
     apiComparison: {
       totalGross: api.totalGross,
       source: api.source,
-      status: pricingMode === 'contract_postpaid' && api.totalGross != null ? 'ignored_postpaid' : api.status,
-      code: pricingMode === 'contract_postpaid' && api.totalGross != null ? 'postpaid_calculation_not_contractual' : api.code,
-      message: postpaidApiMessage || api.message,
-      trusted: apiTrusted,
-      usedForBilling: apiTrusted,
-      differenceGross: api.totalGross == null || contractGross == null ? null : Math.round((api.totalGross - contractGross) * 100) / 100,
+      differenceGross: api.totalGross == null || totalGross == null ? null : Math.round((api.totalGross - totalGross) * 100) / 100,
       checkedAt: api.checkedAt,
     },
-    contractComparison: {
-      totalGross: contractGross,
-      baseGross: rate?.gross ?? null,
-      extrasGross: Math.round(extraGross * 100) / 100,
-      rateKey: rate?.key || '',
-      rateLabel: rate?.label || '',
-      complete: contractComplete,
-      unpricedOptions,
-      differenceGross: api.totalGross == null || contractGross == null ? null : Math.round((api.totalGross - contractGross) * 100) / 100,
-      fuelIncluded: true,
-    },
-    message: source === 'contract_postpaid'
-      ? 'Koszt oszacowany z zapisanego cennika umownego InPost dla konta postpaid.'
-      : (pricingMode === 'contract_postpaid' && !contractComplete
-          ? `Cennik umowny nie jest kompletny${unpricedOptions.length ? ` — brak stawek: ${unpricedOptions.join(', ')}` : ''}.`
-          : api.message || (totalGross == null ? 'ShipX nie zwrócił ceny dla konta prepaid.' : '')),
     subscription: {
       net: priceList.subscriptionNet,
       gross: priceList.subscriptionGross,
@@ -581,8 +568,8 @@ export function inpostServicePickupPayload(record = {}) {
 }
 
 export function inpostServiceBillingClientKey(record = {}) {
-  const customer = record.customer || record.sender || {};
-  return clean(customer.taxCode || customer.email || record.billing?.clientKey, 120).toLowerCase();
+  const principal = record.principal || record.sender || {};
+  return clean(principal.taxCode || principal.email || record.billing?.clientKey, 120).toLowerCase();
 }
 
 export function inpostServiceBillingKey(record = {}) {
@@ -603,10 +590,10 @@ export function inpostServiceInvoicePayload(records = [], options = {}) {
   }
   const incomplete = items.filter((record) => record?.pricing?.complete !== true);
   if (incomplete.length) {
-    const error = new Error(`Nie można wystawić FV: ${incomplete.length} nadań nie ma bieżącej ceny ShipX. Ponów wycenę albo wpisz pełny koszt ręcznie w trybie awaryjnym.`);
+    const error = new Error(`Nie można wystawić FV: ${incomplete.length} nadań nie ma kompletnego kosztu umownego. Uzupełnij brakujące dopłaty albo wpisz pełny koszt ręcznie.`);
     error.code = 'inpost_billing_incomplete_price'; error.status = 422; throw error;
   }
-  const customer = items[0].customer || items[0].sender || {}, billingMonth = items[0].billing?.month || new Date().toISOString().slice(0, 7);
+  const sender = items[0].principal || items[0].sender || {}, billingMonth = items[0].billing?.month || new Date().toISOString().slice(0, 7);
   const invoiceDate = /^\d{4}-\d{2}-\d{2}$/.test(clean(options.invoiceDate, 10)) ? clean(options.invoiceDate, 10) : new Date().toISOString().slice(0, 10);
   const paymentDate = new Date(`${invoiceDate}T12:00:00Z`); paymentDate.setUTCDate(paymentDate.getUTCDate() + 7);
   const services = items.map((record) => ({
@@ -624,17 +611,17 @@ export function inpostServiceInvoicePayload(records = [], options = {}) {
     sale_date: invoiceDate,
     payment_date: paymentDate.toISOString().slice(0, 10),
     sale_type: 'service',
-    notes: clean(items.length > 1 ? `Miesięczne rozliczenie nadań InPost Artway-TM: ${billingMonth}. Kwoty obejmują bieżący koszt ShipX oraz prowizję Artway-TM.` : `Nadanie InPost Artway-TM: ${items[0].reference || items[0].id}. Kwota obejmuje bieżący koszt ShipX oraz prowizję Artway-TM.`, 500),
-    client_business_activity_kind: customer.companyName || customer.taxCode ? 'other_business' : 'private_person',
-    client_company_name: customer.companyName || undefined,
-    client_first_name: customer.companyName ? undefined : (customer.firstName || 'Klient'),
-    client_last_name: customer.companyName ? undefined : (customer.lastName || 'InPost'),
-    client_tax_code: customer.taxCode || undefined,
-    client_street: customer.address?.street || undefined,
-    client_street_number: customer.address?.building_number || undefined,
-    client_flat_number: customer.address?.flat_number || undefined,
-    client_city: customer.address?.city || undefined,
-    client_post_code: customer.address?.post_code || undefined,
+    notes: clean(items.length > 1 ? `Miesięczne rozliczenie nadań InPost Artway-TM: ${billingMonth}. Kwoty obejmują koszt nadania według cennika umownego oraz prowizję Artway-TM.` : `Nadanie InPost Artway-TM: ${items[0].reference || items[0].id}. Kwota obejmuje koszt nadania oraz prowizję Artway-TM.`, 500),
+    client_business_activity_kind: sender.companyName || sender.taxCode ? 'other_business' : 'private_person',
+    client_company_name: sender.companyName || undefined,
+    client_first_name: sender.companyName ? undefined : (sender.firstName || 'Klient'),
+    client_last_name: sender.companyName ? undefined : (sender.lastName || 'InPost'),
+    client_tax_code: sender.taxCode || undefined,
+    client_street: sender.address?.street || undefined,
+    client_street_number: sender.address?.building_number || undefined,
+    client_flat_number: sender.address?.flat_number || undefined,
+    client_city: sender.address?.city || undefined,
+    client_post_code: sender.address?.post_code || undefined,
     services,
   };
   Object.keys(payload).forEach((key) => payload[key] === undefined && delete payload[key]);
@@ -655,13 +642,13 @@ export function summarizeInpostServiceBilling(items = []) {
   const pending = active.filter((item) => item?.billing?.mode === 'monthly' && item?.billing?.status === 'pending');
   const groups = new Map();
   for (const item of pending) {
-    const customer = item.customer || item.sender || {};
     const clientKey = inpostServiceBillingClientKey(item);
     const key = `${item.billing.month}|${clientKey}`;
-    const group = groups.get(key) || { key, month: item.billing.month, clientKey, companyName: customer.companyName || '', taxCode: customer.taxCode || '', count: 0, carrierGross: 0, commissionGross: 0, customerTotalGross: 0, incompletePrices: 0, recordIds: [] };
+    const principal = item.principal || item.sender || {};
+    const group = groups.get(key) || { key, month: item.billing.month, clientKey, companyName: principal.companyName || '', taxCode: principal.taxCode || '', count: 0, carrierGross: 0, commissionGross: 0, customerTotalGross: 0, incompletePrices: 0, recordIds: [] };
     group.count += 1;
     group.carrierGross += money(item.pricing?.totalGross);
-    group.commissionGross += money(item.billing.commissionGross);
+    group.commissionGross += money(item.pricing?.commissionGross ?? item.billing.commissionGross);
     group.customerTotalGross += money(item.pricing?.customerTotalGross);
     if (item.pricing?.complete !== true) group.incompletePrices += 1;
     group.recordIds.push(item.id); groups.set(key, group);
@@ -670,7 +657,7 @@ export function summarizeInpostServiceBilling(items = []) {
     total: active.length,
     pendingMonthly: pending.length,
     carrierPendingGross: Math.round(pending.reduce((sum, item) => sum + money(item.pricing?.totalGross), 0) * 100) / 100,
-    commissionPendingGross: Math.round(pending.reduce((sum, item) => sum + money(item.billing.commissionGross), 0) * 100) / 100,
+    commissionPendingGross: Math.round(pending.reduce((sum, item) => sum + money(item.pricing?.commissionGross ?? item.billing.commissionGross), 0) * 100) / 100,
     customerPendingGross: Math.round(pending.reduce((sum, item) => sum + money(item.pricing?.customerTotalGross), 0) * 100) / 100,
     groups: [...groups.values()].map((group) => ({
       ...group,
