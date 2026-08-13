@@ -98,7 +98,7 @@ function returnAddressNote(sender = {}) {
   const street = [current.street, building].filter(Boolean).join(' ');
   const city = [current.post_code, current.city].filter(Boolean).join(' ');
   const destination = [name, street, city].filter(Boolean).join(', ');
-  return clean(`Zwroty kierować pod adres nadawcy: ${destination}${destination ? '.' : ''}`, 100);
+  return destination ? clean(`Zwroty kierować pod adres nadawcy: ${destination}.`, 100) : '';
 }
 
 function commentsWithReturnAddress(value, sender) {
@@ -284,7 +284,7 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
   const commissionGross = FIRST_COMMISSION_MIN_GROSS;
   const rawSender = raw.sender && typeof raw.sender === 'object' ? raw.sender : null;
   const technical = party(settings.sender || {});
-  const sender = senderWithTechnicalContact(rawSender || settings.sender || {}, technical);
+  const sender = senderWithTechnicalContact(rawSender || {}, technical);
   const principal = raw.principal || raw.requester
     ? senderWithTechnicalContact(raw.principal || raw.requester, technical)
     : sender;

@@ -181,6 +181,37 @@ test('dane klienta usuwają firmę Artway, uzupełniają tylko kontakt techniczn
   assert.equal(inpostServiceShipxPayload(value).sender.company_name, undefined);
 });
 
+test('brak nadawcy klienta nie podstawia po cichu danych Artway', () => {
+  const value = normalizeInpostServiceDraft({
+    requestId: 'REQ-NO-SENDER',
+    receiver,
+    deliveryType: 'courier',
+    sendingMethod: 'pop',
+    parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
+  }, { sender }, { courierService: 'inpost_courier_standard' });
+  const validation = validateInpostServiceDraft(value);
+  assert.equal(value.sender.companyName, '');
+  assert.equal(value.sender.firstName, '');
+  assert.equal(value.sender.address.street, '');
+  assert.equal(value.sender.email, sender.email);
+  assert.equal(value.sender.phone, sender.phone);
+  assert.equal(value.returnAddressNote, '');
+  assert.equal(validation.ok, false);
+  assert.ok(validation.errors.some((error) => error.field === 'sender.firstName'));
+  assert.ok(validation.errors.some((error) => error.field === 'sender.address.street'));
+  assert.equal(inpostServiceShipxPayload(value).sender.company_name, undefined);
+});
+
+test('formularz nowej przesyłki zaczyna od pustego rzeczywistego nadawcy', async () => {
+  const frontend = await readFile(new URL('../src/frontend/07e-inpost-service-address-book-pricing.js', import.meta.url), 'utf8');
+  const shared = await readFile(new URL('../src/frontend/07d-inpost-service-shipping.js', import.meta.url), 'utf8');
+  assert.match(shared, /function inpostServicePustyNadawcaKlienta\(\)/);
+  assert.match(frontend, /const sender=inpostServicePustyNadawcaKlienta\(\),settings=/);
+  assert.doesNotMatch(frontend, /const sender=inpostServiceNadawca\(\),settings=/);
+  assert.match(frontend, /Na etykiecie nadawcą jest wybrany klient/);
+  assert.match(shared, /Wybierz z książki albo wpisz rzeczywistego nadawcę przesyłki/);
+});
+
 test('konkretny punkt nadania jest wymagany tylko dla metod, które tego potrzebują', () => {
   const missing = draft({ sendingMethod: 'parcel_locker', dropoffPoint: '' });
   const validation = validateInpostServiceDraft(missing);

@@ -749,6 +749,10 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
     renderuj();
   });
   const c2cForm = page.locator('#inpostServiceForm');
+  await expect(c2cForm.locator('[data-inpost-selected-contact="sender"]')).toContainText('Nie wybrano nadawcy');
+  await expect(c2cForm.locator('[name="senderCompany"]')).toHaveValue('');
+  await expect(c2cForm.locator('[name="senderFirstName"]')).toHaveValue('');
+  await expect(c2cForm.locator('[data-inpost-return-address]')).toHaveText('Uzupełnij adres nadawcy.');
   await c2cForm.locator('.inpost-delivery-choice label').filter({ hasText: 'InPost Kurier' }).click();
   await expect(c2cForm.locator('[name="sendingMethod"][value="parcel_locker"]')).toBeEnabled();
   await expect(c2cForm.locator('[name="sendingMethod"][value="parcel_locker"]')).toBeChecked();
