@@ -83,9 +83,9 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 ### WYS-021 — Stawka umowna panelu różni się od kontroli ceny ShipX
 
 - Data zgłoszenia: 2026-08-13
-- Status: wymaga sprawdzenia cennika umownego przed kolejnym zakupem etykiety kurierskiej
-- Miejsce: podsumowanie kosztu przesyłki kurierskiej A, 1 kg, nadawanej w PaczkoPunkcie
-- Obecne działanie: panel wylicza koszt umowny 17,58 zł, natomiast kontrola ShipX dla tych samych danych zwraca 32,07 zł, czyli o 14,49 zł więcej.
+- Status: potwierdzone bezpośrednio odpowiedzią API; wymaga sprawdzenia cennika umownego przed kolejnym zakupem etykiety kurierskiej
+- Miejsce: podsumowanie kosztu przesyłki kurierskiej A, 1 kg
+- Obecne działanie: dla Kuriera Standard nadawanego w PaczkoPunkcie panel wyliczył 17,58 zł, a kontrola ShipX 32,07 zł. Dla Kuriera C2C nadawanego w Paczkomacie panel nadal wylicza 17,58 zł, natomiast produkcyjny endpoint `shipments/calculate` organizacji 45690 zwraca dokładnie 1,00 zł. Dokumentacja InPost opisuje C2C jako usługę detaliczną prepaid, więc tej wartości nie można traktować jak potwierdzenia stawki postpaid.
 - Oczekiwane działanie: panel jednoznacznie wskazuje stawkę, która rzeczywiście zostanie naliczona przez organizację InPost, a przy rozbieżności blokuje zakup do czasu zatwierdzenia lub aktualizacji cennika.
 
 ### WYS-022 — Przesyłka z API nie jest widoczna w Managerze mimo tej samej organizacji
@@ -103,6 +103,14 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 - Miejsce: rejestr nadań → akcje przesyłki
 - Obecne działanie: przycisk odbioru był widoczny wyłącznie wtedy, gdy odbiór zaznaczono przed utworzeniem etykiety.
 - Oczekiwane działanie: każda potwierdzona przesyłka bez istniejącego zlecenia ma przycisk „Zamów kuriera”. Przed wysłaniem zlecenia panel pokazuje nadawcę, adres odbioru i ostrzeżenie o możliwej opłacie.
+
+### WYS-024 — Podsumowanie mówi „Dane są poprawne” mimo rozbieżności ceny
+
+- Data zgłoszenia: 2026-08-13
+- Status: zapisano do poprawy razem z WYS-021; nie kupować kolejnej etykiety kurierskiej bez świadomej kontroli ceny
+- Miejsce: formularz nadania → Koszt i faktura Artway-TM
+- Obecne działanie: po poprawnej walidacji danych panel pokazuje zielony komunikat „Dane są poprawne”, nawet gdy obok widnieje różnica między stawką umowną a odpowiedzią ShipX (dla testu C2C: 17,58 zł wobec 1,00 zł).
+- Oczekiwane działanie: istotna rozbieżność zmienia komunikat na ostrzeżenie i blokuje utworzenie płatnej przesyłki do czasu osobnego potwierdzenia właściwej ceny.
 
 ## Naprawione
 
