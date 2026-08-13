@@ -101,9 +101,10 @@ function returnAddressNote(sender = {}) {
   return destination ? clean(`Zwroty kierować pod adres nadawcy: ${destination}.`, 100) : '';
 }
 
-function commentsWithReturnAddress(value, sender) {
-  const note = returnAddressNote(sender);
+function commentsForShipment(value, sender, technicalSenderRequired = false) {
+  const note = technicalSenderRequired ? returnAddressNote(sender) : '';
   const custom = clean(value, 500).replace(/(?:^|\s)Zwroty\s+kierować(?:\s+pod|\s+na)?\s+adres(?:\s+nadawcy)?\s*:?.*$/iu, '').trim();
+  if (!technicalSenderRequired) return clean(custom, 100);
   if (!custom) return note;
   const available = Math.max(0, 100 - note.length - 1);
   const prefix = clean(custom, available).replace(/[\s,;:-]+$/u, '');
@@ -289,7 +290,8 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
     ? senderWithTechnicalContact(raw.principal || raw.requester, technical)
     : sender;
   const receiver = partyWithTechnicalContact(raw.receiver || {}, technical);
-  const returnNote = returnAddressNote(sender);
+  const technicalSenderRequired = raw.technicalSenderRequired === true;
+  const returnNote = technicalSenderRequired ? returnAddressNote(sender) : '';
   const service = deliveryType === 'locker'
     ? clean(services.lockerService || services.locker || 'inpost_locker_standard', 80)
     : courierLocker
@@ -298,9 +300,11 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
   return {
     requestId: clean(raw.requestId, 100),
     reference: clean(raw.reference, 80),
-    comments: commentsWithReturnAddress(raw.comments, sender),
+    comments: commentsForShipment(raw.comments, sender, technicalSenderRequired),
     returnAddress: { ...sender.address },
     returnAddressNote: returnNote,
+    technicalSenderRequired,
+    technicalSender: technicalSenderRequired ? technical : null,
     deliveryType,
     service,
     sendingMethod,
@@ -357,6 +361,12 @@ export function validateInpostServiceDraft(draft = {}) {
   if (draft.cod?.enabled && draft.cod.amount <= 0) errors.push({ field: 'cod.amount', message: 'Podaj kwotę pobrania.' });
   if (draft.insurance?.enabled && draft.insurance.amount <= 0) errors.push({ field: 'insurance.amount', message: 'Podaj wartość ubezpieczenia.' });
   if (draft.deliveryType === 'courier' && (draft.parcel?.weight <= 0 || draft.parcel?.weight > 30)) errors.push({ field: 'parcel.weight', message: 'Kurier Standard z tego cennika obsługuje wagę od 0,01 do 30 kg.' });
+  if (draft.technicalSenderRequired) {
+    const technical = draft.technicalSender || {}, technicalAddress = technical.address || {};
+    if ((!technical.companyName && !technical.firstName) || !emailOk(technical.email) || !/^\d{9}$/.test(technical.phone || '') || !technicalAddress.street || !technicalAddress.building_number || !/^\d{2}-\d{3}$/.test(technicalAddress.post_code || '') || !technicalAddress.city) {
+      errors.push({ field: 'technicalSenderRequired', message: 'Uzupełnij stałe dane Artway-TM w ustawieniach InPost albo wyłącz wyjątkowy tryb nadawcy.' });
+    }
+  }
   if (draft.billing?.mode === 'monthly' && (!draft.sender?.companyName || !/^\d{10}$/.test(draft.sender?.taxCode || ''))) errors.push({ field: 'sender.taxCode', message: 'Faktura miesięczna dla nadawcy wymaga nazwy firmy i 10-cyfrowego NIP.' });
   if (draft.billing?.mode !== 'none' && draft.billing.commissionGross <= 0) errors.push({ field: 'commissionGross', message: 'Prowizja do faktury musi być większa od 0 zł.' });
   if (!draft.requestId) errors.push({ field: 'requestId', message: 'Brak identyfikatora operacji. Odśwież formularz.' });
@@ -368,13 +378,14 @@ export function inpostServiceShipxPayload(draft = {}) {
   if (draft.sendingMethod) customAttributes.sending_method = draft.sendingMethod;
   if (draft.deliveryType === 'locker') customAttributes.target_point = draft.targetPoint;
   if (draft.dropoffPoint && DROPOFF_POINT_REQUIRED_METHODS.has(draft.sendingMethod)) customAttributes.dropoff_point = draft.dropoffPoint;
+  const labelSender = draft.technicalSenderRequired ? draft.technicalSender : draft.sender;
   const payload = {
-    sender: shipxParty(draft.sender, true),
+    sender: shipxParty(labelSender, true),
     receiver: shipxParty(draft.receiver, draft.deliveryType === 'courier'),
     parcels: [parcel(draft.parcel, { exactDimensions: draft.deliveryType === 'courier' })],
     service: draft.service,
     reference: draft.reference,
-    comments: draft.comments || `Nadanie usługowe ${draft.reference}`.slice(0, 100),
+    comments: draft.comments || undefined,
     only_choice_of_offer: false,
     ...(Object.keys(customAttributes).length ? { custom_attributes: customAttributes } : {}),
   };

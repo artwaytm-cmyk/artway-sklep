@@ -416,6 +416,8 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         comments: draft.comments,
         returnAddress: draft.returnAddress,
         returnAddressNote: draft.returnAddressNote,
+        technicalSenderRequired: draft.technicalSenderRequired,
+        labelSender: draft.technicalSenderRequired ? draft.technicalSender : draft.sender,
         createdAt: now,
         updatedAt: now,
         status: 'creating',

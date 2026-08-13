@@ -154,7 +154,7 @@ test('ręcznie wyczyszczona firma nadawcy nie wraca z domyślnych ani starszych 
   assert.equal(inpostServiceShipxPayload(value).sender.company_name, undefined);
 });
 
-test('dane klienta usuwają firmę Artway, uzupełniają tylko kontakt techniczny i zawsze dodają adres zwrotny', () => {
+test('zwykłe nadanie pokazuje klienta jako nadawcę i nie dopisuje automatycznych uwag', () => {
   const clientAddress = { street: 'Wałowa', buildingNumber: '12', postCode: '83-011', city: 'Wiślinka' };
   const value = normalizeInpostServiceDraft({
     requestId: 'REQ-RETURN',
@@ -163,7 +163,7 @@ test('dane klienta usuwają firmę Artway, uzupełniają tylko kontakt techniczn
     receiver: { ...receiver, email: '', phone: '' },
     deliveryType: 'courier',
     sendingMethod: 'pop',
-    comments: 'Ostrożnie. Zwroty kierować na adres nadawcy: stary adres.',
+    comments: '',
     parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
   }, { sender }, {
     services: ['inpost_courier_standard'],
@@ -176,9 +176,32 @@ test('dane klienta usuwają firmę Artway, uzupełniają tylko kontakt techniczn
   assert.equal(value.receiver.email, sender.email);
   assert.equal(value.receiver.phone, sender.phone);
   assert.equal(value.returnAddress.street, 'Wałowa');
+  assert.equal(value.returnAddressNote, '');
+  assert.equal(value.comments, '');
+  const payload = inpostServiceShipxPayload(value);
+  assert.equal(payload.sender.company_name, undefined);
+  assert.equal(payload.sender.first_name, 'Piotr');
+  assert.equal('comments' in payload, false);
+});
+
+test('wyjątkowy tryb Artway pokazuje firmę na etykiecie i dopisuje klienta w uwagach', () => {
+  const clientAddress = { street: 'Wałowa', buildingNumber: '12', postCode: '83-011', city: 'Wiślinka' };
+  const value = normalizeInpostServiceDraft({
+    requestId: 'REQ-TECHNICAL-SENDER',
+    reference: 'USL-TECHNICAL-SENDER',
+    sender: { ...sender, firstName: 'Piotr', lastName: 'Modelski', companyName: '', taxCode: '', address: clientAddress },
+    receiver,
+    technicalSenderRequired: true,
+    deliveryType: 'courier',
+    sendingMethod: 'pop',
+    parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
+  }, { sender }, { courierService: 'inpost_courier_standard' });
+  assert.equal(validateInpostServiceDraft(value).ok, true);
   assert.equal(value.returnAddressNote, 'Zwroty kierować pod adres nadawcy: Piotr Modelski, Wałowa 12, 83-011 Wiślinka.');
-  assert.equal(value.comments, 'Ostrożnie. Zwroty kierować pod adres nadawcy: Piotr Modelski, Wałowa 12, 83-011 Wiślinka.');
-  assert.equal(inpostServiceShipxPayload(value).sender.company_name, undefined);
+  assert.equal(value.comments, value.returnAddressNote);
+  const payload = inpostServiceShipxPayload(value);
+  assert.equal(payload.sender.company_name, sender.companyName);
+  assert.equal(payload.comments, value.returnAddressNote);
 });
 
 test('brak nadawcy klienta nie podstawia po cichu danych Artway', () => {
@@ -209,6 +232,8 @@ test('formularz nowej przesyłki zaczyna od pustego rzeczywistego nadawcy', asyn
   assert.match(frontend, /const sender=inpostServicePustyNadawcaKlienta\(\),settings=/);
   assert.doesNotMatch(frontend, /const sender=inpostServiceNadawca\(\),settings=/);
   assert.match(frontend, /Na etykiecie nadawcą jest wybrany klient/);
+  assert.match(frontend, /Wyjątkowo: InPost wymaga danych Artway-TM/);
+  assert.match(frontend, /Domyślnie nic nie dopisujemy do uwag/);
   assert.match(shared, /Wybierz z książki albo wpisz rzeczywistego nadawcę przesyłki/);
 });
 
@@ -724,7 +749,7 @@ test('endpoint tworzenia przesyłki kurierskiej przekazuje wybrany odbiór przez
       sendingMethod: 'dispatch_order',
       targetPoint: '',
       dropoffPoint: '',
-      comments: 'Zwroty kierować na adres nadawcy.',
+      comments: '',
       parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
       billingMode: 'none',
       commissionGross: 4,
@@ -742,6 +767,7 @@ test('endpoint tworzenia przesyłki kurierskiej przekazuje wybrany odbiór przez
   assert.deepEqual(createCall.options.bodyObj.custom_attributes, { sending_method: 'dispatch_order' });
   assert.deepEqual(createCall.options.bodyObj.parcels[0].dimensions, { length: '640', width: '380', height: '80', unit: 'mm' });
   assert.deepEqual(createCall.options.bodyObj.parcels[0].weight, { amount: '1', unit: 'kg' });
-  assert.match(result.body.item.comments, /^Zwroty kierować pod adres nadawcy: Nadawca sp\. z o\.o\., Gryfa Pomorskiego 1\/A, 84-207 Bojano\.$/);
+  assert.equal(result.body.item.comments, '');
+  assert.equal('comments' in createCall.options.bodyObj, false);
   assert.equal(result.body.item.returnAddress.street, 'Gryfa Pomorskiego');
 });

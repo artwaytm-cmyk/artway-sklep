@@ -752,7 +752,7 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
   await expect(c2cForm.locator('[data-inpost-selected-contact="sender"]')).toContainText('Nie wybrano nadawcy');
   await expect(c2cForm.locator('[name="senderCompany"]')).toHaveValue('');
   await expect(c2cForm.locator('[name="senderFirstName"]')).toHaveValue('');
-  await expect(c2cForm.locator('[data-inpost-return-address]')).toHaveText('Uzupełnij adres nadawcy.');
+  await expect(c2cForm.locator('[data-inpost-return-address]')).toHaveText('Domyślnie nic nie dopisujemy do uwag.');
   await c2cForm.locator('.inpost-delivery-choice label').filter({ hasText: 'InPost Kurier' }).click();
   await expect(c2cForm.locator('[name="sendingMethod"][value="parcel_locker"]')).toBeEnabled();
   await expect(c2cForm.locator('[name="sendingMethod"][value="parcel_locker"]')).toBeChecked();
@@ -769,7 +769,11 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
   await expect(clientSender.getByLabel('NIP', { exact: true })).toHaveValue('');
   await expect(clientSender.getByLabel('E-mail *', { exact: true })).toHaveValue('artwaytm@gmail.com');
   await expect(clientSender.getByLabel('Telefon *', { exact: true })).toHaveValue('530038914');
+  await expect(c2cForm.locator('[data-inpost-return-address]')).toHaveText('Domyślnie nic nie dopisujemy do uwag.');
+  await c2cForm.getByLabel(/Wyjątkowo: InPost wymaga danych Artway-TM/).check();
   await expect(c2cForm.locator('[data-inpost-return-address]')).toHaveText('Zwroty kierować pod adres nadawcy: Piotr Modelski, Wałowa 12, 83-011 Wiślinka.');
+  await c2cForm.getByLabel(/Wyjątkowo: InPost wymaga danych Artway-TM/).uncheck();
+  await expect(c2cForm.locator('[data-inpost-return-address]')).toHaveText('Domyślnie nic nie dopisujemy do uwag.');
   await page.evaluate(() => {
     inpostServiceStan.addressBook = [{
       id: 'IPA-E2E',
