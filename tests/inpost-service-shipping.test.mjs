@@ -84,6 +84,7 @@ test('kurier odrzuca metodę Paczkomatu i bezpiecznie wybiera PaczkoPunkt', () =
     sendingMethod: 'parcel_locker',
     weekend: true,
     additionalServices: ['sms'],
+    parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
   });
   assert.equal(value.sendingMethod, 'pop');
   assert.equal(value.weekend, false);
@@ -92,6 +93,26 @@ test('kurier odrzuca metodę Paczkomatu i bezpiecznie wybiera PaczkoPunkt', () =
   assert.equal(payload.service, 'inpost_courier_standard');
   assert.deepEqual(payload.custom_attributes, { sending_method: 'pop' });
   assert.deepEqual(payload.additional_services, ['sms']);
+  assert.equal(payload.parcels[0].template, undefined);
+  assert.deepEqual(payload.parcels[0].dimensions, { length: '640', width: '380', height: '80', unit: 'mm' });
+  assert.deepEqual(payload.parcels[0].weight, { amount: '1', unit: 'kg' });
+});
+
+test('ręcznie wyczyszczona firma nadawcy nie wraca z domyślnych ani starszych pól ustawień', () => {
+  const value = normalizeInpostServiceDraft({
+    requestId: 'REQ-PERSON',
+    sender: { ...sender, companyName: '', taxCode: '', firstName: 'Piotr', lastName: 'Modelski' },
+    receiver,
+    deliveryType: 'courier',
+    sendingMethod: 'pop',
+    parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
+  }, {
+    sender: { ...sender, companyName: 'Artway-TM', firma: 'Starsza nazwa Artway-TM' },
+  }, { courierService: 'inpost_courier_standard' });
+  assert.equal(value.sender.companyName, '');
+  assert.equal(value.sender.firstName, 'Piotr');
+  assert.equal(value.sender.lastName, 'Modelski');
+  assert.equal(inpostServiceShipxPayload(value).sender.company_name, undefined);
 });
 
 test('konkretny punkt nadania jest wymagany tylko dla metod, które tego potrzebują', () => {
@@ -286,6 +307,9 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /Stawki InPost/);
   assert.doesNotMatch(shipping, /Abonament netto|Abonament brutto|Umowa abonamentowa/);
   assert.match(shipping, /inpostServicePotwierdzenie/);
+  assert.match(shipping, /inpostServiceUzupelnijKontaktTechniczny/);
+  assert.match(shipping, /inpostServiceAktualizujKartyStron/);
+  assert.match(shipping, /formularz użyje kontaktu Artway-TM/);
   assert.match(shipping, /Drukuj na Brother A4/);
   assert.match(shipping, /Aktualny przebieg transportu/);
   assert.match(shipping, /Cena końcowa usługi/);
@@ -518,7 +542,8 @@ test('endpoint tworzenia przesyłki kurierskiej przekazuje wybrany odbiór przez
       sendingMethod: 'dispatch_order',
       targetPoint: '',
       dropoffPoint: '',
-      parcel: { template: 'small', weight: 1 },
+      comments: 'Zwroty kierować na adres nadawcy.',
+      parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
       billingMode: 'none',
       commissionGross: 4,
     }),
@@ -530,4 +555,7 @@ test('endpoint tworzenia przesyłki kurierskiej przekazuje wybrany odbiór przez
   assert.ok(createCall);
   assert.equal(createCall.options.bodyObj.service, 'inpost_courier_standard');
   assert.deepEqual(createCall.options.bodyObj.custom_attributes, { sending_method: 'dispatch_order' });
+  assert.deepEqual(createCall.options.bodyObj.parcels[0].dimensions, { length: '640', width: '380', height: '80', unit: 'mm' });
+  assert.deepEqual(createCall.options.bodyObj.parcels[0].weight, { amount: '1', unit: 'kg' });
+  assert.equal(result.body.item.comments, 'Zwroty kierować na adres nadawcy.');
 });

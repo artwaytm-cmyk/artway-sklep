@@ -398,6 +398,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         id,
         requestId: draft.requestId,
         reference: draft.reference || id,
+        comments: draft.comments,
         createdAt: now,
         updatedAt: now,
         status: 'creating',

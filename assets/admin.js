@@ -1007,7 +1007,16 @@ function inpostServiceWypelnijKlienta(input){
 function inpostServiceStronaOsoby(form,prefix){
   return {companyName:form.elements[`${prefix}Company`]?.value||"",taxCode:form.elements[`${prefix}TaxCode`]?.value||"",firstName:form.elements[`${prefix}FirstName`]?.value||"",lastName:form.elements[`${prefix}LastName`]?.value||"",email:form.elements[`${prefix}Email`]?.value||"",phone:form.elements[`${prefix}Phone`]?.value||"",address:{street:form.elements[`${prefix}Street`]?.value||"",buildingNumber:form.elements[`${prefix}Building`]?.value||"",flatNumber:form.elements[`${prefix}Flat`]?.value||"",postCode:form.elements[`${prefix}PostCode`]?.value||"",city:form.elements[`${prefix}City`]?.value||""}};
 }
+function inpostServiceUzupelnijKontaktTechniczny(form){
+  const technical=inpostServiceNadawca(),fallback=inpostServiceAdresFirmy(),email=technical.email||fallback.email||"",phone=technical.phone||fallback.phone||"";
+  ["sender","receiver"].forEach(prefix=>{
+    const emailInput=form?.elements?.[`${prefix}Email`],phoneInput=form?.elements?.[`${prefix}Phone`];
+    if(emailInput&&!String(emailInput.value||"").trim()&&email){emailInput.value=email;emailInput.dataset.inpostTechnicalContact="true";}
+    if(phoneInput&&!String(phoneInput.value||"").trim()&&phone){phoneInput.value=phone;phoneInput.dataset.inpostTechnicalContact="true";}
+  });
+}
 function inpostServicePayload(form){
+  inpostServiceUzupelnijKontaktTechniczny(form);
   const data=new FormData(form),additionalServices=[...form.querySelectorAll('[name="additionalServices"]:checked')].map(input=>input.value);
   const codAmount=Math.max(0,Number(String(data.get("codAmount")||"0").replace(",","."))||0),insuranceAmount=Math.max(0,Number(String(data.get("insuranceAmount")||"0").replace(",","."))||0),sendingMethod=String(data.get("sendingMethod")||"");
   const sender=inpostServiceStronaOsoby(form,"sender");
@@ -1061,6 +1070,7 @@ async function inpostServiceUtworz(event){
     const d=await chmura("inpost-service-create",{method:"POST",body:payload,timeout:90000});
     if(d.item)inpostServiceStan.items=[d.item,...inpostServiceStan.items.filter(item=>item.id!==d.item.id)];
     inpostServiceNowyRequestId();await inpostServiceLaduj(true,true);
+    if(d.item){inpostServiceSzukaj=String(d.item.trackingNumber||d.item.reference||d.item.id||"");inpostServiceFiltr="wszystkie";inpostServiceBillingFiltr="wszystkie";}
     toast(d.invoice?.error?`Przesyłka utworzona ✅ Faktura wymaga uwagi: ${d.invoice.error}`:`Przesyłka InPost utworzona ✅ ${d.item?.trackingNumber||"oczekuje na numer"}`);
     renderuj();
   }catch(e){if(e.code==="previous_attempt_failed"){inpostServiceNowyRequestId();if(form.elements.requestId)form.elements.requestId.value=inpostServiceStan.requestId;}const details=inpostServiceBladPol(e.details,form,false),message=details[0]?.message||"Nie udało się utworzyć przesyłki. Sprawdź dane i spróbuj ponownie.";toast("Nie utworzono przesyłki: "+message);}
@@ -1470,7 +1480,8 @@ function inpostServiceUstawPolaOsoby(form,prefix,contact={}){
 function inpostServiceWybranyKontaktHTML(contact={},prefix="receiver"){
   const hasData=!!(contact.id||contact.companyName||contact.firstName||contact.lastName||contact.email||contact.phone||inpostServiceAdresKsiazki(contact));
   if(!hasData)return `<span class="inpost-selected-icon">＋</span><span><b>Nie wybrano ${prefix==="sender"?"nadawcy":"odbiorcy"}</b><small>Wybierz zapisany kontakt albo wpisz nowy adres.</small></span>`;
-  return `<span class="inpost-selected-icon">${prefix==="sender"?"📤":"📥"}</span><span><b>${esc(inpostServiceNazwaKontaktu(contact))}</b><small>${esc(inpostServiceAdresKsiazki(contact)||[contact.email,contact.phone].filter(Boolean).join(" • ")||"Adres do uzupełnienia")}</small></span>${inpostServiceRolaEtykieta(contact)}`;
+  const withRole={...contact,roles:Array.isArray(contact.roles)&&contact.roles.length?contact.roles:[prefix]};
+  return `<span class="inpost-selected-icon">${prefix==="sender"?"📤":"📥"}</span><span><b>${esc(inpostServiceNazwaKontaktu(contact))}</b><small>${esc(inpostServiceAdresKsiazki(contact)||[contact.email,contact.phone].filter(Boolean).join(" • ")||"Adres do uzupełnienia")}</small></span>${inpostServiceRolaEtykieta(withRole)}`;
 }
 function inpostServicePunktOpis(point={}){
   const distance=Number(point.distance);
@@ -1602,8 +1613,15 @@ function inpostServicePrzelicz(form){
 }
 function inpostServiceZaplanujWycene(form){
   clearTimeout(inpostServiceWycenaTimer);
+  inpostServiceAktualizujKartyStron(form);
   inpostServicePrzelicz(form);
   inpostServiceWycenaTimer=setTimeout(()=>inpostServiceWycena(form,false),650);
+}
+function inpostServiceAktualizujKartyStron(form){
+  ["sender","receiver"].forEach(prefix=>{
+    const summary=form?.querySelector?.(`[data-inpost-selected-contact="${prefix}"]`);if(!summary)return;
+    summary.innerHTML=inpostServiceWybranyKontaktHTML(inpostServiceStronaOsoby(form,prefix),prefix);
+  });
 }
 async function inpostServiceWycena(form=document.getElementById("inpostServiceForm"),force=true){
   if(!form)return;
@@ -1710,7 +1728,7 @@ function inpostServiceFormHTML(){
           <input type="checkbox" name="senderRoleSender" checked hidden>
           <div class="inpost-contact-selector"><div class="inpost-selected-contact" data-inpost-selected-contact="sender">${inpostServiceWybranyKontaktHTML(sender,"sender")}</div><div class="inpost-contact-selector-actions"><button class="btn" type="button" onclick="inpostServiceOtworzKsiazke('sender',this)">📒 Wybierz z książki</button><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres('sender',this)">＋ Nowy adres</button></div></div>
           <details><summary>Sprawdź lub popraw dane nadawcy</summary><div class="inpost-form-grid">
-            <label>Firma<input name="senderCompany" value="${esc(sender.companyName||"")}"></label><label>NIP<input name="senderTaxCode" inputmode="numeric" maxlength="10" value="${esc(sender.taxCode||"")}"></label><label>Imię<input name="senderFirstName" value="${esc(sender.firstName||"")}"></label><label>Nazwisko<input name="senderLastName" value="${esc(sender.lastName||"")}"></label><label>E-mail *<input name="senderEmail" type="email" required value="${esc(sender.email||"")}"></label><label>Telefon *<input name="senderPhone" inputmode="tel" required value="${esc(sender.phone||"")}"></label>
+            <label>Firma<input name="senderCompany" value="${esc(sender.companyName||"")}"></label><label>NIP<input name="senderTaxCode" inputmode="numeric" maxlength="10" value="${esc(sender.taxCode||"")}"></label><label>Imię<input name="senderFirstName" value="${esc(sender.firstName||"")}"></label><label>Nazwisko<input name="senderLastName" value="${esc(sender.lastName||"")}"></label><label>E-mail *<input name="senderEmail" type="email" required value="${esc(sender.email||"")}"></label><label>Telefon *<input name="senderPhone" inputmode="tel" required value="${esc(sender.phone||"")}"></label><small class="wide inpost-technical-contact-note">Brakujący e-mail lub telefon zostanie uzupełniony danymi kontaktowymi Artway-TM.</small>
             <label>Kod pocztowy *<input name="senderPostCode" required pattern="\\d{2}-?\\d{3}" inputmode="numeric" autocomplete="postal-code" value="${esc(sender.address?.postCode||sender.address?.post_code||"")}" oninput="inpostServiceKodPocztowyWpis(this,'sender')"></label><label>Miasto *<input name="senderCity" required list="inpostServicesenderCityHints" autocomplete="address-level2" value="${esc(sender.address?.city||"")}" oninput="inpostServiceMiastoWpis(this,'sender')"><datalist id="inpostServicesenderCityHints"></datalist></label><div class="backend-note wide" data-inpost-postcode-hint="sender" hidden></div><label class="wide">Ulica *<input name="senderStreet" required list="inpostServicesenderStreetHints" autocomplete="address-line1" value="${esc(sender.address?.street||"")}"><datalist id="inpostServicesenderStreetHints"></datalist></label><label>Nr budynku *<input name="senderBuilding" required value="${esc(sender.address?.buildingNumber||sender.address?.building_number||"")}"></label><label>Nr lokalu<input name="senderFlat" value="${esc(sender.address?.flatNumber||sender.address?.flat_number||"")}"></label>
             <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt('sender',this)">💾 Zapisz w książce</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt('sender',this)">Usuń zapis</button></div><label class="check wide"><input type="checkbox" name="saveSender" checked> Zapamiętaj lub zaktualizuj nadawcę</label>
           </div></details>
@@ -1721,7 +1739,7 @@ function inpostServiceFormHTML(){
           <input type="checkbox" name="receiverRoleReceiver" checked hidden>
           <div class="inpost-contact-selector"><div class="inpost-selected-contact" data-inpost-selected-contact="receiver">${inpostServiceWybranyKontaktHTML({},"receiver")}</div><div class="inpost-contact-selector-actions"><button class="btn" type="button" onclick="inpostServiceOtworzKsiazke('receiver',this)">📒 Wybierz z książki</button><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres('receiver',this)">＋ Nowy adres</button></div></div>
           <div class="inpost-form-grid">
-            <label>E-mail *<input name="receiverEmail" type="email" required placeholder="Adres e-mail odbiorcy"></label><label>Telefon *<input name="receiverPhone" inputmode="tel" required placeholder="9 cyfr"></label>
+            <label>E-mail *<input name="receiverEmail" type="email" required placeholder="Adres e-mail odbiorcy"></label><label>Telefon *<input name="receiverPhone" inputmode="tel" required placeholder="9 cyfr"></label><small class="wide inpost-technical-contact-note">Jeśli klient nie poda tych danych, formularz użyje kontaktu Artway-TM i oznaczy go jako techniczny.</small>
             <div class="wide" data-inpost-only="locker"><label>Punkt odbioru *<div class="inpost-inline"><input id="inpostServiceTargetPoint" name="targetPoint" required placeholder="Nazwa lub lokalizacja punktu"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape('target')">Mapa</button></div></label><div class="inpost-point-search"><input id="inpostServicePointSearch" placeholder="Miasto, kod, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow('target')">Szukaj</button><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktowPrzyAdresie('receiver','target')">Przy adresie</button></div><div id="inpostServicePointResults"></div></div>
             <div class="wide inpost-courier-address" data-inpost-only="courier"><div class="inpost-form-grid"><label>Imię i nazwisko<input name="receiverFirstName" placeholder="Imię"><input name="receiverLastName" placeholder="Nazwisko"></label><label>Nazwa firmy<input name="receiverCompany"></label><label>NIP<input name="receiverTaxCode" inputmode="numeric" maxlength="10"></label><label>Kod pocztowy *<input name="receiverPostCode" data-receiver-address pattern="\\d{2}-?\\d{3}" inputmode="numeric" autocomplete="postal-code" oninput="inpostServiceKodPocztowyWpis(this,'receiver')"></label><label>Miasto *<input name="receiverCity" data-receiver-address list="inpostServicereceiverCityHints" autocomplete="address-level2" oninput="inpostServiceMiastoWpis(this,'receiver')"><datalist id="inpostServicereceiverCityHints"></datalist></label><div class="backend-note wide" data-inpost-postcode-hint="receiver" hidden></div><label class="wide">Ulica *<input name="receiverStreet" data-receiver-address list="inpostServicereceiverStreetHints" autocomplete="address-line1"><datalist id="inpostServicereceiverStreetHints"></datalist></label><label>Nr budynku *<input name="receiverBuilding" data-receiver-address></label><label>Nr lokalu<input name="receiverFlat"></label></div></div>
             <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt('receiver',this)">💾 Dodaj odbiorcę do książki</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt('receiver',this)">Usuń zapis</button></div><label class="check wide"><input type="checkbox" name="saveReceiver" checked> Zapamiętaj lub zaktualizuj odbiorcę</label>

@@ -71,9 +71,9 @@ function shipxParty(value, includeAddress = true) {
   return result;
 }
 
-function parcel(raw = {}) {
+function parcel(raw = {}, { exactDimensions = false } = {}) {
   const template = clean(raw.template || raw.gabaryt, 20).toLowerCase();
-  if (['small', 'medium', 'large'].includes(template)) return { template };
+  if (!exactDimensions && ['small', 'medium', 'large'].includes(template)) return { template };
   return {
     dimensions: {
       length: String(Math.round((Number(raw.length || raw.dlugosc) || 30) * 10)),
@@ -218,7 +218,8 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
   const extras = [...new Set((Array.isArray(raw.additionalServices) ? raw.additionalServices : []).map((item) => clean(item, 30)).filter((item) => allowedExtras.has(item)))];
   const billingMode = BILLING_MODES.has(clean(raw.billingMode, 20)) ? clean(raw.billingMode, 20) : 'none';
   const commissionGross = money(raw.commissionGross, money(settings.commissionGross, 4));
-  const sender = party({ ...(settings.sender || {}), ...(raw.sender || {}) });
+  const rawSender = raw.sender && typeof raw.sender === 'object' ? raw.sender : null;
+  const sender = party(rawSender || settings.sender || {});
   const principal = party(raw.principal || raw.requester || sender);
   const receiver = party(raw.receiver || {});
   const service = deliveryType === 'locker'
@@ -297,7 +298,7 @@ export function inpostServiceShipxPayload(draft = {}) {
   const payload = {
     sender: shipxParty(draft.sender, true),
     receiver: shipxParty(draft.receiver, draft.deliveryType === 'courier'),
-    parcels: [parcel(draft.parcel)],
+    parcels: [parcel(draft.parcel, { exactDimensions: draft.deliveryType === 'courier' })],
     service: draft.service,
     reference: draft.reference,
     comments: draft.comments || `Nadanie usługowe ${draft.reference}`.slice(0, 100),

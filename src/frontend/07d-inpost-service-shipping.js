@@ -94,7 +94,16 @@ function inpostServiceWypelnijKlienta(input){
 function inpostServiceStronaOsoby(form,prefix){
   return {companyName:form.elements[`${prefix}Company`]?.value||"",taxCode:form.elements[`${prefix}TaxCode`]?.value||"",firstName:form.elements[`${prefix}FirstName`]?.value||"",lastName:form.elements[`${prefix}LastName`]?.value||"",email:form.elements[`${prefix}Email`]?.value||"",phone:form.elements[`${prefix}Phone`]?.value||"",address:{street:form.elements[`${prefix}Street`]?.value||"",buildingNumber:form.elements[`${prefix}Building`]?.value||"",flatNumber:form.elements[`${prefix}Flat`]?.value||"",postCode:form.elements[`${prefix}PostCode`]?.value||"",city:form.elements[`${prefix}City`]?.value||""}};
 }
+function inpostServiceUzupelnijKontaktTechniczny(form){
+  const technical=inpostServiceNadawca(),fallback=inpostServiceAdresFirmy(),email=technical.email||fallback.email||"",phone=technical.phone||fallback.phone||"";
+  ["sender","receiver"].forEach(prefix=>{
+    const emailInput=form?.elements?.[`${prefix}Email`],phoneInput=form?.elements?.[`${prefix}Phone`];
+    if(emailInput&&!String(emailInput.value||"").trim()&&email){emailInput.value=email;emailInput.dataset.inpostTechnicalContact="true";}
+    if(phoneInput&&!String(phoneInput.value||"").trim()&&phone){phoneInput.value=phone;phoneInput.dataset.inpostTechnicalContact="true";}
+  });
+}
 function inpostServicePayload(form){
+  inpostServiceUzupelnijKontaktTechniczny(form);
   const data=new FormData(form),additionalServices=[...form.querySelectorAll('[name="additionalServices"]:checked')].map(input=>input.value);
   const codAmount=Math.max(0,Number(String(data.get("codAmount")||"0").replace(",","."))||0),insuranceAmount=Math.max(0,Number(String(data.get("insuranceAmount")||"0").replace(",","."))||0),sendingMethod=String(data.get("sendingMethod")||"");
   const sender=inpostServiceStronaOsoby(form,"sender");
@@ -148,6 +157,7 @@ async function inpostServiceUtworz(event){
     const d=await chmura("inpost-service-create",{method:"POST",body:payload,timeout:90000});
     if(d.item)inpostServiceStan.items=[d.item,...inpostServiceStan.items.filter(item=>item.id!==d.item.id)];
     inpostServiceNowyRequestId();await inpostServiceLaduj(true,true);
+    if(d.item){inpostServiceSzukaj=String(d.item.trackingNumber||d.item.reference||d.item.id||"");inpostServiceFiltr="wszystkie";inpostServiceBillingFiltr="wszystkie";}
     toast(d.invoice?.error?`Przesyłka utworzona ✅ Faktura wymaga uwagi: ${d.invoice.error}`:`Przesyłka InPost utworzona ✅ ${d.item?.trackingNumber||"oczekuje na numer"}`);
     renderuj();
   }catch(e){if(e.code==="previous_attempt_failed"){inpostServiceNowyRequestId();if(form.elements.requestId)form.elements.requestId.value=inpostServiceStan.requestId;}const details=inpostServiceBladPol(e.details,form,false),message=details[0]?.message||"Nie udało się utworzyć przesyłki. Sprawdź dane i spróbuj ponownie.";toast("Nie utworzono przesyłki: "+message);}
