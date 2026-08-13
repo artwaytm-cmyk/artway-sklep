@@ -17,6 +17,7 @@ import {
   validateInpostServiceDraft,
 } from '../src/backend/lib/domain/inpost-service-shipment.mjs';
 import { normalizeInpostServiceTracking } from '../src/backend/lib/domain/inpost-service-tracking.mjs';
+import { createInpostService } from '../src/backend/lib/inpost-service.mjs';
 import { createInpostServiceShipmentRoute } from '../src/backend/lib/inpost-service-shipment-route.mjs';
 import { createInpostRoute } from '../src/backend/lib/inpost-route.mjs';
 import { inpostErrorDetails, inpostErrorText } from '../src/backend/lib/domain/inpost-error.mjs';
@@ -485,6 +486,37 @@ test('zamówienia sklepu korzystają z tego samego cennika umownego bez ujawnian
   assert.match(orders, /Koszt InPost brutto/);
   assert.match(orders, /inpostWycenaZamowieniaLaduj/);
   assert.doesNotMatch(orders, /abonament/i);
+});
+
+test('zamówienie sklepu trafia do własnej organizacji ShipX bez oznaczenia klienta brokera', async () => {
+  const service = createInpostService({
+    read: async () => ({ items: [] }),
+    write: async () => {},
+    onOrderStatusTransition: async () => ({}),
+  });
+  const order = {
+    nr: 'ATM-SKLEP-1',
+    dostawaId: 'paczkomat',
+    paczkomat: 'BOJ01N',
+    klient: { imie: 'Jan', nazwisko: 'Test', email: 'jan@example.pl', telefon: '530038914' },
+    wysylka: { gabaryt: 'small', sposobNadania: 'parcel_locker', punktNadania: 'BOJ01N' },
+  };
+  const config = {
+    orgId: '45690',
+    lockerService: 'inpost_locker_standard',
+    courierService: 'inpost_courier_standard',
+    sendingMethod: 'parcel_locker',
+  };
+  const validation = service.walidujPrzesylkeInPost(order);
+  const payload = service.przesylkaShipXPayload(order, config, validation);
+  const route = await readFile(new URL('../src/backend/lib/inpost-route.mjs', import.meta.url), 'utf8');
+
+  assert.equal(validation.ok, true);
+  assert.equal(payload.reference, order.nr);
+  assert.equal(payload.service, 'inpost_locker_standard');
+  assert.equal(payload.custom_attributes.target_point, 'BOJ01N');
+  assert.equal('external_customer_id' in payload, false);
+  assert.ok(route.includes('/v1/organizations/${encodeURIComponent(c.orgId)}/shipments'));
 });
 
 test('etykieta A4 używa wspieranego przez ShipX typu normal, a A6 zachowuje A6', async () => {
