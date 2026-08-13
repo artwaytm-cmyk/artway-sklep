@@ -1,0 +1,54 @@
+[Unit]
+Description=Artway-TM server-side admin panel agent
+Wants=network-online.target artway-backend.service
+After=network-online.target artway-backend.service
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=artway
+Group=artway
+WorkingDirectory=/srv/artway/shop
+Environment=NODE_ENV=production
+Environment=ARTWAY_LOCAL_API_ORIGIN=http://127.0.0.1:3000
+EnvironmentFile=-/srv/artway/shop/.env.server
+EnvironmentFile=-/srv/artway/ops/secrets/ai.env
+ExecStart=/usr/bin/node /srv/artway/shop/scripts/run-agent-panel-worker.mjs
+Restart=always
+RestartSec=5s
+TimeoutStopSec=20s
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=true
+PrivateTmp=true
+PrivateMounts=true
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindReadOnlyPaths=/home/artway/.codex
+ReadWritePaths=/srv/artway/shop /srv/artway/ops/code-repairs
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

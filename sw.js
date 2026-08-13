@@ -1,0 +1,46 @@
+/* Artway-TM PWA — statyczna powłoka aplikacji. Dane administratora i API
+   zawsze pochodzą z sieci i nigdy nie są zapisywane w Service Workerze. */
+const SW_V = new URL(self.location.href).searchParams.get("v") || "__ARTWAY_RELEASE_ID__";
+const CACHE_NAME = `artway-admin-${SW_V}`;
+const APP_SHELL=[
+  "/",
+  "/index.html",
+  "/manifest.webmanifest",
+  "/icons/artway-icon.svg",
+  "/icons/artway-icon-192.png",
+  "/icons/artway-icon-512.png",
+  `/assets/styles.css?v=${SW_V}`,
+  `/assets/app.js?v=${SW_V}`
+];
+
+self.addEventListener("install",event=>{event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL)).then(()=>self.skipWaiting()));});
+self.addEventListener("activate",event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith("artway-")&&key!==CACHE_NAME).map(key=>caches.delete(key)))).then(()=>self.clients.claim()));});
+self.addEventListener("message",event=>{
+  if(event.data?.type==="SKIP_WAITING")self.skipWaiting();
+  if(event.data?.type==="CLEAR_APP_CACHE")event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith("artway-")).map(key=>caches.delete(key)))));
+});
+
+function isPrivateRequest(url){return url.pathname.startsWith("/api/");}
+async function networkFirst(request){
+  try{const response=await fetch(request);if(response.ok){const cache=await caches.open(CACHE_NAME);cache.put(request,response.clone());}return response;}
+  catch(error){return (await caches.match(request))||(await caches.match("/index.html"))||Response.error();}
+}
+async function cacheFirst(request){
+  const cache=await caches.open(CACHE_NAME),isValid=response=>{
+    const type=String(response?.headers?.get("content-type")||"").toLowerCase();
+    return request.destination==="style"?type.includes("text/css"):request.destination==="script"?(/javascript|ecmascript/.test(type)):true;
+  };
+  const cached=await cache.match(request);
+  if(cached&&isValid(cached))return cached;
+  if(cached)await cache.delete(request);
+  const response=await fetch(request);
+  if(!isValid(response))return new Response("",{status:502,statusText:"Nieprawidłowy typ zasobu"});
+  if(response.ok)cache.put(request,response.clone());return response;
+}
+self.addEventListener("fetch",event=>{
+  const request=event.request;if(request.method!=="GET")return;
+  const url=new URL(request.url);if(url.origin!==self.location.origin||isPrivateRequest(url))return;
+  if(request.mode==="navigate"){event.respondWith(networkFirst(request));return;}
+  if(url.pathname==="/manifest.webmanifest"||url.pathname==="/sw.js"){event.respondWith(networkFirst(request));return;}
+  if(url.pathname.startsWith("/assets/")||url.pathname.startsWith("/icons/")){event.respondWith(cacheFirst(request));}
+});

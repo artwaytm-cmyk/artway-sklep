@@ -1,0 +1,170 @@
+function magazynSubnavHTML(aktywny="pulpit"){
+  // Lokalizacje i generator QR są lekkimi podstronami. Nie uruchamiamy dla
+  // nich kalkulacji planu, dopóki moduł rezerwacji magazynowych nie jest
+  // faktycznie załadowany.
+  const maDanePlanu=typeof potrzebyZatowarowania==="function"&&typeof rezerwacjeMagazynowe==="function";
+  const plan=maDanePlanu?potrzebyZatowarowania():[],braki=plan.length;
+  const bezLok=typeof magazynLokalizacjeZamowienIds!=="undefined"?magazynLokalizacjeZamowienIds.size:0;
+  const dokumenty=typeof agentAIZlecenia!=="undefined"&&typeof agentAIPlanDokumentAktywny==="function"?(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny).length:0,planAkcje=braki+dokumenty;
+  const items=[
+    {id:"pulpit",href:"#/admin/magazyn",icon:"📊",label:"Pulpit",description:"Priorytety"},
+    {id:"dostawcy",href:"#/admin/magazyn/dostawcy",icon:"🏭",label:"Dostępność",description:"Producent • sprzedaż • pokrycie",badge:braki||""},
+    {id:"stany",href:"#/admin/magazyn/stany",icon:"📦",label:"Stany",description:"Fizyczny towar teraz"},
+    {id:"plan",href:"#/admin/magazyn/plan",icon:"📥",label:"Plan zatowarowania",description:"Zakupy • PZ/WZ",badge:planAkcje||""},
+    {id:"lokalizacje",href:"#/admin/magazyn/lokalizacje",icon:"🗺️",label:"Lokalizacje",description:"Obszary • regały • półki",badge:bezLok||""},
+    {id:"etykiety-qr",href:"#/admin/magazyn/etykiety-qr",icon:"🏷️",label:"Etykiety QR",description:"Druk i skanowanie"},
+    {id:"ruchy",href:"#/admin/magazyn/ruchy",icon:"🧾",label:"Ruchy i ustawienia",description:"Audyt magazynu"}
+  ];
+  return `<nav class="panel warehouse-module-nav" aria-label="Podstrony magazynu"><div class="warehouse-module-brand"><span>🏬</span><div><small>Centrum operacyjne</small><b>Magazyn</b></div></div><div class="warehouse-module-links">${items.map(item=>`<a class="${item.id===aktywny?"active":""}" href="${esc(item.href)}" ${item.id===aktywny?'aria-current="page"':""} title="${esc(`${item.label} — ${item.description}`)}"><span class="warehouse-nav-icon">${esc(item.icon)}</span><span class="warehouse-nav-copy"><b>${esc(item.label)}</b><small>${esc(item.description)}</small></span>${item.badge?`<span class="nav-badge">${esc(item.badge)}</span>`:""}</a>`).join("")}</div></nav>`;
+}
+function magazynKontekstPodstronyHTML(aktywna="pulpit",u={}){
+  const pages={
+    pulpit:{icon:"📊",eyebrow:"Centrum operacyjne magazynu",title:u.nazwa||"Magazyn główny",description:"Priorytety na dziś, braki do aktywnych zamówień, dostępność producentów i trasa kompletacji w jednym miejscu."},
+    dostawcy:{icon:"🏭",eyebrow:"Dostępność i decyzje sprzedażowe",title:"Dostępność produktów",description:"Producent, sprzedaż sklepu i Allegro, lokalne pokrycie oraz decyzje o dostępności w jednym kontrolowanym miejscu."},
+    stany:{icon:"📦",eyebrow:"Fizyczny magazyn teraz",title:"Aktualne stany magazynowe",description:"Wyłącznie towar znajdujący się fizycznie w magazynie: ilość, rezerwacje, wolny zapas, lokalizacja i ostatnie potwierdzenie."},
+    lokalizacje:{icon:"🗺️",eyebrow:"Struktura fizyczna",title:"Lokalizacje magazynowe",description:"Czytelna mapa obszarów, regałów i półek z prostymi nazwami oraz stałymi kodami systemowymi w tle."},
+    "etykiety-qr":{icon:"🏷️",eyebrow:"Oznaczenia i skanowanie",title:"Etykiety i kody QR",description:"Wybór, podgląd i druk oznaczeń lokalizacji oraz produktów przygotowanych do pracy telefonem lub czytnikiem."},
+    plan:{icon:"📥",eyebrow:"Zakupy i dokumenty",title:"Zatowarowanie oraz PZ/WZ",description:"Braki, zamówienia producentów, przyjęcia i rozchody prowadzone jako jeden kontrolowany proces z historią."},
+    ruchy:{icon:"🧾",eyebrow:"Audyt i konfiguracja",title:"Ruchy i ustawienia",description:"Historia zmian stanów, dokumenty źródłowe oraz bezpieczne wartości domyślne całego magazynu."}
+  },page=pages[aktywna]||pages.pulpit;
+  const actions=aktywna==="pulpit"?`<button class="btn" onclick="eksportujMagazynCSV()">📊 Eksport CSV</button><button class="btn ghost" onclick="agentAISprawdzDostepnoscProducentow()">🏭 Sprawdź producentów</button><a class="btn ghost" href="#/admin/agent-ai">🤖 Agent AI</a>`:aktywna==="dostawcy"?`<button class="btn" onclick="agentAISprawdzDostepnoscProducentow()">🤖 Uruchom kontrolę</button>`:aktywna==="stany"?`<button class="btn ghost" onclick="eksportujFizyczneStanyMagazynu()">📤 Eksport stanów</button>`:aktywna==="lokalizacje"?`<button class="btn" onclick="magazynOtworzKreatorLokalizacji('strefa')">＋ Nowy obszar</button>`:aktywna==="etykiety-qr"?`<a class="btn ghost" href="#/admin/magazyn/lokalizacje">🗺️ Mapa lokalizacji</a>`:aktywna==="plan"?`<button class="btn" type="button" data-plan-refresh onclick="agentAIUzgodnijPlanZSerwerem({source:'admin-restock-manual'})">↻ Aktualizuj plan</button>`:`<a class="btn ghost" href="#/admin/magazyn/plan">📥 Otwórz PZ/WZ</a>`;
+  return `<header class="warehouse-page-context section-${esc(aktywna)}"><div class="warehouse-page-identity"><div class="warehouse-page-kicker"><span>${esc(page.icon)}</span><small>${esc(page.eyebrow)}</small></div><h1>${esc(page.title)}</h1><p>${esc(page.description)}</p></div><div class="warehouse-page-tools"><div class="warehouse-live-state"><i></i><span><b>Wspólna baza aktywna</b><small>Zapis na serwerze</small></span></div><div class="diag-actions">${actions}<button class="btn ghost" type="button" onclick="adminOtworzGlobalnySkaner()">📷 Skaner</button></div></div></header>`;
+}
+function magazynPlanEtykietaKolumny(value=""){return String(value||"").replace(/<[^>]+>/g,"").replace(/\s+/g," ").trim();}
+function magazynPlanUstandaryzujTabeleHTML(html=""){
+  return String(html||"").replace(/<table class="([^"]*)">([\s\S]*?)<\/table>/g,(table,classes,content)=>{
+    if(!/(?:^|\s)log-table(?:\s|$)/.test(classes))return table;
+    const labels=[...content.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map(x=>magazynPlanEtykietaKolumny(x[1]));
+    const body=content.replace(/<tr([^>]*)>([\s\S]*?)<\/tr>/g,(row,rowAttrs,cells)=>{
+      let column=-1;
+      const marked=cells.replace(/<td([^>]*)>/g,(cell,attrs)=>{
+        column+=1;if(/\bdata-label\s*=/.test(attrs))return cell;
+        const label=/\bcolspan\s*=/.test(attrs)?"":(labels[column]||(column===labels.length-1?"Akcje":""));
+        return `<td data-label="${esc(label)}"${attrs}>`;
+      });
+      return `<tr${rowAttrs}>${marked}</tr>`;
+    });
+    const className=[...new Set(`${classes} admin-responsive-table admin-standard-table`.split(/\s+/).filter(Boolean))].join(" ");
+    return `<table class="${className}">${body}</table>`;
+  });
+}
+function magazynPlanUstandaryzujTabeleDOM(root=document){
+  root?.querySelectorAll?.("table.log-table").forEach(table=>{
+    table.classList.add("admin-responsive-table","admin-standard-table");
+    const labels=[...(table.tHead?.rows?.[0]?.cells||[])].map(cell=>magazynPlanEtykietaKolumny(cell.textContent));
+    table.querySelectorAll("tbody tr, tfoot tr").forEach(row=>[...row.cells].forEach((cell,index)=>{
+      if(!cell.hasAttribute("data-label"))cell.dataset.label=cell.colSpan>1?"":(labels[index]||(index===labels.length-1?"Akcje":""));
+    }));
+  });
+  return root;
+}
+function magazynPlanPrzewinDo(selector){const target=document.querySelector(selector);if(!target)return false;target.scrollIntoView({behavior:"smooth",block:"start"});return true;}
+let magazynPlanTryb="braki";
+function magazynPlanUstawTryb(tryb="braki"){
+  magazynPlanTryb=["braki","producenci","pz-wz","caly"].includes(tryb)?tryb:"braki";
+  odswiezPlanZatowarowaniaWidoku();
+  requestAnimationFrame(()=>document.querySelector(`[data-restock-mode="${magazynPlanTryb}"]`)?.focus({preventScroll:true}));
+}
+function magazynPlanCentrumStatusuHTML(){
+  const shortageResult=typeof agentAIBrakiOperacyjne==="function"?agentAIBrakiOperacyjne():[],shortages=Array.isArray(shortageResult)?shortageResult:[],orders=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]),activeOrders=orders.filter(order=>typeof agentAIPlanDokumentAktywny==="function"&&agentAIPlanDokumentAktywny(order)),supplierReady=activeOrders.filter(order=>order.approvedAt&&Number(order.approvalRevision||0)===Math.max(1,Number(order.revision)||1)&&!order.emailSentAt),awaitingDelivery=activeOrders.filter(order=>(order.emailSentAt||String(order.status||"").toLowerCase().includes("wysłane"))&&(order.pozycje||[]).some(line=>Number(line.przyjeto||0)<Number(line.ilosc||0))),docs=magazynDokumentyStan.items||[],draftDocs=docs.filter(doc=>doc.status==="draft"),readyDocs=draftDocs.filter(doc=>magazynDokumentWalidacja(doc).ready);
+  return `<div class="restock-command-status"><button type="button" onclick="magazynPlanUstawTryb('braki')"><span>⚠️</span><div><b>${shortages.length}</b><small>realnych braków</small><em>do pokrycia zamówieniem</em></div></button><button type="button" onclick="magazynPlanUstawTryb('producenci')"><span>✅</span><div><b>${supplierReady.length}</b><small>gotowych do wysłania</small><em>${activeOrders.length} aktywnych dokumentów</em></div></button><button type="button" onclick="magazynPlanUstawTryb('producenci')"><span>🚚</span><div><b>${awaitingDelivery.length}</b><small>dostaw do przyjęcia</small><em>po wysłaniu do producenta</em></div></button><button type="button" onclick="magazynPlanUstawTryb('pz-wz')"><span>📑</span><div><b>${readyDocs.length}/${draftDocs.length}</b><small>gotowych PZ/WZ</small><em>kontrola przed księgowaniem</em></div></button></div>`;
+}
+function magazynPlanZatowarowaniaHTML(){
+  const modes=[["braki","1","Braki i zakupy","stan, rezerwacje i pokrycie"],["producenci","2","Zamówienia i e-maile","zatwierdź, wyślij i przyjmij"],["pz-wz","3","Operacje PZ / WZ","skanuj, koryguj i zaksięguj"],["caly","☰","Cały proces","pełny przebieg na jednym ekranie"]];
+  const intro=`<section class="panel restock-plan-intro"><div class="restock-plan-automation"><span class="restock-plan-automation-icon">⚡</span><div><span class="order-pro-label">Automatyczny plan zakupowy</span><b>Braki trafiają do właściwego szkicu bez ręcznego przepisywania</b><small>Każde nowe zamówienie i każda zatwierdzona zmiana stanu ponownie przelicza stan, rezerwacje oraz ilości już zamówione. „Aktualizuj plan” w nagłówku jest bezpieczną kontrolą na żądanie.</small></div><details class="restock-plan-tools"><summary>Narzędzia dodatkowe</summary><div><button type="button" onclick="eksportujTabeleOperacyjnaMagazynuCSV()">📤 Eksport CSV bez cen</button><a href="#/admin/agent-ai/producenci">🏭 Kartoteka producentów</a><a href="#/admin/magazyn/etykiety-qr">🏷️ Etykiety QR</a></div></details></div>${magazynPlanCentrumStatusuHTML()}<div class="restock-workspace-switch"><div><span class="order-pro-label">Obszar roboczy</span><b>Pokazujemy tylko proces, nad którym teraz pracujesz</b></div><nav class="restock-workflow-nav" aria-label="Obszar pracy planu zatowarowania">${modes.map(([id,step,label,description])=>`<button type="button" data-restock-mode="${id}" class="${magazynPlanTryb===id?"active":""}" aria-pressed="${magazynPlanTryb===id}" onclick="magazynPlanUstawTryb(${jsArg(id)})"><span>${step}</span><div><b>${label}</b><small>${description}</small></div></button>`).join("")}</nav></div></section>`;
+  let body="";
+  if(magazynPlanTryb==="pz-wz")body=magazynDokumentyPanelHTML();
+  else{
+    body=`<div class="restock-plan-domain mode-${esc(magazynPlanTryb)}">${magazynTabelaOperacyjnaHTML()}</div>`;
+    if(magazynPlanTryb==="caly")body+=magazynDokumentyPanelHTML();
+  }
+  return magazynPlanUstandaryzujTabeleHTML(`${intro}${body}`);
+}
+function odswiezPlanZatowarowaniaWidoku(){
+  const root=document.getElementById("warehouseRestockWorkspace");if(!root||typeof magazynTabelaOperacyjnaHTML!=="function")return false;
+  const aktywny=document.activeElement,focusId=aktywny&&root.contains(aktywny)?String(aktywny.id||""):"",start=typeof aktywny?.selectionStart==="number"?aktywny.selectionStart:null,end=typeof aktywny?.selectionEnd==="number"?aktywny.selectionEnd:null;
+  root.innerHTML=magazynPlanZatowarowaniaHTML();magazynPlanUstandaryzujTabeleDOM(root);
+  if(focusId){const nastepny=document.getElementById(focusId);if(nastepny){nastepny.focus({preventScroll:true});if(start!==null&&typeof nastepny.setSelectionRange==="function")nastepny.setSelectionRange(start,end??start);}}
+  return true;
+}
+function magazynDostawcaWierszHTML({p={},i={},priority={},rank=0,rez={},spr={},kanalySpr={sklep:{},allegro:{}}}={}){
+  const historia=Array.isArray(p.producentStanHistoria)?p.producentStanHistoria:[],id=String(p.id),stan=stanMagazynuId(p.id),r=Number(rez[id]||0),plan=sugestiaZatowarowania(p,rez,spr),meta=plan.meta,sklep30=Number(kanalySpr.sklep?.[id]||0),allegro30=Number(kanalySpr.allegro?.[id]||0),wolne=plan.dostepne;
+  return `<tr data-product-row="${esc(p.id)}" class="supplier-row ${esc(i.cls||"")}">
+    <td><div class="allegro-offer-title-cell">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span>${esc(p.ikona||"🎲")}</span>`}<div><b>${esc(p.nazwa||"Produkt")}</b><small>SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||meta.kod||"—")} • ID ${esc(p.id)}</small><small>${esc(p.kategoria||"Bez kategorii")}</small></div></div></td>
+    <td><div class="supplier-local-coverage"><div class="warehouse-stock-balance"><span><b>${stan===null?"—":stan}</b><small>fizycznie</small></span><span><b>${r}</b><small>rezerwacje</small></span><span class="${wolne!==null&&wolne<0?"negative":""}"><b>${wolne===null?"—":wolne}</b><small>wolne</small></span></div><small>📍 ${esc(meta.lokalizacja?nazwaLokalizacjiMagazynu(meta.lokalizacja):"brak lokalizacji")}</small><div class="supplier-priority ${esc(priority?.level||"niski")}"><b>${priority?.score?`🏆 #${esc(rank||"—")} • ${esc(priority.level)}`:"Brak sprzedaży w 30 dni"}</b><small>Sklep ${sklep30} • Allegro ${allegro30} • w zamówieniach ${esc(priority?.active||0)}</small></div></div></td>
+    <td><div class="supplier-source-state"><b>${esc(p.producent||p.marka||"Nieprzypisany")}</b>${producentDostepnoscBadgeHTML(p)}<small>Próg ostrzeżenia: ${esc(i.prog)} szt.</small><small class="supplier-source-url">${i.url?`<a href="${esc(i.url)}" target="_blank" rel="noopener">Otwórz źródło ↗</a><span>${esc(i.url)}</span>`:"Brak linku źródłowego"}</small></div></td>
+    <td>${decyzjaProducentaPanelHTML(p,i)}</td>
+    <td><div class="supplier-plan-control"><b>${plan.ilosc?`Do zamówienia: ${esc(plan.ilosc)} szt.`:"Pokrycie bez zamówienia"}</b><small>${esc(plan.powod)}</small><small>Pokrycie ${plan.dniPokrycia===null?"—":plan.dniPokrycia+" dni"} • cel ${esc(plan.target)} • dostawa ${esc(plan.lead)} dni</small><div class="supplier-check-cell"><b>${i.checked?esc(allegroDataTxt(i.checked)):"Nigdy nie sprawdzano"}</b><div>${i.stale?`<span class="lvl lvl-ostrzezenie">wynik nieaktualny</span>`:`<span class="lvl lvl-ok">aktualny</span>`}${i.error?`<span class="lvl lvl-blad">${esc(skrocTekst(i.error,80))}</span>`:""}</div><details><summary>Historia kontroli (${historia.length})</summary><div class="supplier-history">${historia.map(h=>`<span class="${esc(h.status||"nieznany")}"><b>${h.quantity===null||h.quantity===undefined?"—":esc(h.quantity)+" szt."}</b><small>${esc(allegroDataTxt(h.at))}</small></span>`).join("")||`<small>Brak historii</small>`}</div></details></div></div></td>
+    <td><div class="warehouse-worktable-actions">${i.url?`<button class="btn" onclick="agentAISprawdzDostepnoscProducentow(1,[${jsArg(p.id)}])">🤖 Sprawdź teraz</button>`:""}<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Edytuj produkt</a></div></td>
+  </tr>`;
+}
+const MAGAZYN_STANY_PARTIA_KART=10;
+let magazynStanyKartyOczekujace=[],magazynStanyKartyKontekst=null,magazynStanyKartyObserwator=null,magazynStanyKartyGeneracja=0;
+function magazynOstatniRuchProduktu(id){
+  const key=String(id);return (Array.isArray(ruchyMagazynowe)?ruchyMagazynowe:[]).filter(r=>String(r?.produktId??r?.productId??"")===key&&Number(r?.ilosc||0)>0).sort((a,b)=>(Date.parse(b?.data||"")||0)-(Date.parse(a?.data||"")||0))[0]||null;
+}
+function magazynFormularzPrzypisaniaPolkiHTML(p={},meta={},wariant="wiersz"){
+  const compact=wariant==="wiersz",maPolki=magazynLokalizacjeAktywne().some(l=>l.typ==="półka"),label=meta.lokalizacja?"Zmień półkę":"Przypisz półkę";
+  if(!maPolki)return `<div class="warehouse-placement-no-shelves"><small>Najpierw utwórz półkę w mapie magazynu.</small><a class="btn ghost" href="#/admin/magazyn/lokalizacje">＋ Utwórz półkę</a></div>`;
+  return `<form class="warehouse-location-assign-form ${compact?"compact":""}" onsubmit="return przypiszPolkeProduktuMagazynu(event,${jsArg(p.id)})"><label><span>${esc(label)}</span><input name="lokalizacja" list="warehouseStockLocationOptions" value="${esc(meta.lokalizacja||"")}" placeholder="Wpisz, wybierz lub zeskanuj kod półki" autocomplete="off" required></label><button class="btn" type="submit">${meta.lokalizacja?"Zapisz zmianę":"📍 Zapisz półkę"}</button></form>`;
+}
+function magazynLokalizacjaKomorkaHTML(p={},meta={}){
+  if(!meta.lokalizacja)return `<div class="warehouse-stock-location-cell is-missing"><span class="warehouse-placement-badge">Do rozmieszczenia</span>${magazynFormularzPrzypisaniaPolkiHTML(p,meta,"wiersz")}</div>`;
+  return `<div class="warehouse-stock-location-cell is-set"><b>${esc(sciezkaNazwLokalizacjiMagazynu(meta.lokalizacja)||nazwaLokalizacjiMagazynu(meta.lokalizacja))}</b><small>${esc(meta.lokalizacja)}</small><details><summary>Zmień półkę</summary>${magazynFormularzPrzypisaniaPolkiHTML(p,meta,"wiersz")}</details></div>`;
+}
+function magazynRozmieszczeniePanelHTML(lista=[]){
+  const produkty=(Array.isArray(lista)?lista:[]).filter(p=>Number(stanMagazynuId(p.id)||0)>0&&!magazynMetaProduktu(p.id).lokalizacja),sztuki=produkty.reduce((sum,p)=>sum+Number(stanMagazynuId(p.id)||0),0),polki=magazynLokalizacjeAktywne().filter(l=>l.typ==="półka");
+  if(!produkty.length)return `<section class="warehouse-placement-zone is-clear"><span>✓</span><div><b>Wszystkie fizyczne stany mają przypisaną półkę</b><small>Nowe przyjęcie bez miejsca pojawi się tutaj automatycznie.</small></div></section>`;
+  return `<section class="warehouse-placement-zone" id="warehousePlacementQueue"><header><div><span class="order-pro-label">Strefa odkładcza po przyjęciu</span><h3>📍 Towary czekające na rozmieszczenie</h3><p>Stan jest już przyjęty. Wybierz rzeczywistą półkę dla każdej pozycji — zapis zostanie sprawdzony i potwierdzony przez serwer.</p></div><div class="warehouse-placement-totals"><span><b>${produkty.length}</b><small>pozycji</small></span><span><b>${sztuki}</b><small>sztuk</small></span><span><b>${polki.length}</b><small>aktywnych półek</small></span></div></header>${polki.length?`<div class="warehouse-placement-flow"><span><b>1</b> Odłóż towar</span><span><b>2</b> Wybierz lub zeskanuj półkę</span><span><b>3</b> Zapisz na serwerze</span></div>`:`<div class="backend-note warn">Nie ma aktywnej półki. Utwórz strukturę w Magazyn → Lokalizacje, a następnie wróć tutaj.</div>`}<div class="warehouse-placement-list">${produkty.slice(0,24).map(p=>{const meta=magazynMetaProduktu(p.id),ruch=magazynOstatniRuchProduktu(p.id),stan=Number(stanMagazynuId(p.id)||0);return `<article class="warehouse-placement-item" data-placement-product="${esc(p.id)}"><div class="warehouse-placement-product">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><b>${esc(p.nazwa||"Produkt")}</b><small>SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||meta.kod||"—")} • ID ${esc(p.id)}</small>${ruch?`<small class="warehouse-placement-source">📥 ${esc(ruch.dokument||ruch.typ||"Przyjęcie")} • ${esc(allegroDataTxt(ruch.data||""))}</small>`:""}</div></div><div class="warehouse-placement-quantity"><b>${stan}</b><small>${stan===1?"sztuka":"sztuki"} fizycznie</small></div>${magazynFormularzPrzypisaniaPolkiHTML(p,meta,"kolejka")}</article>`;}).join("")}</div>${produkty.length>24?`<footer><button class="btn ghost" type="button" onclick="ustawFiltrMagazynu('bezlokalizacji','stan-malejaco')">Pokaż wszystkie ${produkty.length} pozycji</button></footer>`:""}</section>`;
+}
+function magazynStanWierszHTML(p={},kontekst={}){
+  const rez=kontekst.rez||{},prog=Number(kontekst.prog)||0,stan=stanMagazynuId(p.id),r=Number(rez[p.id]||0),wolne=stan===null?null:stan-r,meta=magazynMetaProduktu(p.id),wart=stan===null?0:stan*kwotaNum(p.cena),selected=zaznaczoneMagazynProdukty.has(String(p.id)),invTime=meta.ostatniaInwentaryzacja?Date.parse(meta.ostatniaInwentaryzacja):0,invOld=!invTime||Date.now()-invTime>90*86400000;
+  return `<tr data-warehouse-stock-row data-product-row="${esc(p.id)}" class="${selected?"is-selected":""}">
+    <td><label class="warehouse-stock-row-product"><input type="checkbox" aria-label="Zaznacz ${esc(p.nazwa||"produkt")}" ${selected?"checked":""} onchange="magazynUstawZaznaczenie([${jsArg(p.id)}],this.checked)">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span>${esc(p.ikona||"📦")}</span>`}<span><b>${esc(p.nazwa||"Produkt")}</b><small>SKU ${esc(p.sku||"—")} • EAN ${esc(p.gtin||p.ean||meta.kod||"—")} • ID ${esc(p.id)}</small><small>${esc(p.kategoria||"Bez kategorii")}</small></span></label></td>
+    <td>${magazynLokalizacjaKomorkaHTML(p,meta)}</td>
+    <td><div class="warehouse-stock-current"><b>${stan===null?"—":stan} szt.</b>${stanBadgeMagazynu(stan,progNiskiProduktu(p)||prog)}<small>Wartość ${stan===null?"—":zl(wart)}</small></div></td>
+    <td><b>${r} szt.</b><small class="warehouse-stock-cell-note">aktywne zamówienia</small></td>
+    <td><div class="warehouse-stock-current ${wolne!==null&&wolne<0?"negative":""}"><b>${wolne===null?"—":wolne} szt.</b><small>po rezerwacjach</small></div></td>
+    <td><div class="warehouse-stock-inventory ${invOld?"old":""}"><b>${meta.ostatniaInwentaryzacja?esc(allegroDataTxt(meta.ostatniaInwentaryzacja)):"Niepotwierdzony"}</b><button class="btn ghost" type="button" onclick="oznaczInwentaryzacjeProduktu(${jsArg(p.id)})">✅ Potwierdź</button></div></td>
+    <td><div class="warehouse-stock-row-actions"><details class="warehouse-stock-adjustment"><summary><span><b>Korekta stanu</b><small>−1 / +1 lub dokładna wartość</small></span><strong>Otwórz</strong></summary><div><div class="warehouse-stock-stepper"><button type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},-1)" ${stan===null?"disabled":""}>−1</button><strong>${stan===null?"—":stan}</strong><button type="button" onclick="szybkaKorektaMagazynu(${jsArg(p.id)},1)" ${stan===null?"disabled":""}>+1</button></div><form class="warehouse-stock-set" onsubmit="korygujStanMagazynu(event,${jsArg(p.id)})"><input name="stan" value="${stan===null?"":stan}" placeholder="Stan" inputmode="numeric"><input name="powod" placeholder="Powód korekty" maxlength="80"><button class="btn" type="submit">Zapisz</button></form></div></details><details><summary>Kartoteka i progi</summary><form class="warehouse-stock-meta-form" onsubmit="zapiszKartotekeMagazynu(event,${jsArg(p.id)})"><label>Lokalizacja ${poleLokalizacjiMagazynu(meta.lokalizacja||"","warehouseStockLocationOptions")}</label><label>Dostawca<input name="dostawca" value="${esc(meta.dostawca||"")}"></label><label>EAN / kod<input name="kod" value="${esc(meta.kod||p.gtin||p.ean||"")}"></label><label>Kod Optimy<input name="optimaCode" value="${esc(meta.optimaCode||p.optimaCode||"")}"></label><label>Kod dostawcy<input name="kodDostawcy" value="${esc(meta.kodDostawcy||p.kodDostawcy||p.supplierCode||"")}"></label><label>Stan minimalny<input name="minStock" value="${esc(meta.minStock??"")}" inputmode="numeric"></label><label>Stan docelowy<input name="targetStock" value="${esc(meta.targetStock??"")}" inputmode="numeric"></label><label>Czas dostawy<input name="leadTime" value="${esc(meta.leadTime??"")}" inputmode="numeric"></label><label>Minimalny zakup<input name="minZakup" value="${esc(meta.minZakup??"")}" inputmode="numeric"></label><label>Uwagi<input name="uwagi" value="${esc(meta.uwagi||"")}"></label><div class="warehouse-stock-meta-buttons"><button class="btn" type="submit">💾 Zapisz kartotekę</button><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Produkt</a></div></form></details></div></td>
+  </tr>`;
+}
+function magazynStanyPrzygotujKartyProgresywnie(lista=[],kontekst={}){
+  magazynStanyKartyObserwator?.disconnect();magazynStanyKartyObserwator=null;
+  const source=Array.isArray(lista)?lista:[],items=magazynStanyElementyWidoku(source,kontekst),generation=++magazynStanyKartyGeneracja;
+  magazynStanyKartyKontekst=kontekst;magazynStanyKartyOczekujace=items.slice(MAGAZYN_STANY_PARTIA_KART);
+  const first=items.slice(0,MAGAZYN_STANY_PARTIA_KART).map(item=>magazynStanElementHTML(item,kontekst)).join("");
+  if(!magazynStanyKartyOczekujace.length)return first;
+  setTimeout(()=>magazynStanyUruchomDoloadowywanie(generation),0);
+  return `${first}<tr data-warehouse-stock-loader data-generation="${generation}"><td colspan="7" data-label=""><div class="warehouse-stock-progressive-loader"><span><b>Załadowano ${Math.min(MAGAZYN_STANY_PARTIA_KART,items.length)} z ${items.length} wierszy</b><small>Kolejne pozycje pojawią się podczas przewijania.</small></span><button class="btn ghost" type="button" onclick="magazynStanyDoloadujKarty(${generation})">Pokaż kolejne</button></div></td></tr>`;
+}
+function magazynStanGrupaProduktu(p={},mode=grupowanieStanowMagazynu){
+  const code=String(magazynMetaProduktu(p.id).lokalizacja||""),wanted=mode==="strefy"?"strefa":mode==="regaly"?"regał":mode==="polki"?"półka":"";
+  let current=typeof magazynLokalizacjaPoKodzie==="function"?magazynLokalizacjaPoKodzie(code):null,guard=0;
+  while(current&&guard++<12){if(current.typ===wanted)return current;current=current.parentKod?magazynLokalizacjaPoKodzie(current.parentKod):null;}
+  return {kod:`BRAK-${wanted||"LOKALIZACJI"}`,nazwa:wanted==="regał"?"Bez przypisanego regału":wanted==="półka"?"Bez przypisanej półki":wanted==="strefa"?"Bez przypisanego obszaru":"Bez lokalizacji",typ:wanted};
+}
+function magazynStanyElementyWidoku(lista=[],kontekst={}){
+  if(grupowanieStanowMagazynu==="lista")return lista;
+  const rez=kontekst.rez||{},groups=new Map();
+  lista.forEach(p=>{const location=magazynStanGrupaProduktu(p),key=String(location.kod);if(!groups.has(key))groups.set(key,{location,products:[]});groups.get(key).products.push(p);});
+  return [...groups.values()].sort((a,b)=>String(a.location.kod).localeCompare(String(b.location.kod),"pl",{numeric:true,sensitivity:"base"})).flatMap(group=>{
+    const pieces=group.products.reduce((sum,p)=>sum+Number(stanMagazynuId(p.id)||0),0),reserved=group.products.reduce((sum,p)=>sum+Number(rez[p.id]||0),0);
+    return [{__warehouseGroup:true,location:group.location,count:group.products.length,pieces,reserved},...group.products];
+  });
+}
+function magazynStanElementHTML(item={},kontekst={}){
+  if(!item.__warehouseGroup)return magazynStanWierszHTML(item,kontekst);
+  const location=item.location||{},path=location.kod?.startsWith("BRAK-")?location.nazwa:sciezkaNazwLokalizacjiMagazynu(location.kod);
+  return `<tr class="warehouse-stock-group-row" data-warehouse-stock-group><td colspan="7" data-label=""><div><span>${magazynIkonaTypuLokalizacji(location.typ)}</span><span><b>${esc(path||location.nazwa||"Bez lokalizacji")}</b><small>${esc(location.kod?.startsWith("BRAK-")?"Do uporządkowania":location.kod||"")}</small></span><span><strong>${item.count}</strong><small>produktów</small></span><span><strong>${item.pieces}</strong><small>sztuk</small></span><span><strong>${item.reserved}</strong><small>rezerwacji</small></span></div></td></tr>`;
+}
+function magazynStanyDoloadujKarty(generation=magazynStanyKartyGeneracja){
+  const loader=document.querySelector(`[data-warehouse-stock-loader][data-generation="${Number(generation)}"]`);if(!loader||Number(generation)!==magazynStanyKartyGeneracja)return false;
+  const batch=magazynStanyKartyOczekujace.splice(0,MAGAZYN_STANY_PARTIA_KART);if(batch.length){loader.insertAdjacentHTML("beforebegin",batch.map(item=>magazynStanElementHTML(item,magazynStanyKartyKontekst||{})).join(""));magazynPlanUstandaryzujTabeleDOM(loader.closest(".warehouse-stock-list")||document);}
+  if(!magazynStanyKartyOczekujace.length){magazynStanyKartyObserwator?.disconnect();magazynStanyKartyObserwator=null;loader.remove();return true;}
+  const loaded=document.querySelectorAll(".warehouse-stock-list :is([data-warehouse-stock-row],[data-warehouse-stock-group])").length,total=loaded+magazynStanyKartyOczekujace.length,label=loader.querySelector("b");if(label)label.textContent=`Załadowano ${loaded} z ${total} wierszy`;return true;
+}
+function magazynStanyUruchomDoloadowywanie(generation=magazynStanyKartyGeneracja){
+  const loader=document.querySelector(`[data-warehouse-stock-loader][data-generation="${Number(generation)}"]`);if(!loader||typeof IntersectionObserver!=="function")return;
+  magazynStanyKartyObserwator?.disconnect();magazynStanyKartyObserwator=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting))magazynStanyDoloadujKarty(generation);},{rootMargin:"700px 0px"});magazynStanyKartyObserwator.observe(loader);
+}

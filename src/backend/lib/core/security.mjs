@@ -1,0 +1,194 @@
+import crypto from 'node:crypto';
+
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const ORDER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+export const ADMIN_IDLE_TIMEOUT_OPTIONS = [15, 30, 60, 120, 240, 480];
+export const DEFAULT_ADMIN_IDLE_TIMEOUT_MINUTES = 60;
+export const SESSION_COOKIE_NAME = 'artway_session';
+const rateBuckets = new Map();
+
+function base64url(value) {
+  return Buffer.from(value).toString('base64url');
+}
+
+function sessionSecret() {
+  return String(process.env.ARTWAY_SESSION_SECRET || '').trim();
+}
+
+function sign(encoded) {
+  const secret = sessionSecret();
+  if (!secret) return '';
+  return crypto.createHmac('sha256', secret).update(encoded).digest('base64url');
+}
+
+export function createSignedToken(payload, ttlMs = SESSION_TTL_MS) {
+  if (!sessionSecret()) return '';
+  const now = Date.now();
+  const encoded = base64url(JSON.stringify({ v: 1, iat: now, exp: now + ttlMs, jti: crypto.randomUUID(), ...payload }));
+  return `${encoded}.${sign(encoded)}`;
+}
+
+export function verifySignedToken(token, expectedScope = '') {
+  const raw = String(token || '').trim();
+  const [encoded, signature, extra] = raw.split('.');
+  if (!encoded || !signature || extra || !sessionSecret()) return null;
+  const expected = sign(encoded);
+  const a = Buffer.from(signature);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    if (!payload || payload.v !== 1 || !Number(payload.exp) || Date.now() >= Number(payload.exp)) return null;
+    if (expectedScope && payload.scope !== expectedScope) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+export function requestToken(request) {
+  const auth = String(request?.headers?.get?.('authorization') || '').trim();
+  if (/^Bearer\s+/i.test(auth)) return auth.replace(/^Bearer\s+/i, '').trim();
+  const cookieHeader = String(request?.headers?.get?.('cookie') || '');
+  for (const part of cookieHeader.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator < 0 || part.slice(0, separator).trim() !== SESSION_COOKIE_NAME) continue;
+    try { return decodeURIComponent(part.slice(separator + 1).trim()); }
+    catch { return ''; }
+  }
+  return '';
+}
+
+export function accountSessionCookie(token = '', { clear = false } = {}) {
+  const value = clear ? '' : encodeURIComponent(String(token || ''));
+  const maxAge = clear ? 0 : Math.floor(SESSION_TTL_MS / 1000);
+  const expires = clear ? '; Expires=Thu, 01 Jan 1970 00:00:00 GMT' : '';
+  return `${SESSION_COOKIE_NAME}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}${expires}`;
+}
+
+export function accountSessionHeaders(token = '') {
+  return { 'set-cookie': accountSessionCookie(token) };
+}
+
+export function clearAccountSessionHeaders() {
+  return { 'set-cookie': accountSessionCookie('', { clear: true }) };
+}
+
+export function requestSession(request) {
+  const payload = verifySignedToken(requestToken(request), 'account');
+  if (!payload?.sub) return null;
+  return {
+    email: String(payload.sub).trim().toLowerCase(),
+    role: payload.role === 'admin' ? 'admin' : 'klient',
+    authVersion: Math.max(0, Number(payload.authVersion) || 0),
+    exp: payload.exp,
+  };
+}
+
+export function sessionMatchesAccount(session, account) {
+  if (!session || !account) return false;
+  const sessionEmail = String(session.email || '').trim().toLowerCase();
+  const accountEmail = String(account.email || '').trim().toLowerCase();
+  const accountRole = account.rola === 'admin' ? 'admin' : 'klient';
+  const accountVersion = Math.max(0, Number(account.authVersion) || 0);
+  return !!sessionEmail
+    && sessionEmail === accountEmail
+    && session.role === accountRole
+    && Math.max(0, Number(session.authVersion) || 0) === accountVersion;
+}
+
+export function normalizeAdminIdleTimeoutMinutes(value, fallback = DEFAULT_ADMIN_IDLE_TIMEOUT_MINUTES) {
+  const parsed = Number(value);
+  return ADMIN_IDLE_TIMEOUT_OPTIONS.includes(parsed) ? parsed : fallback;
+}
+
+export function createAccountSession(user = {}) {
+  const email = String(user.email || '').trim().toLowerCase();
+  if (!email) return '';
+  const admin = user.rola === 'admin';
+  const idleTimeoutMinutes = admin ? normalizeAdminIdleTimeoutMinutes(user.adminIdleTimeoutMinutes) : 0;
+  return createSignedToken({
+    scope: 'account',
+    sub: email,
+    role: admin ? 'admin' : 'klient',
+    authVersion: Math.max(0, Number(user.authVersion) || 0),
+    ...(admin ? { idleTimeoutMinutes } : {}),
+  }, admin ? idleTimeoutMinutes * 60 * 1000 : SESSION_TTL_MS);
+}
+
+export function createOrderAccess(order = {}) {
+  const email = String(order.email || '').trim().toLowerCase();
+  const orderNumber = String(order.nr || '').trim();
+  if (!email || !orderNumber) return '';
+  return createSignedToken({ scope: 'order', sub: email, orderNumber }, ORDER_TTL_MS);
+}
+
+export function verifyOrderAccess(token, order = {}) {
+  const payload = verifySignedToken(token, 'order');
+  return !!payload
+    && String(payload.sub || '').toLowerCase() === String(order.email || '').toLowerCase()
+    && String(payload.orderNumber || '') === String(order.nr || '');
+}
+
+export async function hashPassword(password) {
+  const value = String(password || '');
+  const salt = crypto.randomBytes(16);
+  const derived = await new Promise((resolve, reject) => {
+    crypto.scrypt(value, salt, 64, { N: 16384, r: 8, p: 1 }, (error, key) => (error ? reject(error) : resolve(key)));
+  });
+  return `scrypt$16384$8$1$${salt.toString('base64url')}$${derived.toString('base64url')}`;
+}
+
+export async function verifyPassword(password, stored) {
+  const parts = String(stored || '').split('$');
+  if (parts.length !== 6 || parts[0] !== 'scrypt') return false;
+  const [, nRaw, rRaw, pRaw, saltRaw, hashRaw] = parts;
+  const expected = Buffer.from(hashRaw, 'base64url');
+  const derived = await new Promise((resolve, reject) => {
+    crypto.scrypt(String(password || ''), Buffer.from(saltRaw, 'base64url'), expected.length, {
+      N: Number(nRaw), r: Number(rRaw), p: Number(pRaw),
+    }, (error, key) => (error ? reject(error) : resolve(key)));
+  });
+  return derived.length === expected.length && crypto.timingSafeEqual(derived, expected);
+}
+
+export function legacyPasswordHash(password) {
+  return crypto.createHash('sha256').update(String(password || '')).digest('hex');
+}
+
+export function publicUser(user = {}) {
+  const result = {
+    imie: String(user.imie || user.email || '').slice(0, 160),
+    email: String(user.email || '').trim().toLowerCase().slice(0, 200),
+    rola: user.rola === 'admin' ? 'admin' : 'klient',
+  };
+  if (result.rola === 'admin') {
+    result.adminIdleTimeoutMinutes = normalizeAdminIdleTimeoutMinutes(user.adminIdleTimeoutMinutes);
+    result.mfaEnabled = !!user.mfaSecretEncrypted;
+    result.lastLoginAt = String(user.lastLoginAt || '').slice(0, 80);
+    result.roleUpdatedAt = String(user.roleUpdatedAt || '').slice(0, 80);
+    result.securitySettingsUpdatedAt = String(user.securitySettingsUpdatedAt || '').slice(0, 80);
+  }
+  return result;
+}
+
+export function clientIp(request) {
+  return String(request?.headers?.get?.('x-nf-client-connection-ip')
+    || request?.headers?.get?.('x-forwarded-for')
+    || 'unknown').split(',')[0].trim().slice(0, 80);
+}
+
+export function rateLimit(request, name, limit, windowMs) {
+  const now = Date.now();
+  const key = `${name}:${clientIp(request)}`;
+  const current = rateBuckets.get(key);
+  if (!current || now >= current.resetAt) {
+    rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return { ok: true, retryAfter: 0 };
+  }
+  current.count += 1;
+  if (rateBuckets.size > 5000) {
+    for (const [bucketKey, bucket] of rateBuckets) if (now >= bucket.resetAt) rateBuckets.delete(bucketKey);
+  }
+  return { ok: current.count <= limit, retryAfter: Math.max(1, Math.ceil((current.resetAt - now) / 1000)) };
+}

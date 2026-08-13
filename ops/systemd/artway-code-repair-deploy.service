@@ -1,0 +1,27 @@
+[Unit]
+Description=Artway controlled deployment of tested Agent code repair
+Wants=network-online.target artway-backend.service
+After=network-online.target artway-backend.service
+
+[Service]
+Type=oneshot
+User=artway
+Group=artway
+WorkingDirectory=/srv/artway/shop
+Environment=NODE_ENV=production
+Environment=ARTWAY_CODE_REPAIR_ROOT=/srv/artway/shop
+Environment=ARTWAY_CODE_REPAIR_STATE_DIR=/srv/artway/ops/code-repairs
+EnvironmentFile=-/srv/artway/shop/.env.server
+ExecStart=/usr/bin/node /srv/artway/shop/scripts/deploy-ready-code-repair.mjs
+NoNewPrivileges=false
+PrivateDevices=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/artway/shop /srv/artway/releases /srv/artway/ops/code-repairs
+TimeoutStartSec=60min
+Nice=10
+CPUQuota=125%
+MemoryHigh=768M
+MemoryMax=1536M
+TasksMax=384

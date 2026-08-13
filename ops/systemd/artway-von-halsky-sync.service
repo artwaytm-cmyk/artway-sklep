@@ -1,0 +1,54 @@
+[Unit]
+Description=Artway-TM background reconciliation for InPost Von Halsky
+Wants=network-online.target artway-backend.service
+After=network-online.target artway-backend.service
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=artway
+Group=artway
+WorkingDirectory=/srv/artway/shop
+Environment=NODE_ENV=production
+Environment=ARTWAY_LOCAL_API_ORIGIN=http://127.0.0.1:3000
+Environment=ARTWAY_VON_HALSKY_RECONCILE_MS=900000
+Environment=ARTWAY_VON_HALSKY_PENDING_MS=180000
+EnvironmentFile=-/srv/artway/shop/.env.server
+EnvironmentFile=/srv/artway/ops/secrets/session.env
+ExecStart=/usr/bin/node /srv/artway/shop/scripts/run-von-halsky-sync-worker.mjs
+Restart=always
+RestartSec=10s
+TimeoutStopSec=20s
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=true
+PrivateTmp=true
+PrivateMounts=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

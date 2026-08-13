@@ -1,0 +1,2353 @@
+/* GENERATED ADMIN AGENT — loaded on demand */
+function agentAINormalizuj(s=""){
+  const mapa={"ą":"a","ć":"c","ę":"e","ł":"l","ń":"n","ó":"o","ś":"s","ź":"z","ż":"z"};
+  return String(s||"").toLowerCase()
+    .replace(/[ąćęłńóśźż]/g,m=>mapa[m]||m)
+    .replace(/[@#]/g," ")
+    .replace(/[^\p{L}\p{N}/._-]+/gu," ")
+    .replace(/\s+/g," ")
+    .trim();
+}
+let agentAIDecyzjeMagazynowe={loaded:false,loading:false,items:[],locationsByProduct:{},error:"",updatedAt:""};
+const agentAIDecyzjeMagazynoweBusy=new Set();
+const AGENT_AI_CONFIRMATION_WORD=/\b(?:zatwierdz\w*|potwierdz\w*|zapis\w*|akcept\w*|zaakcept\w*)\b/;
+const AGENT_AI_QUOTED_TEXT=[/„[^”\n]*”/g,/“[^”\n]*”/g,/«[^»\n]*»/g,/‹[^›\n]*›/g,/‘[^’\n]*’/g,/"[^"\n]*"/g,/'[^'\n]*'/g,/`[^`\n]*`/g];
+function agentAIKontekstPotwierdzenia(raw="",n=agentAINormalizuj(raw)){
+  const quoted=[];let outside=String(raw||"");
+  AGENT_AI_QUOTED_TEXT.forEach(pattern=>{outside=outside.replace(pattern,match=>{quoted.push(agentAINormalizuj(match.slice(1,-1)));return " ";});});
+  const outsideNormalized=agentAINormalizuj(outside),confirmationOutsideQuotes=AGENT_AI_CONFIRMATION_WORD.test(outsideNormalized);
+  const unclosedQuote=/["'„”“«»‹›‘’`]/u.test(outside),questionOrReference=/[?？]/u.test(String(raw))||/\b(?:czy|co\s+(?:oznacza|znaczy)|napisz|powiedz|odpowiedz|slowo)\b/.test(n);
+  const quotedConfirmation=quoted.some(segment=>AGENT_AI_CONFIRMATION_WORD.test(segment));
+  const quotedInventoryCommand=quoted.some(segment=>/\b\d{1,7}\s*(?:szt|sztuk|sztuki|sztuka|sztuke)\b/.test(segment)&&(/\b(?:mam|mamy)\b[\s\S]*\bna stanie\b/.test(segment)||/\b(?:ustaw|ustawiam|skoryguj|zmien|przyjmij|przyjeto|dodaj|dopisz|zwieksz|powieksz)\b/.test(segment)));
+  const negatedBefore=/\b(?:nie|bez)\b(?:\s+\w+){0,18}\s+\b(?:zatwierdz\w*|potwierdz\w*|zapis\w*|akcept\w*|zaakcept\w*)\b/.test(n);
+  const revokedAfter=/\b(?:zatwierdz\w*|potwierdz\w*|zapis\w*|akcept\w*|zaakcept\w*)\b(?:\s+\w+){0,18}\s+\b(?:ale|lecz|jednak)\b(?:\s+\w+){0,8}\s+\bnie\b/.test(n)||/\b(?:zatwierdz\w*|potwierdz\w*|zapis\w*|akcept\w*|zaakcept\w*)\b(?:\s+\w+){0,20}\s+\b(?:anuluj\w*|cofnij\w*|odwol\w*|rezygn\w*|nie\s+(?:rob\w*|wykonuj\w*|zapisuj\w*|zmieniaj\w*|ustawiaj\w*|dodawaj\w*|zatwierdzaj\w*|potwierdzaj\w*|akceptuj\w*))\b/.test(n);
+  const cancelled=/\b(?:anuluj\w*|cofnij\w*|odwol\w*|rezygn\w*)\b/.test(n);
+  const deferred=/\b(?:jutro|pojutrze|pozniej|nastepnie|dopiero|wieczorem|rano|za\s+(?:chwile|moment|\d+\s*(?:minut|godzin|dni|tygodni))|po\s+(?:weekendzie|urlopie|swietach)|w\s+(?:weekend|poniedzialek|wtorek|srode|czwartek|piatek|sobote|niedziele))\b/.test(n)||/\b(?:gdy|kiedy|jak)\b(?:\s+\w+){0,8}\s+\b(?:bedzie|bede|wroce|dostane|przyjdzie)\b/.test(n)||/\b(?:po|o)\s+\d{1,2}(?::|\.)\d{2}\b/i.test(String(raw))||/\bpo\s+godzinie\s+\d{1,2}\b/.test(n);
+  return {confirmed:confirmationOutsideQuotes&&!negatedBefore&&!revokedAfter&&!cancelled&&!deferred&&!questionOrReference&&!unclosedQuote&&!quotedInventoryCommand&&!(quotedConfirmation&&!confirmationOutsideQuotes)};
+}
+function agentAIMa(n,arr){ return arr.some(x=>x instanceof RegExp?x.test(n):n.includes(x)); }
+function agentAIWytnijProdukt(n){
+  let q=` ${n} `;
+  ["ile mamy","ile jest","jaki stan","stan produktu","sprawdz produkt","sprawdz","znajdz","pokaz","czy mamy","gdzie lezy","gdzie jest","lokalizacja","produkt","towar","sku","kod","na magazynie","w magazynie","w sklepie","mi","prosze"].forEach(f=>{q=q.replaceAll(` ${f} `," ");});
+  return q.replace(/\s+/g," ").trim();
+}
+function agentAIParsujZmianeStanu(tekst=""){
+  const raw=String(tekst||"").trim(),n=agentAINormalizuj(raw);
+  const ilosci=[...n.matchAll(/\b(\d{1,7})\s*(?:szt|sztuk|sztuki|sztuka|sztuke)\b/g)];
+  const iloscMatch=ilosci.at(-1);
+  if(!iloscMatch||!/(?:\b(?:stan|magazyn|mam|mamy|przyjmij|przyjeto|dodaj|dopisz|zwieksz|powieksz)\b|na stanie)/.test(n))return null;
+  const increment=/\b(?:przyjmij|przyjeto|dodaj|dopisz|zwieksz|powieksz)\b(?:\s+\w+){0,5}\s+\d{1,7}\s*(?:szt|sztuk|sztuki|sztuka|sztuke)\b/.test(n);
+  const absolute=/\b(?:mam|mamy)\b[\s\S]*\bna stanie\b/.test(n)||/\b(?:ustaw|ustawiam|skoryguj|zmien)\b[\s\S]*\b(?:stan|stanie|magazyn|magazynie)\b/.test(n)||/\b(?:stan|stanie)\b[\s\S]*\b(?:wynosi|jest)\b/.test(n);
+  if(!increment&&!absolute)return null;
+  const quotedOrExplanatory=/\b(?:klient\s+napisal|wiadomosc\s+klienta|w\s+instrukcji|przyklad|cytat|zacytowal|wyjasnij|co\s+mam\s+odpowiedziec)\b/.test(n);
+  if(quotedOrExplanatory)return null;
+  const conflict=(increment&&absolute)||ilosci.length>1;
+  const confirmed=!conflict&&agentAIKontekstPotwierdzenia(raw,n).confirmed;
+  const query=n
+    .replace(/\b\d{1,7}\s*(?:szt|sztuk|sztuki|sztuka|sztuke)\b/g," ")
+    .replace(/\b(?:mam|mamy|obecnie|teraz|aktualnie|na|stanie|stan|magazynie|magazynu|produkt|produktu|towar|towaru|sprawdz|sprawdzam|zweryfikuj|i|oraz|prosze|zatwierdz|potwierdz|zapisz|ustaw|przyjmij|przyjeto|dodaj|dopisz|zwieksz|powieksz|do)\b/g," ")
+    .replace(/\s+/g," ").trim();
+  return {typ:"magazyn-stan-zmiana",mode:increment&&!absolute?"increment":"set",quantity:Number(iloscMatch[1]),confirmed,conflict,query,raw,confidence:.99};
+}
+function agentAIParsujDecyzjeMagazynowa(tekst=""){
+  const raw=String(tekst||"").trim();
+  let match=raw.match(/^(?:lokalizacja|lokacja|miejsce)\s+(IV[a-f0-9]{14})\s+([A-Za-z0-9._/-]{1,40})\s*[.!]?$/i);
+  if(match)return {typ:"magazyn-decyzja",action:"location",id:match[1],location:match[2],raw,confidence:1};
+  match=raw.match(/^(?:nie\s+potwierdzam|odrzucam|anuluj(?:ę|e)|rezygnuj(?:ę|e))\s+(IV[a-f0-9]{14})\s*[.!]?$/i);
+  if(match)return {typ:"magazyn-decyzja",action:"reject",id:match[1],raw,confidence:1};
+  match=raw.match(/^(?:potwierdzam|zatwierdzam|akceptuj(?:ę|e))\s+(IV[a-f0-9]{14})\s*[.!]?$/i);
+  if(match)return {typ:"magazyn-decyzja",action:"confirm",id:match[1],raw,confidence:1};
+  return null;
+}
+function agentAIKluczIdentyfikatora(v=""){return agentAINormalizuj(v).replace(/[^a-z0-9]/g,"");}
+function agentAIStemNazwy(v=""){
+  const k=agentAIKluczIdentyfikatora(v);
+  return k.length>=6?k.slice(0,6):k;
+}
+function agentAIZnajdzProduktDoZmianyStanu(intent={}){
+  const q=agentAINormalizuj(intent.query||""),tokens=q.split(/\s+/).map(agentAIKluczIdentyfikatora).filter(Boolean),tokenSet=new Set(tokens);
+  const nameTokens=tokens.filter(x=>!/^\d+$/.test(x)&&x.length>=3),products=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const ranked=products.map(p=>{
+    const ids=[
+      ["EAN",p.gtin||p.ean,520],["EXTERNAL_ID",p.externalId,500],["SKU",p.sku,495],
+      ["kod producenta",p.kodProducenta||p.mpn,490],["ID",p.id,460]
+    ];
+    const identityHits=ids.map(([label,value,weight])=>({label,value:String(value??"").trim(),key:agentAIKluczIdentyfikatora(value),weight})).filter(x=>x.key&&tokenSet.has(x.key));
+    const productName=agentAINormalizuj(p.nazwa||p.name||""),productNameTokens=productName.split(/\s+/).filter(Boolean);
+    const matchedNames=nameTokens.filter(word=>productNameTokens.some(candidate=>candidate===word||agentAIStemNazwy(candidate)===agentAIStemNazwy(word)));
+    const nameRatio=nameTokens.length?matchedNames.length/nameTokens.length:0;
+    const exactName=!!q&&!!productName&&(q===productName||q.includes(productName)||productName.includes(q));
+    const identityScore=identityHits.reduce((max,x)=>Math.max(max,x.weight),0),nameScore=(exactName?160:0)+Math.round(nameRatio*120);
+    return {product:p,identityHits,matchedNames,nameRatio,exactName,score:identityScore+nameScore};
+  }).filter(x=>x.identityHits.length||x.nameRatio>=.5||x.exactName).sort((a,b)=>b.score-a.score||b.identityHits.length-a.identityHits.length||String(a.product.nazwa||"").localeCompare(String(b.product.nazwa||""),"pl"));
+  if(!ranked.length)return {status:"none",candidates:[]};
+  const best=ranked[0],second=ranked[1];
+  const strong=best.identityHits.length>0||best.exactName||best.nameRatio>=.75;
+  if(!strong||(second&&second.score===best.score))return {status:"ambiguous",candidates:ranked.slice(0,8)};
+  return {status:"one",product:best.product,evidence:best,candidates:ranked.slice(0,8)};
+}
+function agentAIProduktIdentyfikacjaTekst(p={}){
+  return `ID ${p.id||"—"} • EXTERNAL_ID ${p.externalId||"—"} • SKU ${p.sku||"—"} • EAN ${p.gtin||p.ean||"—"} • kod producenta ${p.kodProducenta||p.mpn||"—"}`;
+}
+function agentAIRequestIdKorekty(intent={},p={}){
+  const storageKey="artway_agent_inventory_request_ids",now=Date.now(),ttl=30*60*1000;
+  let entries={};
+  try{entries=JSON.parse(sessionStorage.getItem(storageKey)||"{}")||{};}catch(e){entries={};}
+  for(const [key,value] of Object.entries(entries))if(!value||now-Number(value.createdAt||0)>ttl)delete entries[key];
+  const fingerprint=[String(p.id||""),String(intent.mode||""),String(intent.quantity??""),agentAINormalizuj(intent.raw||intent.query||"")].join("|");
+  let item=entries[fingerprint];
+  if(!item?.id){
+    item={id:`panel-stock-${globalThis.crypto?.randomUUID?.()||`${now.toString(36)}-${Math.random().toString(36).slice(2)}`}`,createdAt:now};
+    entries[fingerprint]=item;
+  }
+  try{sessionStorage.setItem(storageKey,JSON.stringify(entries));}catch(e){}
+  return {id:item.id,fingerprint,storageKey};
+}
+function agentAIUsunRequestIdKorekty(request={}){
+  if(!request.fingerprint||!request.storageKey)return;
+  try{
+    const entries=JSON.parse(sessionStorage.getItem(request.storageKey)||"{}")||{};
+    delete entries[request.fingerprint];
+    sessionStorage.setItem(request.storageKey,JSON.stringify(entries));
+  }catch(e){}
+}
+async function agentAIWykonajZmianeStanu(intent={}){
+  if(intent.conflict)return "Polecenie jest niejednoznaczne: widzę jednocześnie stan bezwzględny i przyjęcie. Napisz osobno „ustaw stan …” albo „przyjmij … szt.”. Nic nie zostało zapisane.";
+  const match=agentAIZnajdzProduktDoZmianyStanu(intent);
+  if(match.status==="none")return `Nie znalazłem produktu jednoznacznie dla „${intent.query||intent.raw}”. Podaj nazwę wraz z ID, EXTERNAL_ID, SKU, EAN albo kodem producenta. Nie zmieniłem stanu.`;
+  if(match.status!=="one")return ["Znalazłem kilka możliwych produktów — nie zmieniam stanu bez jednoznacznego dopasowania:",...match.candidates.map(x=>`• ${x.product.nazwa} — ${agentAIProduktIdentyfikacjaTekst(x.product)}`),"Dopisz dokładny EAN, EXTERNAL_ID, SKU albo kod producenta."].join("\n");
+  const p=match.product,before=stanMagazynuId(p.id),after=intent.mode==="increment"?(before===null?null:before+intent.quantity):intent.quantity;
+  const evidence=match.evidence.identityHits.map(x=>`${x.label} ${x.value}`).join(", ")||(match.evidence.exactName?"dokładna nazwa":"zgodność nazwy");
+  if(intent.mode==="increment"&&before===null)return `Produkt został dopasowany jednoznacznie: ${p.nazwa} (${agentAIProduktIdentyfikacjaTekst(p)}), ale ma stan „bez limitu”. Najpierw ustaw konkretny stan; nie można bezpiecznie dodać ${intent.quantity} szt.`;
+  const requestId=`panel-stock-${globalThis.crypto?.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
+  const result=await chmura("inventory-decision-create",{method:"POST",body:{
+    productId:String(p.id),mode:intent.mode,quantity:intent.quantity,query:intent.query,requestId,
+    source:"admin-agent-panel",channel:"panel",reason:`Polecenie administratora: ${intent.raw}`
+  },timeout:30000});
+  await agentAIDecyzjeMagazynowePobierz(true);
+  const decision=result.decision||{},serverBefore=Object.prototype.hasOwnProperty.call(decision,"expectedStock")?decision.expectedStock:before,serverAfter=Object.prototype.hasOwnProperty.call(decision,"after")?decision.after:after;
+  const summary=[`📍 Dopasowanie: ${p.nazwa}`,agentAIProduktIdentyfikacjaTekst(p),`Podstawa dopasowania: ${evidence}.`,`Plan: ${serverBefore===null?"bez limitu":serverBefore} → ${serverAfter} szt. (${intent.mode==="increment"?`przyjęcie +${intent.quantity}`:"ustawienie stanu absolutnego"}).`,`Decyzja: ${decision.id||"zapisana"}.`];
+  return [...summary,"Najpierw wybierz lokalizację produktu w karcie poniżej. Potem osobno kliknij „Potwierdzam zmianę” albo „Nie potwierdzam”.","Nic nie zostało jeszcze zmienione. Jeśli decyzja zostanie na później, Agent przypomni o niej około 16:00."].join("\n");
+}
+async function agentAIDecyzjeMagazynowePobierz(silent=false){
+  if(agentAIDecyzjeMagazynowe.loading)return agentAIDecyzjeMagazynowe;
+  agentAIDecyzjeMagazynowe.loading=true;
+  try{
+    const data=await chmura("inventory-decisions-list",{method:"POST",body:{statuses:["awaiting_location","pending_confirmation","confirming"]},timeout:20000});
+    agentAIDecyzjeMagazynowe={loaded:true,loading:false,items:Array.isArray(data.items)?data.items:[],locationsByProduct:data.locationsByProduct||{},error:"",updatedAt:new Date().toISOString()};
+  }catch(error){
+    agentAIDecyzjeMagazynowe={...agentAIDecyzjeMagazynowe,loaded:true,loading:false,error:String(error?.message||error)};
+    if(!silent)toast(`Nie udało się pobrać decyzji: ${error?.message||error}`);
+  }
+  agentAIDecyzjeMagazynoweOdswiezPanel();
+  return agentAIDecyzjeMagazynowe;
+}
+function agentAIDecyzjeMagazynoweOdswiezPanel(){
+  const box=$("agentInventoryDecisionPanel");
+  if(box)box.innerHTML=agentAIDecyzjeMagazynowePanelHTML();
+}
+function agentAIDecyzjaStanTekst(status=""){
+  return status==="awaiting_location"?"Wymaga lokalizacji":status==="pending_confirmation"?"Czeka na Twoją decyzję":status==="confirming"?"Trwa bezpieczny zapis":"Zamknięta";
+}
+function agentAIDecyzjeMagazynowePanelHTML(){
+  const state=agentAIDecyzjeMagazynowe,items=Array.isArray(state.items)?state.items:[];
+  if(state.loading&&!state.loaded)return `<section class="agent-inventory-decisions" aria-live="polite"><div class="agent-ops-empty">⏳ Pobieram decyzje magazynowe…</div></section>`;
+  if(state.error)return `<section class="agent-inventory-decisions" aria-live="polite"><div class="backend-note warn">⚠️ ${esc(state.error)} <button class="btn ghost" onclick="agentAIDecyzjeMagazynowePobierz()">Ponów</button></div></section>`;
+  if(!items.length)return `<section class="agent-inventory-decisions" aria-live="polite"><div class="order-section-head"><div><span class="order-pro-label">Bezpieczne korekty</span><h3>Decyzje magazynowe</h3></div><span class="lvl lvl-ok">brak oczekujących</span></div><div class="agent-ops-empty">✅ Nie ma zmian oczekujących na lokalizację ani potwierdzenie.</div></section>`;
+  return `<section class="agent-inventory-decisions" aria-live="polite"><div class="order-section-head"><div><span class="order-pro-label">Bezpieczne korekty</span><h3>Decyzje magazynowe (${items.length})</h3><p class="order-detail-lead">Najpierw lokalizacja, potem osobna decyzja. Brak kliknięcia oznacza brak zmiany; oczekujące pozycje wrócą w przypomnieniu około 16:00.</p></div><button class="btn ghost" onclick="agentAIDecyzjeMagazynowePobierz()">↻ Odśwież</button></div><div class="agent-inventory-decision-list">${items.map(item=>{
+    const productId=String(item.productId||item.product?.id||""),locations=state.locationsByProduct?.[productId]||[],shownLocations=locations.slice(0,200),suggested=String(item.suggestedLocation||""),before=item.expectedStock===null?"niemonitorowany":`${item.expectedStock} szt.`,after=item.after===null?"—":`${item.after} szt.`,busy=agentAIDecyzjeMagazynoweBusy.has(String(item.id)),disabled=busy?"disabled":"";
+    const options=[`<option value="">— wybierz lokalizację —</option>`,...shownLocations.map(loc=>`<option value="${esc(loc.code)}" ${suggested===loc.code?"selected":""}>${loc.current?"📍 ":""}${esc(loc.code)}${loc.name?` — ${esc(loc.name)}`:""}</option>`)].join("");
+    return `<article class="agent-inventory-decision ${esc(item.status)} ${busy?"is-busy":""}" data-inventory-decision-id="${esc(item.id)}" aria-busy="${busy?"true":"false"}"><header><div><b>${esc(item.product?.name||`Produkt ${productId}`)}</b><small>${esc(item.id)} • ID ${esc(productId)}${item.product?.externalId?` • EXTERNAL_ID ${esc(item.product.externalId)}`:""}</small></div><span class="lvl ${item.status==="pending_confirmation"?"lvl-ostrzezenie":"lvl-info"}">${busy?"Zapisuję bezpiecznie…":esc(agentAIDecyzjaStanTekst(item.status))}</span></header><div class="agent-inventory-decision-facts"><span><small>Stan przed</small><b>${esc(before)}</b></span><span><small>Stan po</small><b>${esc(after)}</b></span><span><small>Lokalizacja</small><b>${esc(item.location||suggested||"do wskazania")}</b></span></div>${item.status==="awaiting_location"?`<div class="agent-inventory-location-step"><label><span>Lokalizacja produktu</span><select id="inventoryDecisionLocation-${esc(item.id)}" ${disabled}>${options}</select>${locations.length>shownLocations.length?`<small>Pokazano pierwsze ${shownLocations.length} lokalizacji. Uporządkuj nieaktywne lokalizacje w magazynie.</small>`:""}</label>${locations.length?`<button class="btn" ${disabled} onclick="agentAIDecyzjaUstawLokalizacje(${jsArg(item.id)},this)">📍 Zapisz lokalizację i pokaż podsumowanie</button>`:busy?`<span class="btn disabled">＋ Utwórz lokalizację</span>`:`<a class="btn" href="#/admin/magazyn/lokalizacje">＋ Utwórz lokalizację</a>`}<button class="btn ghost" ${disabled} onclick="agentAIDecyzjaWykonaj(${jsArg(item.id)},'reject',this)">Nie potwierdzam</button></div>`:item.status==="pending_confirmation"?`<div class="agent-inventory-final-step"><div><b>🔐 Ostatni krok</b><small>Sprawdź stan i lokalizację. Każdy przycisk dotyczy tylko tej jednej decyzji.</small></div><button class="btn" ${disabled} onclick="agentAIDecyzjaWykonaj(${jsArg(item.id)},'confirm',this)">✅ Potwierdzam zmianę</button><button class="btn ghost" ${disabled} onclick="agentAIDecyzjaWykonaj(${jsArg(item.id)},'reject',this)">❌ Nie potwierdzam</button></div>`:`<div class="agent-inventory-final-step"><div><b>⏳ Sprawdzam zapis</b><small>Jeśli poprzednie połączenie zostało przerwane, dokończenie rozpozna istniejący ruch i nie zapisze go drugi raz.</small></div><button class="btn ghost" ${disabled} onclick="agentAIDecyzjaWykonaj(${jsArg(item.id)},'confirm',this)">↻ Sprawdź i dokończ</button></div>`}${item.lastError?`<div class="backend-note warn">${esc(item.lastError)}</div>`:""}</article>`;
+  }).join("")}</div></section>`;
+}
+function agentAIDecyzjaUstawBusy(id,busy){
+  const key=String(id||"");
+  if(busy)agentAIDecyzjeMagazynoweBusy.add(key);else agentAIDecyzjeMagazynoweBusy.delete(key);
+  agentAIDecyzjeMagazynoweOdswiezPanel();
+}
+async function agentAIDecyzjaUstawLokalizacje(id,button){
+  if(agentAIDecyzjeMagazynoweBusy.has(String(id)))return;
+  const select=$(`inventoryDecisionLocation-${id}`),location=String(select?.value||"").trim();
+  if(!location){toast("Wybierz lokalizację produktu");select?.focus();return;}
+  agentAIDecyzjaUstawBusy(id,true);let success=false;
+  try{
+    const data=await chmura("inventory-decision-location",{method:"POST",body:{id,location},timeout:20000});
+    toast("Lokalizacja zapisana. Teraz osobno potwierdź albo odrzuć zmianę.");
+    await agentAIDecyzjeMagazynowePobierz(true);
+    agentAIPokazTekstDecyzji(data.text||"Lokalizacja zapisana — oczekuje na potwierdzenie.");
+    success=true;
+  }catch(error){toast(error?.message||String(error));await agentAIDecyzjeMagazynowePobierz(true);}finally{agentAIDecyzjaUstawBusy(id,false);if(success)setTimeout(()=>document.querySelector(`[data-inventory-decision-id="${String(id)}"] .agent-inventory-final-step .btn`)?.focus(),0);}
+}
+async function agentAIDecyzjaWykonaj(id,action,button){
+  if(!["confirm","reject"].includes(action)||agentAIDecyzjeMagazynoweBusy.has(String(id)))return;
+  agentAIDecyzjaUstawBusy(id,true);
+  try{
+    const endpoint=action==="confirm"?"inventory-decision-confirm":"inventory-decision-reject";
+    const data=await chmura(endpoint,{method:"POST",body:{id},timeout:30000});
+    if(action==="confirm"){
+      const refreshed=await chmuraWczytajStan().catch(()=>false);
+      if(refreshed)zbudujProdukty();
+      toast(refreshed?"Zmiana magazynowa została zapisana i zweryfikowana ✅":"Zmiana została zapisana na serwerze, ale panel nie potwierdził odświeżenia — odśwież dane");
+    }else toast("Decyzja odrzucona — stan pozostał bez zmian");
+    await agentAIDecyzjeMagazynowePobierz(true);
+    agentAIPokazTekstDecyzji(data.text||"");
+  }catch(error){toast(error?.message||String(error));await agentAIDecyzjeMagazynowePobierz(true);}finally{agentAIDecyzjaUstawBusy(id,false);}
+}
+function agentAICzystyTekstDecyzji(text=""){
+  return String(text||"").replace(/<br\s*\/?>/gi,"\n").replace(/<\/(?:p|div)>/gi,"\n").replace(/<[^>]+>/g,"").replace(/&nbsp;/g," ").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,"&").replace(/\n{3,}/g,"\n\n").trim();
+}
+function agentAIPokazTekstDecyzji(text=""){
+  const box=$("agentAICommandLiveResult");
+  if(!box)return;
+  box.hidden=false;box.className="agent-response-card agent-command-live-result";
+  box.innerHTML=`<div class="agent-response-head"><b>🔐 Decyzja magazynowa</b><small>${esc(new Date().toLocaleString("pl-PL"))}</small></div><pre class="agent-answer-pre">${esc(agentAICzystyTekstDecyzji(text))}</pre>`;
+}
+async function agentAIWykonajDecyzjeMagazynowa(intent={}){
+  if(agentAIDecyzjeMagazynoweBusy.has(String(intent.id)))return "Ta decyzja jest właśnie bezpiecznie przetwarzana. Zaczekaj na wynik.";
+  agentAIDecyzjaUstawBusy(intent.id,true);
+  try{
+  const endpoint=intent.action==="location"?"inventory-decision-location":intent.action==="confirm"?"inventory-decision-confirm":"inventory-decision-reject";
+  const data=await chmura(endpoint,{method:"POST",body:{id:intent.id,...(intent.location?{location:intent.location}:{})},timeout:30000});
+  let refreshed=true;
+  if(intent.action==="confirm"){refreshed=await chmuraWczytajStan().catch(()=>false);if(refreshed)zbudujProdukty();}
+  await agentAIDecyzjeMagazynowePobierz(true);
+  return `${agentAICzystyTekstDecyzji(data.text||"Decyzja została obsłużona.")}${intent.action==="confirm"&&!refreshed?"\n\nZmiana jest zapisana na serwerze, ale panel nie potwierdził odświeżenia danych.":""}`;
+  }finally{agentAIDecyzjaUstawBusy(intent.id,false);}
+}
+function agentAIWytnijProduktAllegro(n=""){
+  return String(n||"")
+    .replace(/\b(?:wystaw|dodaj|utworz|stworz|zrob|aktualizuj|odswiez|polacz|podepnij|aktywuj|dezaktywuj)\b/g," ")
+    .replace(/\b(?:oferte|oferta|produkt|na|do|w|przez|allegro|agent|prosze)\b/g," ")
+    .replace(/\s+/g," ").trim();
+}
+function agentAIZapiszPamiec(tresc="", meta={}){
+  const czysta=String(tresc||"").trim();
+  if(!czysta) return null;
+  let wyzwalacz=String(meta.wyzwalacz||"").trim(), akcja=String(meta.akcja||czysta).trim();
+  const m=czysta.match(/^(?:gdy|kiedy)\s+(?:napisze|napiszę|powiem|wpisze|wpiszę)\s+["„]?(.+?)["”]?\s*(?:to|->|=>|:)\s*(.+)$/i) || czysta.match(/^(.+?)\s*(?:->|=>)\s*(.+)$/);
+  if(m){ wyzwalacz=m[1].trim(); akcja=m[2].trim(); }
+  const rec={id:"MEM-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,6),tresc:czysta,wyzwalacz,akcja,typ:meta.typ||"procedura",tagi:Array.isArray(meta.tagi)?meta.tagi:[],data:new Date().toISOString(),dataTxt:new Date().toLocaleString("pl-PL"),operator:sesja?.email||"administrator"};
+  agentAIPamiec=[rec,...(Array.isArray(agentAIPamiec)?agentAIPamiec:[])].slice(0,500);
+  zapiszLS("artway_agent_ai_pamiec",agentAIPamiec);
+  zapiszHistorieAgenta("pamięć",`Agent zapamiętał: ${skrocTekst(czysta,120)}`,{pamiec:rec});
+  return rec;
+}
+function agentAIWytnijPamiec(raw=""){
+  return String(raw||"").replace(/^\s*(zapamietaj|zapamiętaj|naucz sie|naucz się|dodaj do pamieci|dodaj do pamięci|procedura)\s*[:,-]?\s*/i,"").trim();
+}
+function agentAIUsunPamiec(id){
+  const przed=(agentAIPamiec||[]).length;
+  agentAIPamiec=(agentAIPamiec||[]).filter(x=>x.id!==id);
+  zapiszLS("artway_agent_ai_pamiec",agentAIPamiec);
+  if(agentAIPamiec.length!==przed){ zapiszHistorieAgenta("pamięć","Usunięto wpis pamięci agenta",{id}); toast("Usunięto wpis pamięci"); renderuj(); }
+}
+function agentAIPamiecTekst(limit=12){
+  const lista=(agentAIPamiec||[]).slice(0,limit);
+  if(!lista.length) return "Pamięć agenta jest pusta. Napisz np. „zapamiętaj: przy niskim stanie najpierw sprawdzamy dostawcę Pinkfrog”.";
+  return ["🧠 Pamięć/procedury agenta:",...lista.map((x,i)=>`• ${i+1}. ${x.wyzwalacz?`Gdy: ${x.wyzwalacz} → `:""}${x.akcja||x.tresc} (${x.dataTxt||""})`)].join("\n");
+}
+function agentAIZnajdzPamiecDlaPolecenia(tekst=""){
+  const n=agentAINormalizuj(tekst), slowa=n.split(" ").filter(w=>w.length>2);
+  return (agentAIPamiec||[]).filter(x=>{
+    const wyz=agentAINormalizuj(x.wyzwalacz||"");
+    const hay=agentAINormalizuj([x.wyzwalacz,x.akcja,x.tresc].filter(Boolean).join(" "));
+    if(wyz && (n.includes(wyz)||wyz.includes(n))) return true;
+    const trafienia=slowa.filter(w=>hay.includes(w)).length;
+    return slowa.length>=2 && trafienia>=Math.min(3,slowa.length);
+  }).slice(0,5);
+}
+function agentAILokalizacjeTekst(){
+  const stat=statystykiLokalizacji(), aktywne=magazynLokalizacjeAktywne();
+  if(!aktywne.length) return "Nie ma jeszcze utworzonych lokalizacji magazynowych. Utwórz je w Magazyn → Lokalizacje albo napisz: „utwórz lokalizację R1-P1”.";
+  return ["🗺️ Lokalizacje magazynu:",...aktywne.map(l=>{
+    const s=stat[l.kod]||{produkty:0,sztuki:0,rezerwacje:0,wartosc:0};
+    return `• ${l.kod}${l.nazwa?` — ${l.nazwa}`:""}; typ: ${l.typ||"—"}; strefa: ${l.strefa||"—"}; produkty: ${s.produkty}; sztuki: ${s.sztuki}; rezerwacje: ${s.rezerwacje}; wartość: ${zl(s.wartosc)}`;
+  })].join("\n");
+}
+function agentAIProduktyZProblememOpisu(limit=500){
+  return produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>{
+    const braki=[];
+    if(!String(p.opisKrotki||"").trim()) braki.push("brak krótkiego opisu");
+    if(!String(p.opis||"").trim()) braki.push("brak pełnego opisu");
+    if(String(p.opis||"").replace(/\s+/g," ").trim().length>450 && !/\n/.test(String(p.opis||""))) braki.push("pełny opis wymaga formatowania");
+    if(String(p.opisKrotki||"").length>360) braki.push("krótki opis jest za długi");
+    return braki.length?{produkt:p,braki}:null;
+  }).filter(Boolean).slice(0,limit);
+}
+function agentAIOpisyTekst(limit=12){
+  const lista=agentAIProduktyZProblememOpisu(limit);
+  if(!lista.length) return "Opisy produktów wyglądają poprawnie: krótkie opisy są uzupełnione, a pełne opisy nie wymagają pilnej korekty.";
+  return ["📝 Produkty do poprawy opisów:",...lista.map((x,i)=>`• ${i+1}. ${x.produkt.nazwa} — ${x.braki.join(", ")}`),"Napisz „popraw opisy produktów”, żeby agent uzupełnił krótkie opisy i uporządkował pełne opisy."].join("\n");
+}
+function agentAILimitProduktowZPolecenia(raw="",fallback=40){
+  const match=String(raw||"").match(/\b(\d{1,4})\s*(?:produkt|produktów|produktow|kartotek|opis)/i),value=Number(match?.[1]||fallback);
+  return Math.max(1,Math.min(1000,Number.isFinite(value)?value:fallback));
+}
+async function agentAIPoprawOpisyProduktow(limit=40){
+  const requested=Math.max(1,Math.min(1000,Number(limit)||40));
+  try{
+    const data=await chmura("allegro-preparation-queue-auto",{method:"POST",body:{batchSize:requested,source:"admin-description-command"},timeout:60000}),work=data?.automatic||{},enqueued=Math.max(0,Number(work.enqueued)||0),queue=work.queue||{};
+    if(work.reason==="queue_busy")return `Agent serwerowy już pracuje. W kolejce pozostaje ${Math.max(0,Number(queue.pending)||0)} produktów${queue.active?.productId?`, aktualnie produkt ${queue.active.productId}`:""}. Nie utworzono duplikatu.`;
+    if(work.reason==="catalog_ready")return "Agent sprawdził katalog: nie ma kolejnych bezpiecznych kartotek do automatycznej poprawy. Pozycje wymagające danych lub decyzji są oznaczone osobno.";
+    if(enqueued){zapiszHistorieAgenta("opisy-produktow",`Agent przekazał do trwałej kolejki serwera ${enqueued} produktów`,{limit:requested,queued:enqueued,storage:"postgresql"});return `Agent zapisał na serwerze kolejkę ${enqueued} z maksymalnie ${requested} produktów. Praca trwa po zamknięciu panelu, a kolejne partie zostaną dobrane automatycznie.`;}
+    return `Agent nie dodał nowej pracy: ${work.reason||"brak nowych kandydatów"}.`;
+  }catch(error){loguj("blad","Agent nie uruchomił serwerowej kolejki produktów: "+(error.message||error));return `Nie uruchomiono kolejki produktów: ${error.message||error}`;}
+}
+async function agentAIKolejkaProduktowSteruj(action="pause"){
+  const operation=String(action||"").toLowerCase();
+  let knownQueue=typeof agentAIRuntime!=="undefined"?agentAIRuntime.preparationQueue||{}:{};
+  if(operation==="cancel_previous"&&!(knownQueue.batches||[]).length)knownQueue=(await chmura("allegro-preparation-queue-status",{timeout:30000}))?.queue||{};
+  const batch=(knownQueue.batches||[]).find(item=>Number(item.pending||0)+Number(item.running||0)>0)||(knownQueue.batches||[])[0]||null;
+  const data=await chmura("allegro-preparation-queue-control",{method:"POST",body:{action:operation,batchId:operation==="cancel_previous"?String(batch?.id||""):""},timeout:30000}),queue=data?.queue||{},cancelled=Number(queue?.control?.cancelled)||0;
+  if(typeof asortymentZastosujStanKolejkiSerwera==="function")asortymentZastosujStanKolejkiSerwera(queue);
+  if(typeof agentAIRuntime!=="undefined")agentAIRuntime={...agentAIRuntime,preparationQueue:queue};
+  if(operation==="pause")return `Wstrzymałem trwałą kolejkę produktów na serwerze. ${Math.max(0,Number(queue.pending)||0)} zadań pozostaje bezpiecznie zapisanych; bieżący zapis produktu może się dokończyć.`;
+  if(operation==="resume")return `Wznowiłem trwałą kolejkę produktów. Agent podejmie ${Math.max(0,Number(queue.pending)||0)} oczekujących zadań bez tworzenia duplikatów.`;
+  if(operation==="cancel_previous")return `Anulowałem ${cancelled} wcześniejszych oczekujących zadań i zachowałem bieżącą partię. Aktualnie zapisywany produkt kończy się bezpiecznie.`;
+  return `Anulowałem ${cancelled} oczekujących zadań przygotowania. Aktualnie zapisywany produkt kończy się bezpiecznie, a anulowane pozycje pozostają w audycie.`;
+}
+function agentAIRozpoznajPolecenie(tekst=""){
+  const raw=String(tekst||"").trim(), n=agentAINormalizuj(raw);
+  if(!n) return {typ:"pomoc",raw,confidence:1};
+  const decisionIntent=agentAIParsujDecyzjeMagazynowa(raw);
+  if(decisionIntent)return decisionIntent;
+  const urlMatch=raw.match(/https?:\/\/\S+/i);
+  if(urlMatch&&agentAIMa(n,["sprawdz link","sprawdź link","pobierz z link","znajdz przez link","znajdź przez link","przeanalizuj link","uzupelnij z link","uzupełnij z link","dodaj produkt z link","dodaj z link","przygotuj produkt z link"]))return {typ:"link-producenta-analiza",url:urlMatch[0],addProduct:agentAIMa(n,["dodaj produkt","dodaj z link","przygotuj produkt"]),raw,confidence:.99};
+  const stockIntent=agentAIParsujZmianeStanu(raw);
+  if(stockIntent)return stockIntent;
+  const slash=n.split(/\s+/)[0].split("@")[0];
+  if(slash.startsWith("/")){
+    if(["/start","/pomoc","/help"].includes(slash)) return {typ:"pomoc",raw,confidence:1};
+    if(slash==="/status") return {typ:"status",raw,confidence:1};
+    if(slash==="/magazyn") return {typ:"magazyn",raw,confidence:1};
+    if(slash==="/braki") return {typ:"braki",raw,confidence:1};
+    if(["/opisy","/opis"].includes(slash)) return {typ:n.includes("popraw")?"opisy-popraw":"opisy",raw,confidence:1};
+    if(slash==="/zamowienia") return {typ:"zamowienia",raw,confidence:1};
+    if(["/centrum","/priorytety","/dzis"].includes(slash)) return {typ:"centrum",raw,confidence:1};
+    if(["/wiadomosci","/dyskusje"].includes(slash)) return {typ:"komunikacja",raw,confidence:1};
+    if(["/wysylki","/inpost"].includes(slash)) return {typ:"wysylki",raw,confidence:1};
+    if(slash==="/produkty") return {typ:"produkty-audyt",raw,confidence:1};
+    if(["/producenci","/dostawcy"].includes(slash)) return {typ:"producenci",raw,confidence:1};
+    if(["/diagnostyka","/integracje"].includes(slash)) return {typ:"diagnostyka",raw,confidence:1};
+    if(["/zlecenie","/zamow"].includes(slash)) return {typ:"zlecenie",tryb:n.includes("nisk")?"niskie":"braki",raw,confidence:1};
+    if(["/sprawdz","/check"].includes(slash)) return {typ:"sprawdz",raw,confidence:1};
+    if(slash==="/wykonaj") return {typ:n.includes("blad")||n.includes("błąd")?"plan-retry":n.includes("dane")||n.includes("pobier")?"plan-data":n.includes("funkcj")||n.includes("stron")?"plan-health":"plan-wykonaj",raw,confidence:1};
+  }
+  if(agentAIMa(n,["pomoc","co potrafisz","jakie polecenia","co mozesz","instrukcja"])) return {typ:"pomoc",raw,confidence:.95};
+  if(agentAIMa(n,["ponow bledy","ponów błędy","ponow nieudane kroki","ponów nieudane kroki","sprobuj jeszcze raz bledne","spróbuj jeszcze raz błędne"])) return {typ:"plan-retry",raw,confidence:.99};
+  if(agentAIMa(n,["pobierz swieze dane","pobierz świeże dane","odswiez wszystkie dane","odśwież wszystkie dane","wykonaj samo pobieranie","sprawdz zrodla danych","sprawdź źródła danych"])) return {typ:"plan-data",raw,confidence:.99};
+  if(agentAIMa(n,["sprawdz sama strone","sprawdź samą stronę","kontrola funkcjonalnosci","kontrola funkcjonalności","sprawdz funkcjonalnosc strony","sprawdź funkcjonalność strony"])) return {typ:"plan-health",raw,confidence:.99};
+  if(agentAIMa(n,["wykonaj bezpieczny plan","wykonaj plan agenta","wykonaj konkretne dzialania","wykonaj konkretne działania","zrob bezpieczne dzialania","zrób bezpieczne działania","sprawdz funkcjonalnosc i pobierz dane","sprawdź funkcjonalność i pobierz dane"])) return {typ:"plan-wykonaj",raw,confidence:.99};
+  if(agentAIMa(n,["centrum operacyjne","plan dnia","co mam zrobic","co mam zrobić","co mam dzisiaj zrobic","co mam dzisiaj zrobić","najwazniejsze zadania","najważniejsze zadania","pokaz priorytety","pokaż priorytety","co jest pilne","co wymaga decyzji","pokaż decyzje","pokaz decyzje","raport calej strony","raport całej strony"])) return {typ:"centrum",raw,confidence:.96};
+  if(agentAIMa(n,["wiadomosci allegro","wiadomości allegro","dyskusje allegro","komunikacja z klientami","pokaz komunikacje","pokaż komunikację","komunikacja allegro","komu odpisac","komu odpisać","sprawy do odpowiedzi"])) return {typ:"komunikacja",raw,confidence:.95};
+  if(agentAIMa(n,["wysylki","wysyłki","etykiety inpost","przesylki bez numeru","przesyłki bez numeru","status inpost","co wyslac","co wysłać"])) return {typ:"wysylki",raw,confidence:.93};
+  if(agentAIMa(n,["audyt produktow","audyt produktów","stan katalogu","braki danych produktow","braki danych produktów","produkty do poprawy","jak wyglada katalog","jak wygląda katalog"])) return {typ:"produkty-audyt",raw,confidence:.92};
+  if(agentAIMa(n,["status producentow","status producentów","dostawcy i producenci","zamowienia producentow","zamówienia producentów","otwarte dokumenty producentow","otwarte dokumenty producentów"])) return {typ:"producenci",raw,confidence:.92};
+  if(agentAIMa(n,["diagnostyka integracji","status integracji","sprawdz integracje","sprawdź integracje","email inpost paynow","czy integracje dzialaja","czy integracje działają"])) return {typ:"diagnostyka",raw,confidence:.94};
+  if(agentAIMa(n,["zapamietaj","zapamiętaj","naucz sie","naucz się","dodaj do pamieci","dodaj do pamięci","procedura:"])) return {typ:"pamiec-zapis",tresc:agentAIWytnijPamiec(raw),raw,confidence:.95};
+  if(agentAIMa(n,["pokaz pamiec","pokaż pamięć","co pamietasz","co pamiętasz","lista procedur","pokaz procedury","pokaż procedury"])) return {typ:"pamiec-lista",raw,confidence:.95};
+  if(agentAIMa(n,["pokaz lokalizacje","pokaż lokalizacje","lista lokalizacji","lokalizacje magazynu","mapa magazynu"])) return {typ:"lokalizacje",raw,confidence:.9};
+  if(agentAIMa(n,["wstrzymaj kolejke produktow","wstrzymaj kolejkę produktów","zatrzymaj kolejke produktow","zatrzymaj kolejkę produktów","wstrzymaj zadania produktow","wstrzymaj zadania produktów"])) return {typ:"kolejka-produktow-sterowanie",action:"pause",raw,confidence:.99};
+  if(agentAIMa(n,["wznow kolejke produktow","wznów kolejkę produktów","uruchom ponownie kolejke produktow","uruchom ponownie kolejkę produktów","kontynuuj kolejke produktow","kontynuuj kolejkę produktów"])) return {typ:"kolejka-produktow-sterowanie",action:"resume",raw,confidence:.99};
+  if(agentAIMa(n,["anuluj wczesniejsze zadania produktow","anuluj wcześniejsze zadania produktów","usun poprzednie zadania produktow","usuń poprzednie zadania produktów"])) return {typ:"kolejka-produktow-sterowanie",action:"cancel_previous",raw,confidence:.99};
+  if(agentAIMa(n,["anuluj oczekujace zadania produktow","anuluj oczekujące zadania produktów","anuluj kolejke produktow","anuluj kolejkę produktów"])) return {typ:"kolejka-produktow-sterowanie",action:"cancel",raw,confidence:.99};
+  if(agentAIMa(n,["popraw opisy","popraw opisy produktow","popraw opisy produktów","uporzadkuj opisy","uporządkuj opisy","wygeneruj krotkie opisy","wygeneruj krótkie opisy"])) return {typ:"opisy-popraw",raw,confidence:.94};
+  if(agentAIMa(n,["sprawdz opisy","sprawdź opisy","audyt opisow","audyt opisów","lista opisow","lista opisów","czy opisy sa dobre","czy opisy są dobre"])) return {typ:"opisy",raw,confidence:.92};
+  if(agentAIMa(n,["sprawdz dostepnosc u producentow","sprawdź dostępność u producentów","sprawdz stany producentow","sprawdź stany producentów","monitoring producentow","monitoring producentów","niski stan u producenta","braki u producentow","braki u producentów"])) return {typ:"dostepnosc-producentow-sprawdz",raw,confidence:.97};
+  if(agentAIMa(n,["sprawdz linki producentow","sprawdź linki producentów","pobierz linki producentow","pobierz linki producentów","pobierz produkty z linkow","pobierz produkty z linków","ponow pobieranie linkow","ponów pobieranie linków"])) return {typ:"linki-producentow-sprawdz",raw,confidence:.93};
+  if(agentAIMa(n,["pokaz linki producentow","pokaż linki producentów","linki producentow","linki producentów","kolejka linkow","kolejka linków","url producenta"])) return {typ:"linki-producentow",raw,confidence:.92};
+  if(agentAIMa(n,["utworz lokalizacje","utwórz lokalizację","dodaj lokalizacje","dodaj lokalizację"])){
+    const kod=kodLokalizacjiMagazynu(n.replace(/.*(?:utworz|utworzz|utwórz|dodaj)\s+lokalizacj[eaęi]\s*/,"").split(" ")[0]||"");
+    return {typ:"lokalizacja-dodaj",kod,raw,confidence:.82};
+  }
+  if(agentAIMa(n,["synchronizuj","synchronizacja","odswiez baze","odswiez dane","polacz baze","zapisz na serwerze"])) return {typ:"sync",raw,confidence:.95};
+  if(agentAIMa(n,["utworz szkice fv","stworz szkice fv","brakujace szkice","faktury","infakt"])) return {typ:"faktury",raw,confidence:.9};
+  if(agentAIMa(n,["eksport magazynu","pobierz magazyn","csv magazynu"])) return {typ:"export-magazyn",raw,confidence:.9};
+  if(agentAIMa(n,["audyt magazynu","sprawdz kartoteke","audyt kartoteki"])) return {typ:"audyt-magazynu",raw,confidence:.9};
+  if(agentAIMa(n,["uzupelnij kartoteke","domyslna kartoteka","wypelnij lokalizacje","wypelnij dostawcow"])) return {typ:"kartoteka-domyslna",raw,confidence:.9};
+  if(agentAIMa(n,[
+    "przygotuj zamowienie","przygotuj zlecenie","napisz zamowienie","napisz zlecenie","zrob zamowienie","zrob zlecenie",
+    "zamowienie do producenta","zlecenie do producenta","zamowienie do dostawcy","zlecenie do dostawcy","co zamowic u producenta","co zamowic u dostawcy"
+  ])){
+    const niskie=agentAIMa(n,["nisk","niski stan","niskie stany","brak na stanie","zerowy stan","uzupelniajace","uzupelnij"]);
+    const braki=agentAIMa(n,["pod zamowienia","pod zlecenia","aktywne zamowienia","aktywne zlecenia","braki do zamowien"]);
+    return {typ:"zlecenie",tryb:niskie&&!braki?"niskie":"braki",raw,confidence:.95};
+  }
+  if(n.includes("allegro")&&/(?:wystaw|dodaj|utworz|stworz|aktualizuj|podepnij|aktywuj|dezaktywuj)/.test(n)){
+    return {typ:"allegro-oferta",query:agentAIWytnijProduktAllegro(n),publicationAction:n.includes("dezaktywuj")?"deactivate":n.includes("aktywuj")||n.includes("wystaw")?"activate":"keep",raw,confidence:.98};
+  }
+  if(agentAIMa(n,["sprawdz allegro","sprawdź allegro","zlecenia allegro","zamowienia allegro","zamówienia allegro","pakowanie allegro","braki allegro"])) return {typ:"allegro-zlecenia",raw,confidence:.98};
+  if(agentAIMa(n,["sprawdz teraz","sprawdz czy","sprawdz zlecenia","sprawdz zamowienia","czy wplynelo","czy wpadlo","czy jest nowe","czy sa nowe","nowe zlecenie","nowe zamowienie","jakies zlecenie wplynelo","jakies zamowienie wplynelo"])) return {typ:"sprawdz",raw,confidence:.95};
+  if(agentAIMa(n,["czego brakuje","co brakuje","braki","brakuje do zamowien","brakuje do zlecen","co trzeba domowic","co trzeba zamowic","nadrezerwacje","braki magazynowe","plan zatowarowania","plan zakupow"])) return {typ:"braki",raw,confidence:.9};
+  if(agentAIMa(n,["lista zamowien","pokaz zamowienia","pokaz zlecenia","ostatnie zamowienia","ostatnie zlecenia","ile zamowien","ile zlecen","zamowienia","zlecenia"])) return {typ:"zamowienia",raw,confidence:.86};
+  if(agentAIMa(n,["status sklepu","status strony","status agenta","czy sklep dziala","czy strona dziala","kondycja","stan systemu","backend","baza dziala","raport agenta"])) return {typ:"status",raw,confidence:.92};
+  if(agentAIMa(n,["stan magazynu","podsumowanie magazynu","raport magazynu","magazyn","ile produktow","produkty bez kartoteki","bez dostawcy","bez lokalizacji","niskie stany","brak na stanie"])) return {typ:"magazyn",raw,confidence:.85};
+  if(agentAIMa(n,["ile mamy","ile jest","jaki stan","stan produktu","sprawdz produkt","znajdz","czy mamy","gdzie lezy","gdzie jest"]) || /^sku\s+/.test(n) || /^kod\s+/.test(n)){
+    const query=agentAIWytnijProdukt(n);
+    if(query.length>=2) return {typ:"produkt",query,raw,confidence:.82};
+  }
+  if(n==="status") return {typ:"status",raw,confidence:.9};
+  if(n==="magazyn") return {typ:"magazyn",raw,confidence:.9};
+  if(n==="braki") return {typ:"braki",raw,confidence:.9};
+  if(["zamowienia","zlecenia"].includes(n)) return {typ:"zamowienia",raw,confidence:.9};
+  if(n==="zlecenie") return {typ:"zlecenie",tryb:"braki",raw,confidence:.9};
+  return {typ:"nieznane",raw,confidence:.2};
+}
+function agentAIProduktTekst(fraza=""){
+  const q=agentAINormalizuj(fraza);
+  if(!q) return "Podaj nazwę, SKU albo fragment produktu, np. „ile mamy szachy”.";
+  const slowa=q.split(" ").filter(Boolean);
+  const rez=rezerwacjeMagazynowe();
+  const lista=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).filter(p=>{
+    const hay=agentAINormalizuj([p.nazwa,p.sku,p.kategoria,p.podkategoria,p.id].filter(Boolean).join(" "));
+    return hay.includes(q) || slowa.every(w=>hay.includes(w));
+  }).slice(0,8);
+  if(!lista.length) return `Nie znalazłem produktu dla: „${fraza}”. Spróbuj krótszej nazwy albo SKU.`;
+  return ["🔎 Produkty znalezione:",...lista.map(p=>{
+    const stan=stanMagazynuId(p.id), r=Number(rez[p.id]||0), dost=stan===null?null:stan-r, meta=magazynMetaProduktu(p.id);
+    const dostepnosc=produktOznaczonyNiedostepny(p)?"wyłączony ze sprzedaży":"dostępny w sklepie";
+    return `• ${p.nazwa} (${p.sku||"ID "+p.id}) — stan: ${stan===null?"bez limitu":stan+" szt."}, rezerwacje: ${r}, dostępne po rezerwacjach: ${dost===null?"bez limitu":dost+" szt."}, sprzedaż: ${dostepnosc}, cena: ${zl(p.cena)}, lokalizacja: ${meta.lokalizacja?nazwaLokalizacjiMagazynu(meta.lokalizacja):"—"}, dostawca: ${meta.dostawca||"—"}`;
+  })].join("\n");
+}
+function agentAIBrakiTekst(limit=12){
+  const plan=potrzebyZatowarowania().slice(0,limit);
+  if(!plan.length) return "📦 Braki do aktywnych zamówień: brak. Aktualne rezerwacje mieszczą się w stanie magazynowym.";
+  return ["📦 Braki do aktywnych zamówień:",...plan.map(x=>`• ${x.produkt.nazwa} (${x.produkt.sku||"ID "+x.produkt.id}) — zamówić ${x.ilosc} szt.; dostępne: ${x.dostepne}; rezerwacje: ${x.rezerwacje}; dostawca: ${x.meta.dostawca||"—"}`)].join("\n");
+}
+function agentAIZamowieniaTekst(limit=8){
+  const zam=pobierzZamowienia().slice().sort((a,b)=>(Number(b.ts)||0)-(Number(a.ts)||0));
+  const aktywne=zam.filter(statusZamowieniaRezerwujeMagazyn);
+  const nowe=zam.filter(z=>String(z.status||"").toLowerCase()==="nowe");
+  const potw=zam.filter(z=>z.wymagaPotwierdzeniaDostepnosci);
+  const bezNumeru=aktywne.filter(z=>!daneWysylki(z).numer);
+  const ostatnie=zam.slice(0,limit).map(z=>`• ${z.nr} — ${klientZamowieniaLabel(z)} — ${z.status||"nowe"} — ${zl(kosztyZamowienia(z).razem||z.razem)}`).join("\n");
+  return [`📋 Zamówienia: ${zam.length} wszystkich, ${nowe.length} nowych, ${aktywne.length} aktywnych, ${potw.length} do potwierdzenia dostępności, ${bezNumeru.length} bez numeru nadania.`,ostatnie?`\nOstatnie:\n${ostatnie}`:""].join("");
+}
+function agentAIAllegroZleceniaTekst(limit=12){
+  const aktywne=aktywneZamowieniaAllegro();
+  const analizy=aktywne.map(z=>({z,a:allegroAnalizaMagazynowaZamowienia(z)}));
+  const braki=analizy.filter(x=>x.a.braki>0), nierozpoznane=analizy.filter(x=>x.a.nierozpoznane>0), bezStanu=analizy.filter(x=>x.a.bezStanu>0), bezLokalizacji=analizy.filter(x=>x.a.bezLokalizacji>0), gotowe=analizy.filter(x=>x.a.gotowe);
+  const rows=analizy.slice(0,limit).map(x=>{const lok=x.a.pozycje.filter(p=>p.decyzja==="kompletuj").map(p=>p.lokalizacja?nazwaLokalizacjiMagazynu(p.lokalizacja):"").filter(Boolean);return `• ${x.z.id} • Allegro: ${allegroStatusKolejkiMeta(x.z).label} • magazyn: ${allegroEtapMagazynuMeta(x.z).label} • ${x.a.gotowe?(x.a.bezLokalizacji?"towar zarezerwowany, lokalizację ustala magazyn":`pobierz z: ${[...new Set(lok)].join(", ")}`):`braki ${x.a.braki} szt., nierozpoznane ${x.a.nierozpoznane}, bez stanu ${x.a.bezStanu}`}`;});
+  return [`📦 Kontrola zleceń Allegro: ${aktywne.length} aktywnych, ${gotowe.length} gotowych do kompletacji, ${braki.length} z brakami, ${nierozpoznane.length} nierozpoznanych i ${bezStanu.length} bez stanu.`,`📍 Osobna kolejka magazynu: ${bezLokalizacji.length} zleceń ma towar bez ustalonej lokalizacji; nie blokuje to rezerwacji ani realizacji.`,...rows,braki.length?"Agent dopisuje wyłącznie realne braki z nowych zleceń do właściwego szkicu producenta; lokalizacja nigdy nie tworzy zakupu.":"Nie ma braków wymagających zamówienia u producenta."].join("\n");
+}
+function agentAIStatusTekst(){
+  const analiza=agentAIAnaliza();
+  const problemy=analiza.filter(x=>x.poziom!=="ok");
+  const score=Math.max(0,Math.round(100-(analiza.filter(x=>x.poziom==="bad").length*18)-(analiza.filter(x=>x.poziom==="warn").length*8)));
+  return [`🤖 Status agenta/sklepu: ${score}%`,`${problemy.length} tematów wymaga kontroli.`,`Baza: ${chmuraStan.admin?"połączona":"wymaga hasła/połączenia"} • e-mail: ${stanBramki.email?.configured?"OK":"sprawdź"} • InPost: ${stanBramki.inpost?.configured?"OK":"sprawdź"} • pamięć: ${(agentAIPamiec||[]).length} • lokalizacje: ${magazynLokalizacjeAktywne().length}`,problemy.length?`\nNajważniejsze:\n${problemy.slice(0,8).map(x=>`• ${x.tytul}: ${x.opis}`).join("\n")}`:"\nBrak pilnych problemów z listy kontroli."].join("\n");
+}
+function agentAICentrumTekst(limit=10){
+  const analiza=agentAIAnaliza(),zadania=analiza.filter(x=>x.poziom!=="ok").sort((a,b)=>agentAIPriorytet(a)-agentAIPriorytet(b)).slice(0,limit),bad=analiza.filter(x=>x.poziom==="bad").length,warn=analiza.filter(x=>x.poziom==="warn").length,score=Math.max(0,Math.round(100-bad*18-warn*8));
+  return [`🤖 Centrum operacyjne Artway-TM — ${score}%`,`Pilne: ${bad} • wymagające uwagi: ${warn} • kontrole OK: ${analiza.length-bad-warn}.`,zadania.length?`\nKolejność pracy:\n${zadania.map((x,i)=>`${i+1}. ${x.poziom==="bad"?"🔴":"🟡"} ${x.tytul}\n   ${x.opis}\n   Następny krok: ${agentAIOpisKroku(x)}`).join("\n")}`:"\n✅ Brak aktywnych tematów wymagających reakcji.","\nPolecenia szczegółowe: „sprawdź funkcjonalność strony”, „audyt produktów”, „sprawdź wydajność” albo „diagnostyka integracji”."].join("\n");
+}
+function agentAIKomunikacjaTekst(){
+  const st=allegroKomunikacjaStaty(),threads=st.threads||[],issues=st.issues||[],threadNeed=threads.filter(allegroKomunikacjaWymagaOdpowiedzi).length,issueNeed=issues.filter(allegroKomunikacjaWymagaOdpowiedzi).length;
+  return [`💬 Komunikacja z klientami`,`Allegro: ${threadNeed} wiadomości i ${issueNeed} dyskusji/reklamacji wymaga odpowiedzi.`,`Załatwione wewnętrznie: ${[...threads,...issues].filter(allegroKomunikacjaZalatwiona).length}.`,`Automatyczna odpowiedź jest wysyłana tylko przy pierwszej nowej wiadomości; dalsze odpowiedzi pozostają do zatwierdzenia administratora.`,threadNeed+issueNeed?"Otwórz Allegro → Wiadomości lub Dyskusje, sprawdź propozycję Agenta i odpowiedz klientowi.":"✅ Brak nowych spraw wymagających odpowiedzi."].join("\n");
+}
+function agentAIWysylkiTekst(){
+  const aktywne=pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn),bezNumeru=aktywne.filter(z=>!daneWysylki(z).numer),problemy=aktywne.filter(z=>daneWysylki(z).etap==="problem"||daneWysylki(z).status==="problem");
+  return [`🚚 Centrum wysyłek`,`Aktywne zamówienia: ${aktywne.length}. Bez numeru nadania: ${bezNumeru.length}. Wyjątki/problem: ${problemy.length}.`,`InPost: ${stanBramki.inpost?.configured?"połączony":"wymaga sprawdzenia konfiguracji"}.`,bezNumeru.length?`Do obsługi: ${bezNumeru.slice(0,10).map(z=>z.nr).join(", ")}.\nNastępny krok: uzupełnij odbiorcę, wybierz usługę, wygeneruj etykietę i pobierz numer nadania.`:"✅ Aktywne przesyłki mają numery nadania."].join("\n");
+}
+function agentAIProduktyAudytTekst(){
+  const produkty=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)),bezCeny=produkty.filter(p=>!produktMaCeneSprzedazy(p)),bezZdjec=produkty.filter(p=>!p.zdjecie),opisy=agentAIProduktyZProblememOpisu(1000),oferty=produkty.filter(p=>p.allegroOfferId||allegroOfertaDlaProduktuSklepu(p)?.id),zadania=allegroAktywneZadaniaAgentaOfert();
+  return [`🏷️ Audyt produktów i katalogu`,`Aktywne produkty: ${produkty.length}. Na Allegro: ${oferty.length}.`,`Bez ceny: ${bezCeny.length} • bez zdjęcia: ${bezZdjec.length} • opis do poprawy: ${opisy.length} • zadania wystawiania: ${zadania.length}.`,zadania.length?"Najpierw uzupełnij dane wymagane przez Allegro, następnie ponów wystawianie z Agenta ofert.":opisy.length?"Możesz użyć polecenia „popraw opisy produktów”.":"✅ Brak pilnych problemów katalogu."].join("\n");
+}
+function agentAIProducenciTekst(){
+  const stats=statystykiDostepnosciProducentow(),docs=(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny),producenci=(producenciKartoteka||[]).filter(p=>p.active!==false);
+  return [`🏭 Producenci i zakupy`,`Kartoteki producentów: ${producenci.length}. Otwarte dokumenty zakupowe: ${docs.length}.`,`Dostępność: ${stats.braki.length} braków • ${stats.niskie.length} niskich stanów • ${stats.nieznane.length} niepotwierdzonych.`,`Linki oczekujące na pobranie: ${agentAILinkiOczekujace().length}.`,docs.length?"Sprawdź bieżące rewizje dokumentów; e-mail do producenta wymaga zatwierdzenia aktualnej wersji.":"✅ Brak otwartych dokumentów producentów."].join("\n");
+}
+function agentAIDiagnostykaTekst(){
+  return [`🛠️ Diagnostyka całej strony`,`Wspólna baza: ${chmuraStan.admin?"OK":"wymaga połączenia"}.`,`E-mail: ${stanBramki.email?.configured?"OK":"sprawdź"} • InPost: ${stanBramki.inpost?.configured?"OK":"sprawdź"} • Allegro: ${allegroStan.connected?"OK":"sprawdź połączenie"}.`,`Paynow: ${stanBramki.paynow?.configured?"OK":"sprawdź konfigurację"}.`,`Następny krok: otwórz Diagnostykę, jeżeli którakolwiek integracja nie ma statusu OK.`].join("\n");
+}
+function agentAIMagazynTekst(){
+  const produktyAdmin=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const monitorowane=produktyAdmin.filter(p=>stanMagazynuId(p.id)!==null);
+  const bezMonitoringu=produktyAdmin.length-monitorowane.length;
+  const niskie=monitorowane.filter(p=>stanMagazynuId(p.id)<=progNiskiProduktu(p));
+  const niedostepne=produktyAdmin.filter(produktOznaczonyNiedostepny);
+  const braki=potrzebyZatowarowania();
+  const bezLokalizacji=produktyAdmin.filter(p=>!magazynMetaProduktu(p.id).lokalizacja),bezDostawcy=braki.filter(x=>!x.meta?.dostawca);
+  return [`🏬 Magazyn: ${produktyAdmin.length} produktów aktywnych w administracji.`,`Monitorowane stany: ${monitorowane.length}; bez monitoringu: ${bezMonitoringu}.`,`Realne braki do aktywnych zamówień: ${braki.length}; bez dostawcy w Planie: ${bezDostawcy.length}; lokalizacje do utrzymania przez magazyn: ${bezLokalizacji.length}; wyłączone ze sprzedaży: ${niedostepne.length}.`,niskie.length?`\nPierwsze niskie stany:\n${niskie.slice(0,8).map(p=>`• ${p.nazwa} — stan ${stanMagazynuId(p.id)} szt., próg ${progNiskiProduktu(p)}`).join("\n")}`:""].join("\n");
+}
+
+function czyEAN(v){
+  const c=tylkoCyfry(v);
+  return [8,12,13,14].includes(c.length);
+}
+function kodOperacyjnyProduktu(p, meta={}){
+  return String(p?.kodProducenta || p?.mpn || p?.externalId || p?.sku || meta.kod || "").trim();
+}
+function eanOperacyjnyProduktu(p, meta={}){
+  const kandydaci=[meta.ean,meta.ean13,meta.kodEan,p?.ean,p?.gtin,p?.kodEan,meta.kod,p?.kod].filter(Boolean);
+  const e=kandydaci.find(czyEAN) || kandydaci[0] || "";
+  return String(e||"").trim();
+}
+function mapaZamowienDlaProduktow(){
+  const mapa={};
+  pobierzZamowienia().filter(statusZamowieniaRezerwujeMagazyn).forEach(z=>{
+    pozycjeZamowieniaMagazyn(z).forEach(p=>{
+      const k=String(p.id);
+      const rec=mapa[k]||(mapa[k]={ilosc:0,zamowienia:{},numery:[]});
+      rec.ilosc+=Number(p.ilosc)||0;
+      rec.zamowienia[z.nr]=(rec.zamowienia[z.nr]||0)+(Number(p.ilosc)||0);
+    });
+  });
+  aktywneZamowieniaAllegro().forEach(z=>{
+    pozycjeAllegroMagazyn(z).filter(p=>p.id!=="").forEach(p=>{
+      const k=String(p.id), numer=`Allegro ${z.id||z.nr}`;
+      const rec=mapa[k]||(mapa[k]={ilosc:0,zamowienia:{},numery:[]});
+      rec.ilosc+=Number(p.ilosc)||0;
+      rec.zamowienia[numer]=(rec.zamowienia[numer]||0)+(Number(p.ilosc)||0);
+    });
+  });
+  Object.values(mapa).forEach(rec=>{rec.numery=Object.entries(rec.zamowienia).map(([nr,ilosc])=>`${nr} × ${ilosc}`).slice(0,12);});
+  return mapa;
+}
+function agentAIPozycjeZleceniaProducenta(tryb="braki",limit=500){
+  const mode=String(tryb||"braki").toLowerCase(), zamMap=mapaZamowienDlaProduktow(), rez=rezerwacjeMagazynowe();
+  let wiersze=[];
+  if(mode==="niskie"){
+    wiersze=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>{
+      const stan=stanMagazynuId(p.id);
+      if(stan===null) return null;
+      const r=Number(rez[p.id]||0), dost=stan-r, min=progNiskiProduktu(p), target=targetStockProduktu(p,0), meta=magazynMetaProduktu(p.id);
+      if(stan>min && dost>=min) return null;
+      return {produkt:p,ilosc:Math.max(1,target-Math.max(0,dost)),stan,rezerwacje:r,dostepne:dost,meta,powod:`stan ${stan}, dostępne po rezerwacjach ${dost}, próg ${min}`,zamowienia:zamMap[String(p.id)]?.numery||[]};
+    }).filter(Boolean);
+  }else{
+    wiersze=potrzebyZatowarowania().map(x=>({produkt:x.produkt,ilosc:x.ilosc,stan:x.stan,rezerwacje:x.rezerwacje,dostepne:x.dostepne,meta:x.meta,powod:x.powod,zamowienia:zamMap[String(x.produkt.id)]?.numery||[]}));
+  }
+  return wiersze.slice(0,limit).map(x=>{
+    const p=x.produkt, meta=x.meta||{}, kod=kodOperacyjnyProduktu(p,meta), ean=eanOperacyjnyProduktu(p,meta), dostawca=agentAIDostawcaProduktu(p,meta);
+    return {
+      produktId:String(p.id),
+      kod,
+      kodProducenta:String(p.kodProducenta||p.mpn||"").trim(),
+      externalId:String(p.externalId||"").trim(),
+      sku:String(p.sku||"").trim(),
+      ean,
+      nazwa:p.nazwa||"Produkt",
+      kategoria:p.kategoria||"",
+      ilosc:Number(x.ilosc)||0,
+      stan:x.stan===null?null:Number(x.stan||0),
+      rezerwacje:Number(x.rezerwacje||0),
+      dostepne:x.dostepne===null?null:Number(x.dostepne||0),
+      iloscPotrzebna:Number(x.ilosc)||0,
+      przyjeto:0,
+      nadwyzka:0,
+      lokalizacja:meta.lokalizacja||"",
+      dostawca,
+      powod:x.powod||"",
+      zamowienia:Array.isArray(x.zamowienia)?x.zamowienia:[]
+    };
+  });
+}
+function agentAIDostawcaProduktu(p={},meta={}){
+  const kartoteka=String(meta.dostawca||"").trim();
+  if(kartoteka)return kartoteka;
+  const producent=String(p.producent||p.marka||"").trim();
+  if(producent){
+    const key=producent.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-");
+    if(key.includes("alexander"))return typeof producentPoNazwie==="function"?(producentPoNazwie("Alexander")?.name||"Alexander"):"Alexander";
+    if(key.includes("multigra"))return typeof producentPoNazwie==="function"?(producentPoNazwie("Multigra")?.name||"Multigra"):"Multigra";
+    return producent;
+  }
+  const url=String(p.producentUrl||p.sourceUrl||p.agentImportUrl||"").toLowerCase();
+  if(url.includes("alexander"))return "Alexander";
+  if(url.includes("multigra"))return "Multigra";
+  return "";
+}
+function agentAIAktywneIlosciUProducentow(){
+  const mapa={};
+  (Array.isArray(agentAIZlecenia)?agentAIZlecenia:[])
+    .filter(agentAIPlanDokumentAktywny)
+    .forEach(z=>(Array.isArray(z.pozycje)?z.pozycje:[]).forEach(p=>{
+      const id=String(p.produktId||"");
+      if(!id)return;
+      const pozostalo=Math.max(0,(Number(p.ilosc)||0)-(Number(p.przyjeto)||0));
+      mapa[id]=(mapa[id]||0)+pozostalo;
+    }));
+  return mapa;
+}
+function agentAIBrakiOperacyjne(){
+  const aktywne=agentAIAktywneIlosciUProducentow();
+  return agentAIPozycjeZleceniaProducenta("braki",1000).map(p=>{
+    const brak=Math.max(0,Number(p.ilosc)||0), wZleceniach=Math.max(0,Number(aktywne[String(p.produktId)]||0));
+    return {...p,brakCalkowity:brak,wZleceniach,pozostaloDoZamowienia:Math.max(0,brak-wZleceniach)};
+  });
+}
+function agentAIGrupujPoDostawcy(pozycje=[]){
+  const grupy={};
+  (Array.isArray(pozycje)?pozycje:[]).forEach(p=>{const d=String(p.dostawca||"Bez przypisanego dostawcy").trim()||"Bez przypisanego dostawcy";(grupy[d]||(grupy[d]=[])).push(p);});
+  return Object.entries(grupy).sort(([a],[b])=>a.localeCompare(b,"pl"));
+}
+function agentAIFormatZleceniaProducenta(zlecenie){
+  if(!zlecenie||!Array.isArray(zlecenie.pozycje)||!zlecenie.pozycje.length) return "Nie ma pozycji do zlecenia.";
+  const grupy={};
+  zlecenie.pozycje.forEach(x=>{const d=x.dostawca||"Bez przypisanego dostawcy";(grupy[d]||(grupy[d]=[])).push(x);});
+  return [
+    `🧾 ${zlecenie.numer||zlecenie.id} — ${zlecenie.tryb==="niskie"?"zlecenie uzupełniające":"zlecenie pod aktywne zamówienia"}`,
+    `Status: ${zlecenie.status||"szkic"} • pozycji: ${zlecenie.pozycje.length} • sztuk: ${zlecenie.pozycje.reduce((s,x)=>s+Number(x.ilosc||0),0)}`,
+    "",
+    ...Object.entries(grupy).map(([d,items])=>[
+      `Dostawca: ${d}`,
+      ...items.map((x,i)=>`${i+1}. ${x.nazwa} — ${x.ilosc} szt. — kod: ${agentAIKodPozycjiProducenta(x)||"BRAK — uzupełnij kartotekę"} • lok.: ${x.lokalizacja||"—"}${x.zamowienia?.length?` • zam.: ${x.zamowienia.join(", ")}`:""}`),
+      ""
+    ].join("\n")),
+    "Zlecenie zapisano w tabeli operacyjnej agenta. Nie zostało wysłane automatycznie do dostawcy."
+  ].join("\n").trim();
+}
+function agentAIStatusRoboczyProducenta(status="szkic"){
+  return ["szkic","do sprawdzenia","zaakceptowane"].includes(String(status||"szkic").toLowerCase());
+}
+function agentAIDostawcaZlecenia(z={}){
+  return String(z.supplier||z.dostawcy?.[0]||z.pozycje?.[0]?.dostawca||"Bez przypisanego dostawcy").trim()||"Bez przypisanego dostawcy";
+}
+function producentKlucz(v=""){return String(v||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");}
+function producentPoNazwie(name=""){
+  const key=producentKlucz(name);return (producenciKartoteka||[]).find(p=>producentKlucz(p.name||p.nazwa)===key)||null;
+}
+function producentDaneZFormularza(form,base={}){
+  const f=new FormData(form),name=String(f.get("name")||"").trim();if(!name)return null;
+  const {emailSubject:_staryTemat,emailIntro:_staryWstep,...safeBase}=base;
+  return {...safeBase,id:base.id||`producer-${producentKlucz(name)||Date.now().toString(36)}`,name,legalName:String(f.get("legalName")||"").trim(),orderEmail:String(f.get("orderEmail")||"").trim().toLowerCase(),contactPerson:String(f.get("contactPerson")||"").trim(),phone:String(f.get("phone")||"").trim(),website:String(f.get("website")||"").trim(),address:String(f.get("address")||"").trim(),nip:String(f.get("nip")||"").trim(),leadTimeDays:Math.max(0,Number(f.get("leadTimeDays"))||0),minimumOrder:String(f.get("minimumOrder")||"").trim(),paymentTerms:String(f.get("paymentTerms")||"").trim(),notes:String(f.get("notes")||"").trim(),active:f.get("active")==="on",updatedAt:new Date().toISOString()};
+}
+function producentDodaj(e){
+  e.preventDefault();const p=producentDaneZFormularza(e.target,{});if(!p){toast("Podaj nazwę producenta");return;}
+  if(producentPoNazwie(p.name)){toast("Producent o tej nazwie już istnieje");return;}
+  producenciKartoteka=[p,...(producenciKartoteka||[])];zapiszLS("artway_producenci",producenciKartoteka);zapiszHistorieAgenta("producent",`Dodano producenta ${p.name}`,{producentId:p.id});toast("Producent dodany ✅");renderuj();
+}
+function producentZapisz(e,id){
+  e.preventDefault();const old=(producenciKartoteka||[]).find(p=>String(p.id)===String(id));if(!old)return;
+  const p=producentDaneZFormularza(e.target,old);if(!p)return;
+  producenciKartoteka=(producenciKartoteka||[]).map(x=>String(x.id)===String(id)?p:x);zapiszLS("artway_producenci",producenciKartoteka);zapiszHistorieAgenta("producent",`Zaktualizowano kartotekę ${p.name}`,{producentId:p.id,email:!!p.orderEmail});toast("Kartoteka producenta zapisana ✅");renderuj();
+}
+function producentUsun(id){
+  const p=(producenciKartoteka||[]).find(x=>String(x.id)===String(id));if(!p)return;
+  const powiazane=(agentAIZlecenia||[]).filter(z=>producentKlucz(agentAIDostawcaZlecenia(z))===producentKlucz(p.name));
+  const aktywne=powiazane.filter(agentAIPlanDokumentAktywny);
+  if(aktywne.length){
+    producenciKartoteka=(producenciKartoteka||[]).map(x=>String(x.id)===String(id)?{...x,active:false,archivedAt:new Date().toISOString()}:x);
+    zapiszLS("artway_producenci",producenciKartoteka);zapiszHistorieAgenta("producent",`Dezaktywowano kartotekę ${p.name} — istnieją aktywne dokumenty`,{producentId:p.id,aktywne:aktywne.length});toast(`Kartoteka ma ${aktywne.length} aktywne zamówienie(a) — została bezpiecznie dezaktywowana`);renderuj();return;
+  }
+  producenciKartoteka=(producenciKartoteka||[]).filter(x=>String(x.id)!==String(id));zapiszLS("artway_producenci",producenciKartoteka);zapiszHistorieAgenta("producent",`Usunięto kartotekę ${p.name}`,{producentId:p.id});toast("Kartoteka producenta usunięta");renderuj();
+}
+function producentFormHTML(p={}){
+  const edit=!!p.id;return `<form class="producer-record-card" onsubmit="${edit?`producentZapisz(event,${jsArg(p.id)})`:`producentDodaj(event)`}"><div class="producer-record-head"><div><span class="supplier-chip">🏭 ${esc(p.name||"Nowy producent")}</span><h3>${edit?"Dane i kontakt":"Dodaj producenta"}</h3></div>${edit?`<span class="lvl ${p.orderEmail?"lvl-ok":"lvl-ostrzezenie"}">${p.orderEmail?"e-mail gotowy":"brak e-maila zamówień"}</span>`:""}</div><div class="producer-form-grid"><div class="f-group"><label>Nazwa producenta *</label><input name="name" required value="${esc(p.name||"")}" placeholder="np. Alexander"></div><div class="f-group"><label>Pełna nazwa firmy</label><input name="legalName" value="${esc(p.legalName||"")}"></div><div class="f-group"><label>E-mail do zamówień *</label><input name="orderEmail" type="email" value="${esc(p.orderEmail||"")}" placeholder="zamowienia@producent.pl"></div><div class="f-group"><label>Osoba kontaktowa</label><input name="contactPerson" value="${esc(p.contactPerson||"")}"></div><div class="f-group"><label>Telefon</label><input name="phone" value="${esc(p.phone||"")}"></div><div class="f-group"><label>Strona internetowa</label><input name="website" type="url" value="${esc(p.website||"")}" placeholder="https://..."></div><div class="f-group"><label>NIP</label><input name="nip" value="${esc(p.nip||"")}"></div><div class="f-group"><label>Adres</label><input name="address" value="${esc(p.address||"")}"></div><div class="f-group"><label>Standardowy czas realizacji (dni)</label><input name="leadTimeDays" type="number" min="0" value="${esc(p.leadTimeDays??3)}"></div><div class="f-group"><label>Minimum zamówienia</label><input name="minimumOrder" value="${esc(p.minimumOrder||"")}" placeholder="np. 500 zł"></div><div class="f-group"><label>Warunki płatności</label><input name="paymentTerms" value="${esc(p.paymentTerms||"")}" placeholder="np. przelew 7 dni"></div><label class="check"><input name="active" type="checkbox" ${p.active!==false?"checked":""}> Aktywny producent</label></div><details ${edit?"":"open"}><summary>Wysyłka i notatki</summary><div class="backend-note"><b>Stały bezpieczny szablon e-maila</b><p>Temat i treść powstają na serwerze z zatwierdzonej rewizji. Wiadomość zawiera wyłącznie kod, nazwę i zamawianą ilość — bez cen i wartości. Pełny podgląd zobaczysz w Planie zatowarowania przed wysłaniem.</p></div><div class="f-group"><label>Notatki wewnętrzne</label><textarea name="notes" rows="3">${esc(p.notes||"")}</textarea></div></details><div class="producer-record-actions"><button class="btn" type="submit">${edit?"💾 Zapisz kartotekę":"➕ Dodaj producenta"}</button>${edit&&p.website?`<a class="btn ghost" href="${esc(p.website)}" target="_blank" rel="noopener">🌐 Otwórz stronę</a>`:""}${edit?`<button class="btn danger" type="button" onclick="if(confirm('Usunąć tę kartotekę producenta?'))producentUsun(${jsArg(p.id)})">Usuń</button>`:""}</div></form>`;
+}
+function producenciKartotekaPanelHTML(){
+  const list=(producenciKartoteka||[]).slice().sort((a,b)=>String(a.name||"").localeCompare(String(b.name||""),"pl")),ready=list.filter(p=>p.orderEmail&&p.active!==false).length;
+  const summary=list.map(p=>{const docs=(agentAIZlecenia||[]).filter(z=>agentAIDostawcaZlecenia(z)===p.name),open=docs.filter(agentAIPlanDokumentAktywny).length,last=docs.slice().sort((a,b)=>String(b.data||"").localeCompare(String(a.data||"")))[0];return `<div class="producer-summary-card"><div><span class="supplier-chip">🏭 ${esc(p.name)}</span><b>${esc(p.contactPerson||p.legalName||"Kontakt nieuzupełniony")}</b><small>${p.orderEmail?`✉️ ${esc(p.orderEmail)}`:"brak e-maila zamówień"}${p.phone?` • 📞 ${esc(p.phone)}`:""}</small></div><div><strong>${docs.length}</strong><small>zamówień • ${open} bieżących</small>${last?`<small>ostatnie: ${esc(last.numer||last.id)}</small>`:""}</div></div>`;}).join("");
+  return `<div class="panel producer-directory"><div class="order-section-head"><div><span class="order-pro-label">Kartoteka zakupowa</span><h2 style="margin-top:.25rem">🏭 Producenci i kontakty</h2><p class="order-detail-lead">Adres e-mail z tej kartoteki jest jedynym adresem używanym do wysyłki zatwierdzonego zamówienia. Dane i kontakty synchronizują się ze wspólną bazą, a bezcenowy szablon wiadomości jest stały i chroniony po stronie serwera.</p></div><span class="lvl ${ready===list.length&&list.length?"lvl-ok":"lvl-ostrzezenie"}">${ready}/${list.length} gotowych do e-maila</span></div><div class="producer-directory-summary">${summary||`<div class="backend-note">Brak producentów w kartotece.</div>`}</div><div class="producer-directory-list">${list.map(producentFormHTML).join("")}${producentFormHTML({})}</div></div>`;
+}
+let agentAIPlanUzgadnianie=false,agentAIPlanOstatnieAutomatyczneUzgodnienie=0,agentAIPlanAutomatycznyTimer=null;
+function agentAIPlanUstawStanAktualizacji(trwa=false){document.querySelectorAll("[data-plan-refresh]").forEach(button=>{button.disabled=!!trwa;button.setAttribute("aria-busy",trwa?"true":"false");button.textContent=trwa?"⏳ Sprawdzam stan i zamówienia…":"↻ Aktualizuj plan";});}
+function agentAIPlanZaplanujAutomatyczneUzgodnienie(){if(agentAIPlanUzgadnianie||agentAIPlanAutomatycznyTimer||Date.now()-agentAIPlanOstatnieAutomatyczneUzgodnienie<15*60*1000)return false;agentAIPlanAutomatycznyTimer=setTimeout(async()=>{agentAIPlanAutomatycznyTimer=null;if(!String(location.hash||"").includes("/admin/magazyn/plan")||!maUprawnieniaZapisuChmury())return;agentAIPlanOstatnieAutomatyczneUzgodnienie=Date.now();await agentAIUzgodnijPlanZSerwerem({silent:true,source:"admin-restock-open"}).catch(()=>{});},350);return true;}
+async function agentAIUzgodnijPlanZSerwerem(opcje={}){
+  if(agentAIPlanUzgadnianie)return Array.isArray(agentAIZlecenia)?agentAIZlecenia:[];
+  if(!maUprawnieniaZapisuChmury()){if(!opcje.silent)toast("Połącz panel administratora ze wspólną bazą, aby uzgodnić Plan zatowarowania");return [];}
+  agentAIPlanUzgadnianie=true;agentAIPlanUstawStanAktualizacji(true);
+  try{
+    const d=await chmura("supplier-order-reconcile",{method:"POST",body:{source:String(opcje.source||"admin-restock-plan")},timeout:60000});
+    if(d.settings&&Object.keys(d.settings).length)nalozWspolneUstawienia(d.settings);
+    agentAIPlanZapiszOdpowiedzSerwera(d);
+    if(d.rev!==undefined)zapiszLS("artway_chmura_rev",d.rev||0);
+    chmuraStan={...chmuraStan,dostepna:true,admin:true,rev:d.rev||chmuraStan.rev||0,updated_at:d.updated_at||null,error:""};
+    zastosujUstawienia();zbudujProdukty();odswiezMenu();odswiezKoszyk();agentAIPlanOdswiezWidok();
+    const dokumenty=Array.isArray(agentAIZlecenia)?agentAIZlecenia:[];
+    agentAIPlanOstatnieAutomatyczneUzgodnienie=Date.now();
+    if(!opcje.silent){
+      const wynik=d.reconciliation||{},utworzone=Array.isArray(wynik.created)?wynik.created.length:Number(wynik.created||0),zmienione=Array.isArray(wynik.updated)?wynik.updated.length:Number(wynik.updated||0);
+      toast(`✅ Plan zaktualizowany • ${dokumenty.filter(agentAIPlanDokumentAktywny).length} aktywnych dokumentów • nowe ${utworzone} • poprawione ${zmienione}`);
+    }
+    return dokumenty;
+  }catch(e){if(!opcje.silent)toast(`⚠️ Nie udało się uzgodnić Planu: ${e.message||e}`);throw e;}
+  finally{agentAIPlanUzgadnianie=false;agentAIPlanUstawStanAktualizacji(false);}
+}
+async function agentAIZatwierdzZlecenie(id){
+  const z=(agentAIZlecenia||[]).find(x=>String(x.id)===String(id));if(!z){toast("Nie znaleziono szkicu producenta");return;}
+  try{const d=await chmura("supplier-order-approve",{method:"POST",body:{draftId:z.id,expectedRevision:Math.max(1,Number(z.revision)||1)},timeout:45000});await agentAIPlanOdswiezPoOperacji(d,`✅ Zatwierdzono wersję ${Math.max(1,Number(d.draft?.revision||z.revision)||1)}`);}catch(e){await agentAIPlanBladOperacji(e,"Nie zatwierdzono wersji");}
+}
+async function agentAIUsunZlecenie(id){
+  const z=(agentAIZlecenia||[]).find(x=>String(x.id)===String(id));if(!z){toast("Nie znaleziono szkicu producenta");return;}
+  if(!confirm(`Anulować szkic ${z.numer||z.id}? Dokument pozostanie w historii i nie zostanie wysłany.`))return;
+  try{const d=await chmura("supplier-order-cancel",{method:"POST",body:{draftId:z.id,expectedRevision:Math.max(1,Number(z.revision)||1)},timeout:45000});await agentAIPlanOdswiezPoOperacji(d,"✅ Szkic anulowany i przeniesiony do historii");}catch(e){await agentAIPlanBladOperacji(e,"Nie anulowano szkicu");}
+}
+async function agentAIPrzygotujKorekteZlecenia(id){
+  const z=(agentAIZlecenia||[]).find(x=>String(x.id)===String(id));if(!z){toast("Nie znaleziono zamówienia producenta");return;}
+  const reason=prompt("Dlaczego przygotowujesz korektę? Poprzedniego dostarczonego e-maila nie da się usunąć — pozostanie w historii audytowej.","Korekta ilości lub pozycji zamówienia");
+  if(reason===null)return;if(String(reason).trim().length<3){toast("Podaj krótki powód korekty");return;}
+  if(!confirm(`Utworzyć nową wersję korekty dokumentu ${z.numer||z.id}?\n\nPoprzednia wysyłka pozostanie w historii. Bieżący status wróci do kontroli, a po zmianach trzeba będzie ponownie zatwierdzić i wysłać dokument.`))return;
+  try{const d=await chmura("supplier-order-correction",{method:"POST",body:{draftId:z.id,expectedRevision:Math.max(1,Number(z.revision)||1),reason:String(reason).trim()},timeout:45000});await agentAIPlanOdswiezPoOperacji(d,`✅ Utworzono korektę — wersja ${Math.max(1,Number(d.draft?.revision)||1)} czeka na kontrolę`);}catch(e){await agentAIPlanBladOperacji(e,"Nie utworzono korekty");}
+}
+async function agentAIPonowEmailProducenta(id){
+  const z=(agentAIZlecenia||[]).find(x=>String(x.id)===String(id));if(!z){toast("Nie znaleziono zamówienia producenta");return;}
+  const reason=prompt("Podaj powód ponownej wysyłki identycznego dokumentu:","Producent prosi o ponowne przesłanie wiadomości");
+  if(reason===null)return;if(String(reason).trim().length<3){toast("Podaj krótki powód ponownej wysyłki");return;}
+  return agentAIWyslijZlecenieEmail(id,{forceResend:true,resendReason:String(reason).trim()});
+}
+function agentAIPobierzZlecenieCSV(id){
+  const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
+  if(!z){toast("Nie znaleziono zlecenia producenta");return;}
+  const pozycje=(z.pozycje||[]).map(p=>({...p,kodEksportowy:agentAIKodPozycjiProducenta(p)})),braki=pozycje.filter(p=>!p.kodEksportowy).map(p=>({nazwa:p.nazwa||"Produkt"}));
+  if(agentAIEksportZablokowanyPrzezBrakKodow(braki,"Eksport tabeli zamówienia"))return false;
+  const nag=["kod","nazwa","zamawiana_ilosc"];
+  const csv=[nag.join(";"),...pozycje.map(p=>[p.kodEksportowy,p.nazwa,p.ilosc].map(csvPole).join(";"))].join("\n");
+  pobierzPlik(`zlecenie-producenta-${String(z.numer||z.id).replace(/[^a-z0-9_-]+/gi,"-")}.csv`,"\uFEFF"+csv,"text/csv");
+  return true;
+}
+function agentAIEanPoprawny(v){
+  const kod=tylkoCyfry(v);if(![8,12,13,14].includes(kod.length))return false;
+  const cyfry=[...kod].map(Number),kontrolna=cyfry.pop(),suma=cyfry.slice().reverse().reduce((s,n,i)=>s+n*(i%2===0?3:1),0);
+  return (10-(suma%10))%10===kontrolna;
+}
+function agentAIBiznesowyIdentyfikator(v){
+  const wartosc=String(v||"").trim();
+  if(!wartosc||wartosc.length>80||/^(?:-|—|brak|n\/a|null|undefined)$/i.test(wartosc)||/\b(?:lub|albo|or)\b/i.test(wartosc))return "";
+  return /^[\p{L}\p{N}][\p{L}\p{N}._\/-]{0,79}$/u.test(wartosc)?wartosc:"";
+}
+function agentAIStabilnyIdentyfikatorPozycji(p={},produktWejscie=null){
+  const produkt=produktWejscie&&typeof produktWejscie==="object"?produktWejscie:(typeof produktMagazynowy==="function"?(produktMagazynowy(p.produktId)||{}):{}),meta=typeof magazynMetaProduktu==="function"?(magazynMetaProduktu(p.produktId)||{}):{};
+  const lokalneId=new Set([p.id,p.produktId,produkt.id].map(v=>String(v||"").trim().toUpperCase()).filter(Boolean));
+  const jawny=v=>agentAIBiznesowyIdentyfikator(v),ogolny=v=>{const wartosc=jawny(v);return wartosc&&!lokalneId.has(wartosc.toUpperCase())?wartosc:"";};
+  const grupy=[
+    ["EXTERNAL_ID",[p.externalId,produkt.externalId]],
+    ["SKU",[p.sku,produkt.sku]],
+    ["kod producenta",[p.kodProducenta,p.mpn,produkt.kodProducenta,produkt.mpn]]
+  ];
+  for(const [typ,wartosci] of grupy){const wartosc=wartosci.map(jawny).find(Boolean);if(wartosc)return {wartosc,typ};}
+  const kodyOgolne=[
+    ["kod dostawcy",[p.kodDostawcy,p.supplierCode,p.vendorCode,produkt.kodDostawcy,produkt.supplierCode,produkt.vendorCode,meta.kodDostawcy]],
+    ["kod katalogowy",[p.kodKatalogowy,p.catalogCode,produkt.kodKatalogowy,produkt.catalogCode,meta.kodKatalogowy]],
+    ["kod",[p.kod,produkt.kod,meta.kod]]
+  ];
+  for(const [typ,wartosci] of kodyOgolne){const wartosc=wartosci.map(ogolny).find(Boolean);if(wartosc)return {wartosc,typ};}
+  const ean=[p.ean,p.gtin,produkt.gtin,produkt.ean].map(tylkoCyfry).find(agentAIEanPoprawny);
+  if(ean)return {wartosc:ean,typ:"EAN"};
+  return {wartosc:"",typ:""};
+}
+function agentAIKodPozycjiProducenta(p={},produkt=null){return agentAIStabilnyIdentyfikatorPozycji(p,produkt).wartosc;}
+function agentAIIdentyfikatorOptimaPozycji(p={},produkt={}){
+  const meta=typeof magazynMetaProduktu==="function"?(magazynMetaProduktu(p.produktId)||{}):{},jawny=v=>agentAIBiznesowyIdentyfikator(v);
+  const grupy=[
+    ["kod Comarch Optima",[p.optimaCode,p.supplierOptimaCode,p.kodOptima,produkt.optimaCode,produkt.supplierOptimaCode,produkt.kodOptima,meta.optimaCode,meta.supplierOptimaCode,meta.kodOptima]],
+    ["kod dostawcy",[p.kodDostawcy,p.supplierCode,p.vendorCode,produkt.kodDostawcy,produkt.supplierCode,produkt.vendorCode,meta.kodDostawcy,meta.supplierCode,meta.vendorCode]],
+    ["kod producenta",[p.kodProducenta,p.mpn,produkt.kodProducenta,produkt.mpn]]
+  ];
+  for(const [typ,wartosci] of grupy){const wartosc=wartosci.map(jawny).find(Boolean);if(wartosc)return {wartosc,typ};}
+  const ean=[p.ean,p.gtin,produkt.gtin,produkt.ean].map(tylkoCyfry).find(agentAIEanPoprawny);
+  return ean?{wartosc:ean,typ:"EAN"}:{wartosc:"",typ:""};
+}
+function agentAIPrzygotujOptimaZlecenie(pozycje=[],productFinder){
+  const znajdz=typeof productFinder==="function"?productFinder:(id=>typeof produktMagazynowy==="function"?(produktMagazynowy(id)||{}):{}),wiersze=[],braki=[];
+  (Array.isArray(pozycje)?pozycje:[]).forEach(p=>{
+    const produkt=znajdz(p.produktId)||{},identyfikator=agentAIIdentyfikatorOptimaPozycji(p,produkt),ilosc=Math.max(0,Number(p.ilosc)||0);
+    if(!identyfikator.wartosc){braki.push({produktId:String(p.produktId||""),nazwa:String(p.nazwa||produkt.nazwa||"Produkt bez nazwy")});return;}
+    if(!ilosc)return;
+    wiersze.push({towar:identyfikator.wartosc,ilosc,typ:identyfikator.typ,nazwa:String(p.nazwa||produkt.nazwa||"Produkt")});
+  });
+  return {wiersze,braki,tresc:wiersze.map(x=>`${String(x.towar).replace(/[;\r\n]/g,"")};${x.ilosc};`).join("\r\n")};
+}
+function agentAIEksportZablokowanyPrzezBrakKodow(braki=[],tytul="Eksport Planu"){
+  const lista=(Array.isArray(braki)?braki:[]).filter(Boolean);if(!lista.length)return false;
+  agentAIOtworzModal(`${tytul} wymaga uzupełnienia kodów`,`<div class="backend-note warn"><b>Plik nie został utworzony.</b><p>${lista.length} pozycji nie ma jednoznacznego EXTERNAL_ID, SKU, kodu producenta, innego jawnego kodu ani poprawnego EAN. Uzupełnij kartoteki — wewnętrzne ID sklepu nigdy nie jest automatycznym kodem eksportowym.</p></div><ul class="supplier-optima-missing">${lista.map(x=>`<li>${esc(x.nazwa||x.name||"Produkt")}</li>`).join("")}</ul>`,"Po poprawie kartotek uruchom eksport ponownie.");
+  toast(`Uzupełnij stabilny kod w ${lista.length} pozycjach — plik nie został utworzony`);return true;
+}
+let agentAIModalPoprzedniFocus=null;
+function agentAIZamknijModal(){
+  const modal=document.getElementById("agentSupplierPreviewModal");
+  if(modal)modal.remove();
+  document.removeEventListener("keydown",agentAIModalKlawisz);
+  if(agentAIModalPoprzedniFocus&&typeof agentAIModalPoprzedniFocus.focus==="function")agentAIModalPoprzedniFocus.focus();
+  agentAIModalPoprzedniFocus=null;
+}
+function agentAIModalKlawisz(e){if(e.key==="Escape"){e.preventDefault();agentAIZamknijModal();}}
+function agentAIOtworzModal(tytul,trescHTML,opis=""){
+  agentAIZamknijModal();
+  agentAIModalPoprzedniFocus=document.activeElement;
+  const modal=document.createElement("div");
+  modal.id="agentSupplierPreviewModal";modal.className="supplier-preview-overlay";modal.setAttribute("role","dialog");modal.setAttribute("aria-modal","true");modal.setAttribute("aria-labelledby","agentSupplierPreviewTitle");modal.tabIndex=-1;
+  modal.innerHTML=`<section class="supplier-preview-modal"><header><div><span class="order-pro-label">Bezpieczny podgląd — nic nie zostanie wysłane</span><h2 id="agentSupplierPreviewTitle">${esc(tytul)}</h2>${opis?`<p>${esc(opis)}</p>`:""}</div><button type="button" class="btn ghost supplier-preview-close" aria-label="Zamknij podgląd" onclick="agentAIZamknijModal()">✕</button></header><div class="supplier-preview-body">${trescHTML}</div><footer><button type="button" class="btn" onclick="agentAIZamknijModal()">Zamknij podgląd</button></footer></section>`;
+  modal.addEventListener("click",e=>{if(e.target===modal)agentAIZamknijModal();});
+  document.body.appendChild(modal);document.addEventListener("keydown",agentAIModalKlawisz);
+  modal.querySelector(".supplier-preview-close")?.focus();
+}
+function agentAIEmailProducentaHTML(z,dostawca,pozycje){
+  const przygotowane=(Array.isArray(pozycje)?pozycje:[]).map(p=>({...p,kodEksportowy:agentAIKodPozycjiProducenta(p)})),braki=przygotowane.filter(p=>!p.kodEksportowy),sztuk=przygotowane.reduce((s,p)=>s+Math.max(0,Number(p.ilosc)||0),0),rows=przygotowane.map(p=>`<tr><td><b>${esc(p.kodEksportowy||"BRAK KODU")}</b></td><td>${esc(p.nazwa||"Produkt")}</td><td><b>${esc(Number(p.ilosc)||0)}</b></td></tr>`).join("");
+  const key=producentKlucz(dostawca),optima=key.includes("alexander")||key.includes("multigra");
+  return `<div class="supplier-email-sheet"><div class="supplier-email-meta"><span>Do: <b>${esc(producentPoNazwie(dostawca)?.orderEmail||"adres nieuzupełniony")}</b></span><span>Temat: <b>${esc(`Zamówienie ${z.numer||z.id} — Artway-TM`)}</b></span></div>${braki.length?`<div class="backend-note warn"><b>Wysyłka zablokowana:</b> ${braki.length} pozycji wymaga uzupełnienia kodu w kartotece.</div>`:""}<div class="supplier-email-message"><header class="supplier-email-brand"><div><span>Artway-TM • zamówienie</span><h3>${esc(z.numer||z.id)}</h3></div><small>${esc(dostawca)}<br>${przygotowane.length} pozycji • ${sztuk} szt.</small></header><div class="supplier-email-content"><p>Cześć,<br>poniżej dzisiejsze zamówienie.</p><div class="supplier-email-order-table"><table><thead><tr><th>Kod produktu</th><th>Nazwa</th><th>Zamawiana ilość</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td colspan="2">Razem</td><td><b>${sztuk} szt.</b></td></tr></tfoot></table></div><p>Pozdrowienia dla całej ekipy!<br><b>Artway-TM</b></p>${optima?`<small class="supplier-optima-note"><b>Załącznik Comarch ERP Optima:</b> Ogólne → Kolektor danych → Importuj pozycje → wskaż TXT → zaznacz „Pobieraj ceny z programu”. Plik bez nagłówka; ceny są celowo puste.</small>`:""}</div></div></div>`;
+}
+function agentAIPodgladEmailaProducenta(id,dostawca){
+  const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
+  if(!z){toast("Nie znaleziono zamówienia producenta");return;}
+  const pozycje=(z.pozycje||[]).filter(p=>String(p.dostawca||agentAIDostawcaZlecenia(z))===String(dostawca));
+  if(!pozycje.length){toast("Brak pozycji tego producenta");return;}
+  agentAIOtworzModal(`E-mail do: ${dostawca}`,agentAIEmailProducentaHTML(z,dostawca,pozycje),`${pozycje.length} pozycji • wersja ${Math.max(1,Number(z.revision)||1)}`);
+}
+function agentAIPobierzOptimaTXT(id,dostawca){
+  const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
+  if(!z){toast("Nie znaleziono zamówienia producenta");return;}
+  const pozycje=(z.pozycje||[]).filter(p=>String(p.dostawca||agentAIDostawcaZlecenia(z))===String(dostawca)),dane=agentAIPrzygotujOptimaZlecenie(pozycje);
+  if(agentAIEksportZablokowanyPrzezBrakKodow(dane.braki,"Eksport Comarch ERP Optima"))return false;
+  if(dane.wiersze.length){
+    const producent=String(dostawca||"producent").replace(/[^a-z0-9_-]+/gi,"-"),numer=String(z.numer||z.id).replace(/[^a-z0-9_-]+/gi,"-");
+    const key=producentKlucz(dostawca),optima=key.includes("alexander")||key.includes("multigra");
+    pobierzPlik(`${producent}-${optima?"Optima":"zamowienie"}-${numer}.txt`,dane.tresc,"text/plain");
+    toast(`${optima?"Comarch Optima":"Plik bezcenowy"}: pobrano ${dane.wiersze.length} pozycji`);return true;
+  }
+  toast("Brak pozycji możliwych do eksportu do Comarch Optima");return false;
+}
+function agentAIPlanZapiszOdpowiedzSerwera(d={}){
+  const lista=Array.isArray(d.supplierOrders)?d.supplierOrders:null;
+  if(lista)agentAIZlecenia=lista;
+  else if(d.draft&&d.draft.id){
+    const istnieje=(agentAIZlecenia||[]).some(x=>String(x.id)===String(d.draft.id));
+    agentAIZlecenia=istnieje?(agentAIZlecenia||[]).map(x=>String(x.id)===String(d.draft.id)?d.draft:x):[d.draft,...(agentAIZlecenia||[])];
+  }
+  const poprzedni=chmuraWczytywanie;chmuraWczytywanie=true;
+  try{zapiszLS("artway_agent_ai_zlecenia",agentAIZlecenia);}finally{chmuraWczytywanie=poprzedni;}
+}
+async function agentAIPlanOdswiezPoOperacji(d={},komunikat="Zapisano zmianę"){
+  agentAIPlanZapiszOdpowiedzSerwera(d);
+  const pobrano=await chmuraWczytajStan().catch(()=>false);
+  if(!pobrano&&d.rev!==undefined){
+    chmuraStan={...chmuraStan,rev:Number(d.rev)||chmuraStan.rev,updated_at:d.updated_at||chmuraStan.updated_at};
+    const poprzedni=chmuraWczytywanie;chmuraWczytywanie=true;try{zapiszLS("artway_chmura_rev",Number(d.rev)||0);}finally{chmuraWczytywanie=poprzedni;}
+  }
+  toast(komunikat);if(typeof odswiezPlanZatowarowaniaWidoku!=="function"||!odswiezPlanZatowarowaniaWidoku())renderuj();return d;
+}
+async function agentAIPlanBladOperacji(e,prefix="Nie zapisano zmiany"){
+  if(Number(e?.status)===409||String(e?.code||"").includes("conflict")){
+    toast("⚠️ Szkic zmienił się na innym urządzeniu. Pobieram aktualną wersję…");
+    await chmuraPobierzWszystko().catch(()=>{});return;
+  }
+  toast(`⚠️ ${prefix}: ${e?.message||e}`);
+}
+function agentAIPlanProduktPoReferencji(value=""){
+  const raw=String(value||"").trim(),id=raw.split(/\s*[•|]\s*/)[0].trim(),key=normalizujSzukanyTekst(raw).replace(/\s+/g,"");
+  const produkty=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  return produkty.find(p=>String(p.id)===id)||produkty.find(p=>[p.externalId,p.sku,p.kodProducenta,p.mpn,p.gtin,p.ean].some(v=>normalizujSzukanyTekst(v).replace(/\s+/g,"")===key))||produkty.find(p=>normalizujSzukanyTekst(p.nazwa)===normalizujSzukanyTekst(raw));
+}
+function agentAIPlanDostawcy(){
+  const zProduktow=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>agentAIDostawcaProduktu(p,magazynMetaProduktu(p.id))).filter(Boolean);
+  return [...new Set([...(producenciKartoteka||[]).filter(p=>p.active!==false).map(p=>p.name||p.nazwa),...(agentAIZlecenia||[]).map(agentAIDostawcaZlecenia),...zProduktow].map(x=>String(x||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,"pl"));
+}
+async function agentAIPlanDodajPozycje(event){
+  event.preventDefault();const form=event.currentTarget,f=new FormData(form),supplier=String(f.get("supplier")||"").trim(),produkt=agentAIPlanProduktPoReferencji(f.get("product")||""),quantity=Math.max(1,parseInt(String(f.get("quantity")||1).replace(/[^\d-]/g,""),10)||1);
+  if(!supplier){toast("Wybierz producenta");return false;}if(!produkt){toast("Wybierz istniejący produkt po ID, EXTERNAL_ID, SKU, EAN lub nazwie");return false;}
+  const draft=(agentAIZlecenia||[]).find(z=>agentAIPlanDokumentAktywny(z)&&agentAIStatusRoboczyProducenta(z.status)&&producentKlucz(agentAIDostawcaZlecenia(z))===producentKlucz(supplier));
+  const line=(draft?.pozycje||[]).find(p=>String(p.produktId)===String(produkt.id)),minimum=Number(line?.iloscPotrzebna||0),finalQuantity=Math.max(minimum,quantity),button=form.querySelector('button[type="submit"]');
+  if(button)button.disabled=true;
+  try{
+    const body={supplier,productId:String(produkt.id),quantity:finalQuantity,product:{externalId:String(produkt.externalId||""),sku:String(produkt.sku||""),kodProducenta:String(produkt.kodProducenta||produkt.mpn||""),ean:String(produkt.gtin||produkt.ean||""),nazwa:String(produkt.nazwa||"Produkt")}};
+    if(draft){body.draftId=draft.id;body.expectedRevision=Math.max(1,Number(draft.revision)||1);}
+    const d=await chmura("supplier-order-line-upsert",{method:"POST",body,timeout:45000});
+    form.reset();await agentAIPlanOdswiezPoOperacji(d,`✅ ${produkt.nazwa}: ${finalQuantity} szt. w szkicu ${supplier}`);
+  }catch(e){await agentAIPlanBladOperacji(e,"Nie dodano pozycji");}finally{if(button?.isConnected)button.disabled=false;}
+  return false;
+}
+function agentAIPlanReczneDodanieHTML(){
+  const produkty=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).slice().sort((a,b)=>String(a.nazwa||"").localeCompare(String(b.nazwa||""),"pl")),dostawcy=agentAIPlanDostawcy();
+  return `<details class="supplier-manual-add"><summary>➕ Dodaj ręcznie pozycję do szkicu</summary><form onsubmit="return agentAIPlanDodajPozycje(event)"><label>Producent<select name="supplier" required><option value="">Wybierz producenta…</option>${dostawcy.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join("")}</select></label><label class="supplier-manual-product">Produkt<input name="product" list="supplierRestockProducts" required autocomplete="off" placeholder="ID, EXTERNAL_ID, SKU, EAN lub dokładna nazwa"><datalist id="supplierRestockProducts">${produkty.slice(0,3000).map(p=>`<option value="${esc(`${p.id} • ${p.externalId||p.sku||p.kodProducenta||p.gtin||p.ean||"bez kodu"} • ${p.nazwa||"Produkt"}`)}"></option>`).join("")}</datalist></label><label>Łączna ilość w szkicu<input name="quantity" type="number" min="1" step="1" value="1" required></label><button class="btn" type="submit">Dodaj do właściwego szkicu</button></form><small>Zmiana aktualizuje właściwy szkic i tworzy nową rewizję. Nic nie jest wysyłane automatycznie.</small></details>`;
+}
+function agentAIZlecenieTabelaDostawcyHTML(z,dostawca,pozycje){
+  const suma=pozycje.reduce((s,p)=>s+Number(p.ilosc||0),0),producer=producentPoNazwie(dostawca),editable=agentAIStatusRoboczyProducenta(z.status),key=producentKlucz(dostawca),optima=key.includes("alexander")||key.includes("multigra"),optimaDane=optima?agentAIPrzygotujOptimaZlecenie(pozycje):null;
+  return `<section class="supplier-split-card"><header><div><span class="supplier-chip">🏭 ${esc(dostawca)}</span><h4>Zamówienie: ${pozycje.length} pozycji / ${suma} szt.</h4><small>${producer?.orderEmail?`✉️ ${esc(producer.orderEmail)}`:"uzupełnij e-mail w kartotece producenta"}</small></div><div class="diag-actions"><button class="btn" type="button" onclick="agentAIPodgladEmailaProducenta(${jsArg(z.id)},${jsArg(dostawca)})">👁️ E-mail i tabela</button><button class="btn ghost" type="button" onclick="agentAIPobierzOptimaTXT(${jsArg(z.id)},${jsArg(dostawca)})">📥 ${optima?"Comarch Optima TXT":"TXT bez cen"}</button><a class="btn ghost" href="#/admin/agent-ai/producenci">Kontakt</a></div></header>
+  <div class="warehouse-worktable-wrap"><table class="log-table supplier-order-products"><thead><tr><th>Produkt i kod</th><th>Potrzeba</th><th>Zamawiam</th><th>Stan magazynu</th><th>Stan przyjęcia</th><th>Akcje</th></tr></thead><tbody>${pozycje.map(p=>{const produkt=produktMagazynowy(p.produktId)||p.product||{},identyfikator=agentAIStabilnyIdentyfikatorPozycji(p,produkt),potrzebna=Number(p.iloscPotrzebna??p.ilosc)||0,ilosc=Number(p.ilosc)||0,przyjeto=Math.max(0,Number(p.przyjeto)||0),pozostalo=Math.max(0,ilosc-przyjeto),nadwyzka=Math.max(0,ilosc-potrzebna),lineKey=p.stableKey||p.lineKey||p.id||"",wirtualny=String(p.produktId||"").startsWith("allegro-offer:");return `<tr><td><div class="supplier-product-cell"><span class="admin-product-thumb">${produkt.zdjecie?`<img src="${esc(produkt.zdjecie)}" alt="" loading="lazy">`:`<span class="admin-product-thumb-fallback">${esc(produkt.ikona||"🎲")}</span>`}</span><div><b>${esc(p.nazwa||produkt.nazwa||"Produkt")}</b><strong>${esc(identyfikator.wartosc||"uzupełnij kod")}</strong><small>${esc(identyfikator.typ||"brak stabilnego identyfikatora")}${p.ean||produkt.ean?` • EAN ${esc(p.ean||produkt.ean)}`:""}</small></div></div></td><td><b>${potrzebna} szt.</b><small>${esc((p.zamowienia||[]).join(", ")||"pozycja ręczna")}</small></td><td>${editable?`<div class="supplier-qty-control"><button type="button" aria-label="Zmniejsz" onclick="agentAIPrzesunIloscPozycji(${jsArg(z.id)},${jsArg(p.produktId)},-1,${jsArg(lineKey)})">−</button><input aria-label="Ilość zamawiana" inputmode="numeric" value="${ilosc}" onchange="agentAIUstawIloscPozycji(${jsArg(z.id)},${jsArg(p.produktId)},this.value,${jsArg(lineKey)})"><button type="button" aria-label="Zwiększ" onclick="agentAIPrzesunIloscPozycji(${jsArg(z.id)},${jsArg(p.produktId)},1,${jsArg(lineKey)})">+</button></div>`:`<b>${ilosc} szt.</b>`}<small>${nadwyzka?`nadwyżka +${nadwyzka} szt.`:"bez nadwyżki"}</small></td><td><b>${p.stan===null?"bez limitu":`${esc(p.stan||0)} szt.`}</b><small>rezerwacje ${esc(p.rezerwacje||0)} • ${esc(p.lokalizacja||"bez lokalizacji")}</small></td><td><div class="supplier-receive-summary"><span><b>${przyjeto}</b><small>przyjęto</small></span><span class="${pozostalo?"pending":"done"}"><b>${pozostalo}</b><small>pozostało</small></span></div><small>${pozostalo?"Korekta w przyjęciu dokumentu":"Pozycja rozliczona"}</small></td><td><div class="warehouse-worktable-actions">${editable?`<button class="btn ghost" onclick="agentAIPowiekszPozycjeZlecenia(${jsArg(z.id)},${jsArg(p.produktId)},${jsArg(lineKey)})">➕ Ilość</button>`:""}${wirtualny?`<a class="btn ghost" href="#/admin/allegro/oferty">🟠 Oferta</a>`:`<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.produktId)}">✏️ Produkt</a>`}</div></td></tr>`;}).join("")}</tbody></table></div>
+  <small class="supplier-optima-strip ${optima?(optimaDane.braki.length?"has-error":"is-ready"):"is-generic"}">${optima?`<b>Import Optimy:</b> ${optimaDane.braki.length?`brak kodu TOWAR w ${optimaDane.braki.length} pozycjach`:`TXT gotowy (${optimaDane.wiersze.length}/${pozycje.length})`}. Dokument → Ogólne → Kolektor danych → Importuj pozycje; następnie „Pobieraj ceny z programu”.`:`Plik TXT zawiera wyłącznie kod produktu i ilość — bez cen.`}</small></section>`;
+}
+function agentAIPrzyjecieDokumentuHTML(z={}){
+  const pozycje=Array.isArray(z.pozycje)?z.pozycje:[],status=String(z.status||"").toLowerCase(),wyslane=!!z.emailSentAt||status.includes("wysłane do")||status.includes("częściowo zrealizowane")||status==="zrealizowane",zamowiono=pozycje.reduce((s,p)=>s+Math.max(0,Number(p.ilosc)||0),0),przyjeto=pozycje.reduce((s,p)=>s+Math.max(0,Number(p.przyjeto)||0),0),pozostalo=Math.max(0,zamowiono-przyjeto),pelne=!!zamowiono&&!pozostalo,partie=Array.isArray(z.receiptBatches)?z.receiptBatches:[];
+  if(!wyslane)return `<section class="supplier-document-receipt is-locked"><div><span class="order-pro-label">Przyjęcie dostawy</span><b>Dostępne po wysłaniu zamówienia</b><small>Stan magazynu nie zostanie zmieniony przed wysłaniem dokumentu do producenta.</small></div></section>`;
+  if(pelne)return `<section class="supplier-document-receipt is-complete"><div><span class="order-pro-label">Dokument przyjęty</span><b>✅ ${esc(przyjeto)} / ${esc(zamowiono)} szt. rozliczono</b><small>Powiązane zamówienia Allegro są teraz w etapie „Oczekuje na wysyłkę” i nie zasilają kolejnego zakupu.</small></div><span class="lvl lvl-ok">partie przyjęcia: ${partie.length||1}</span></section>`;
+  const korekty=pozycje.map((p,index)=>{const zam=Math.max(0,Number(p.ilosc)||0),prz=Math.max(0,Number(p.przyjeto)||0),left=Math.max(0,zam-prz),lineKey=p.stableKey||p.lineKey||p.id||`line:${index}`;return `<label class="supplier-receipt-line"><span><b>${esc(p.nazwa||"Produkt")}</b><small>${esc(p.externalId||p.sku||p.kodProducenta||p.ean||p.produktId||"bez kodu")} • zamówiono ${zam} • dotąd przyjęto ${prz}</small></span><input type="number" min="0" step="1" value="${left}" data-line-key="${esc(lineKey)}" data-product-id="${esc(p.produktId||"")}" aria-label="Dostarczono teraz: ${esc(p.nazwa||"produkt")}"><em>${left} pozostało</em></label>`;}).join("");
+  return `<section class="supplier-document-receipt"><div class="supplier-document-receipt-head"><div><span class="order-pro-label">Przyjęcie całego dokumentu</span><b>${pozostalo} szt. w ${pozycje.filter(p=>Number(p.przyjeto||0)<Number(p.ilosc||0)).length} pozycjach czeka na przyjęcie</b><small>Jedna operacja zwiększy stany, przypisze ilości do zamówień Allegro i przeniesie kompletne zlecenia do wysyłki.</small></div><button class="btn" type="button" onclick="agentAIPrzyjmijDokumentZlecenia(${jsArg(z.id)})">📥 Przyjmij dokument (${pozostalo} szt.)</button></div><details class="supplier-receipt-correction"><summary>✏️ Dostawa różni się od zamówienia — wprowadź korektę</summary><form onsubmit="return agentAIPrzyjmijDokumentZlecenia(${jsArg(z.id)},this,event)"><p>Wpisz faktyczną liczbę sztuk dostarczonych teraz. Wartość 0 oznacza brak pozycji; mniejsza ilość pozostawi ją do późniejszego przyjęcia, a większa zapisze nadwyżkę na magazynie.</p><div class="supplier-receipt-lines">${korekty}</div><button class="btn" type="submit">Przyjmij dokument z korektą</button></form></details></section>`;
+}
+function agentAIEtapyZleceniaProducenta(z={}){
+  const revision=Math.max(1,Number(z.revision)||1),pozycje=Array.isArray(z.pozycje)?z.pozycje:[],stanSprawdzony=!!z.stockCheckedAt||!!pozycje.length&&pozycje.every(p=>Object.prototype.hasOwnProperty.call(p,"stan")&&p.iloscPotrzebna!==undefined),zatwierdzone=!!z.approvedAt&&Number(z.approvalRevision||0)===revision,wyslane=!!z.emailSentAt||String(z.status||"").toLowerCase().includes("wysłane do"),przyjeto=pozycje.reduce((s,p)=>s+Math.max(0,Number(p.przyjeto)||0),0),zamowiono=pozycje.reduce((s,p)=>s+Math.max(0,Number(p.ilosc)||0),0),przyjeteWszystko=!!zamowiono&&przyjeto>=zamowiono;
+  return [
+    {label:"Stan magazynowy",opis:stanSprawdzony?"brak policzony":"oczekuje na kontrolę",done:stanSprawdzony,current:!stanSprawdzony},
+    {label:"Szkic producenta",opis:`wersja ${revision}`,done:true,current:false},
+    {label:"Zatwierdzenie",opis:zatwierdzone?"potwierdzone przez administratora":"wymaga decyzji",done:zatwierdzone,current:stanSprawdzony&&!zatwierdzone},
+    {label:"Zamówienie wysłane",opis:wyslane?"etap zakupowy zakończony":"nic nie wysłano",done:wyslane,current:zatwierdzone&&!wyslane},
+    {label:"Dostawa",opis:przyjeteWszystko?"towar przyjęty":przyjeto?`${przyjeto}/${zamowiono} szt.`:"oczekuje na dostawę",done:przyjeteWszystko,current:wyslane&&!przyjeteWszystko},
+    {label:"Oczekuje na wysyłkę",opis:przyjeteWszystko?"zamówienia gotowe do obsługi":"po pełnym przyjęciu",done:przyjeteWszystko,current:false}
+  ];
+}
+function agentAIEtapyZleceniaHTML(z){return `<div class="supplier-workflow">${agentAIEtapyZleceniaProducenta(z).map((x,i)=>`<span class="${x.done?"done":x.current?"current":"waiting"}"><b>${i+1}. ${esc(x.label)}</b><small>${esc(x.opis)}</small></span>`).join("")}</div>`;}
+let agentAIPlanSzukaj="",agentAIPlanFiltrProducenta="wszyscy",agentAIPlanFiltrStatusu="aktywne";
+function agentAIPlanOdswiezWidok(){if(typeof odswiezPlanZatowarowaniaWidoku==="function"&&odswiezPlanZatowarowaniaWidoku())return true;renderuj();return false;}
+function agentAIPlanDokumentAktywny(z={}){
+  const status=String(z.status||"").trim().toLowerCase();
+  if(["zrealizowane","anulowane","zastąpione","zastapione","superseded","wyczyszczone","cleared"].includes(status))return false;
+  return (Array.isArray(z.pozycje)?z.pozycje:[]).some(p=>{
+    const zamowiono=Math.max(0,Number(p.ilosc??p.quantity)||0),potrzeba=Math.max(0,Number(p.iloscPotrzebna??p.baseRequired)||0),nadwyzka=Math.max(0,Number(p.manualExtra??p.nadwyzka)||0),przyjeto=Math.max(0,Number(p.przyjeto??p.received)||0);
+    return zamowiono>0||potrzeba>0||nadwyzka>0||przyjeto>0;
+  });
+}
+function agentAIPlanDokumentPasuje(z={}){
+  const status=String(z.status||"szkic").toLowerCase(),aktywny=agentAIPlanDokumentAktywny(z),revision=Math.max(1,Number(z.revision)||1),approved=!!z.approvedAt&&Number(z.approvalRevision||0)===revision,sent=!!z.emailSentAt||status.includes("wysłane do"),received=(z.pozycje||[]).some(p=>Number(p.przyjeto)>0);
+  if(agentAIPlanFiltrProducenta!=="wszyscy"&&producentKlucz(agentAIDostawcaZlecenia(z))!==producentKlucz(agentAIPlanFiltrProducenta))return false;
+  if(agentAIPlanFiltrStatusu==="aktywne"&&!aktywny)return false;if(agentAIPlanFiltrStatusu==="szkice"&&!agentAIStatusRoboczyProducenta(status))return false;if(agentAIPlanFiltrStatusu==="zatwierdzone"&&!approved)return false;if(agentAIPlanFiltrStatusu==="wyslane"&&!sent)return false;if(agentAIPlanFiltrStatusu==="przyjecie"&&(!sent||(z.pozycje||[]).every(p=>Number(p.przyjeto||0)>=Number(p.ilosc||0))))return false;if(agentAIPlanFiltrStatusu==="zamkniete"&&aktywny)return false;
+  const q=normalizujSzukanyTekst(agentAIPlanSzukaj);if(!q)return true;
+  return normalizujSzukanyTekst([z.id,z.numer,z.status,agentAIDostawcaZlecenia(z),...(z.pozycje||[]).flatMap(p=>[p.nazwa,p.externalId,p.sku,p.kodProducenta,p.mpn,p.ean,p.gtin])].join(" ")).includes(q);
+}
+function agentAIPlanSzukajDokumenty(input){agentAIPlanSzukaj=String(input?.value||"");clearTimeout(window.__supplierPlanSearch);window.__supplierPlanSearch=setTimeout(()=>odswiezPlanZatowarowaniaWidoku(),180);}
+function agentAIPlanWyczyscFiltry(){agentAIPlanSzukaj="";agentAIPlanFiltrProducenta="wszyscy";agentAIPlanFiltrStatusu="aktywne";odswiezPlanZatowarowaniaWidoku();}
+function agentAIHistoriaEmailiProducentaHTML(z={}){
+  const proby=Array.isArray(z.emailSendHistory)?z.emailSendHistory:[],korekty=Array.isArray(z.supersededSends)?z.supersededSends:[];
+  if(!proby.length&&!korekty.length&&!z.emailSentAt)return "";
+  const wiersze=[...proby.map(x=>({at:x.at,typ:x.mode==="resend"?"Ponowna wysyłka":"Wysyłka",opis:`dostarczono ${Number(x.delivered)||0} • pominięto duplikaty ${Number(x.skippedDuplicates)||0} • błędy ${Number(x.failed)||0}${x.reason?` • ${x.reason}`:""}`,operator:x.operator})),...korekty.map(x=>({at:x.supersededAt,typ:`Korekta wersji ${x.revision||"—"}`,opis:x.reason||"Poprzednia wysyłka oznaczona jako zastąpiona",operator:x.supersededBy}))].sort((a,b)=>String(b.at||"").localeCompare(String(a.at||""))).slice(0,20);
+  return `<details class="supplier-email-audit"><summary>🕓 Historia wysyłek i korekt (${Math.max(1,proby.length+korekty.length)})</summary><div>${wiersze.map(x=>`<article><b>${esc(x.typ)}</b><span>${esc(allegroDataTxt(x.at))}</span><p>${esc(x.opis)}</p><small>${esc(x.operator||"administrator")}</small></article>`).join("")||`<article><b>Ostatnia wysyłka</b><span>${esc(allegroDataTxt(z.emailSentAt))}</span></article>`}</div></details>`;
+}
+function agentAIPlanKartaDokumentuHTML(z){
+  const status=String(z.status||"szkic").toLowerCase(),zamkniete=!agentAIPlanDokumentAktywny(z),robocze=!zamkniete&&agentAIStatusRoboczyProducenta(status),grupy=agentAIGrupujPoDostawcy(z.pozycje||[]),revision=Math.max(1,Number(z.revision)||1),approvedCurrent=!!z.approvedAt&&Number(z.approvalRevision||0)===revision,missingEmail=grupy.some(([d])=>!producentPoNazwie(d)?.orderEmail),zamowiono=(z.pozycje||[]).reduce((s,p)=>s+Number(p.ilosc||0),0),przyjeto=(z.pozycje||[]).reduce((s,p)=>s+Number(p.przyjeto||0),0),wyslane=!!z.emailSentAt||status.includes("wysłane do")||status.includes("częściowo zrealizowane")||status==="zrealizowane",czesciowe=status==="częściowo wysłane e-mailem",pelnaWysylka=wyslane&&!czesciowe,liczbaWysylek=Math.max(Number(z.emailSendCount)||0,(Array.isArray(z.emailSendHistory)?z.emailSendHistory.filter(x=>Number(x.delivered)>0).length:0),z.emailSentAt?1:0);
+  return `<article class="supplier-order-card ${zamkniete?"is-closed":""}"><header class="supplier-order-head"><div><span class="order-pro-label">${esc(z.tryb==="niskie"?"Uzupełnienie magazynu":"Braki i pozycje ręczne")} • wersja ${revision}</span><h3>${esc(z.numer||z.id)}</h3><small>${esc(z.dataTxt||allegroDataTxt(z.data))} • ${grupy.length} producentów • ${(z.pozycje||[]).length} pozycji • ${esc(z.sztuk||zamowiono)} szt. • przyjęto ${przyjeto}</small></div><div class="supplier-order-status"><span class="lvl ${status.includes("wysłane")||status==="zrealizowane"?"lvl-ok":"lvl-info"}">${esc(z.status||"szkic")}</span><small>${z.emailSentAt?`Ostatni e-mail: ${esc(allegroDataTxt(z.emailSentAt))} • wysyłek ${liczbaWysylek}`:z.lastEmailSentAt?`Poprzednia wysyłka: ${esc(allegroDataTxt(z.lastEmailSentAt))} • trwa korekta`:zamkniete?"Dokument historyczny — nie wymaga działania":"Dokument otwarty — oczekuje na kontrolę"}</small></div></header>${agentAIEtapyZleceniaHTML(z)}${agentAIPrzyjecieDokumentuHTML(z)}${approvedCurrent&&robocze?`<div class="backend-note"><b>Wersja ${revision} zatwierdzona.</b> Każda zmiana ilości lub nowy brak cofnie dokument do ponownej kontroli.</div>`:""}${z.correctionOpenedAt&&!wyslane?`<div class="backend-note warn"><b>Trwa korekta poprzedniej wysyłki.</b> ${esc(z.correctionReason||"")} Po zmianach zatwierdź aktualną wersję i wyślij ją ponownie.</div>`:""}<div class="supplier-split-list">${grupy.map(([d,items])=>agentAIZlecenieTabelaDostawcyHTML(z,d,items)).join("")}</div><footer class="supplier-order-actions">${robocze&&!approvedCurrent?`<button class="btn ghost" onclick="agentAIZatwierdzZlecenie(${jsArg(z.id)})">✅ Zatwierdź wersję ${revision}</button>`:""}${!pelnaWysylka?`<button class="btn" onclick="agentAIWyslijZlecenieEmail(${jsArg(z.id)})" ${((!approvedCurrent&&!czesciowe)||missingEmail||zamkniete)?"disabled":""}>✉️ ${czesciowe?"Ponów brakujące e-maile":"Wyślij e-mailem do producenta"}</button>`:""}${pelnaWysylka?`<button class="btn" onclick="agentAIPonowEmailProducenta(${jsArg(z.id)})" ${missingEmail?"disabled":""}>🔁 Wyślij ponownie</button>`:""}${wyslane&&!przyjeto?`<button class="btn ghost" onclick="agentAIPrzygotujKorekteZlecenia(${jsArg(z.id)})">✏️ Utwórz korektę</button>`:""}<button class="btn ghost" onclick="agentAIPobierzZlecenieCSV(${jsArg(z.id)})">📤 Tabela bez cen CSV</button>${robocze?`<button class="btn danger" onclick="agentAIUsunZlecenie(${jsArg(z.id)})">🗑️ Anuluj szkic</button>`:""}</footer>${wyslane?`<div class="supplier-recovery-note"><b>Bezpieczne działania po wysyłce</b><span>„Wyślij ponownie” przekazuje identyczną zatwierdzoną wersję i wymaga podania powodu. „Utwórz korektę” nie usuwa dostarczonego e-maila — zachowuje go w audycie i otwiera nową wersję do edycji.</span></div>`:""}${agentAIHistoriaEmailiProducentaHTML(z)}${missingEmail&&!zamkniete?`<div class="backend-note" style="border-color:#fed7aa;background:#fff7ed"><b>Brak e-maila producenta.</b> Uzupełnij kartotekę przed zatwierdzoną wysyłką.</div>`:""}</article>`;
+}
+function agentAIZleceniaPanelHTML(){
+  const wszystkie=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).slice().sort((a,b)=>String(b.data||"").localeCompare(String(a.data||""))),lista=wszystkie.filter(agentAIPlanDokumentPasuje),aktywne=lista.filter(agentAIPlanDokumentAktywny),historia=lista.filter(z=>!agentAIPlanDokumentAktywny(z)),otwarteWszystkie=wszystkie.filter(agentAIPlanDokumentAktywny),approved=otwarteWszystkie.filter(z=>z.approvedAt&&Number(z.approvalRevision||0)===Math.max(1,Number(z.revision)||1)).length,sent=otwarteWszystkie.filter(z=>z.emailSentAt||String(z.status||"").toLowerCase().includes("wysłane do")).length,doPrzyjecia=otwarteWszystkie.filter(z=>(z.emailSentAt||String(z.status||"").toLowerCase().includes("wysłane do"))&&(z.pozycje||[]).some(p=>Number(p.przyjeto||0)<Number(p.ilosc||0))).length,dostawcy=agentAIPlanDostawcy();
+  return `<div class="panel agent-orders-panel supplier-restock-plan"><div class="order-section-head"><div><span class="order-pro-label">Dokumenty producentów</span><h2 style="margin-top:.25rem">🧾 Zamówienia i przyjęcia</h2><p class="order-detail-lead">Kontrola tabeli, zatwierdzenie, wysyłka i przyjęcie dostawy — w jednym przebiegu. Braki są już dopisywane automatycznie do właściwego szkicu producenta.</p></div><span class="supplier-plan-auto-badge">⚡ synchronizacja automatyczna</span></div>
+  <nav class="supplier-plan-statusbar" aria-label="Filtry dokumentów producentów"><button class="${agentAIPlanFiltrStatusu==="aktywne"?"active":""}" aria-pressed="${agentAIPlanFiltrStatusu==="aktywne"}" onclick="agentAIPlanFiltrStatusu='aktywne';odswiezPlanZatowarowaniaWidoku()"><b>${otwarteWszystkie.length}</b><small>aktywne dokumenty</small></button><button class="${agentAIPlanFiltrStatusu==="zatwierdzone"?"active":""}" aria-pressed="${agentAIPlanFiltrStatusu==="zatwierdzone"}" onclick="agentAIPlanFiltrStatusu='zatwierdzone';odswiezPlanZatowarowaniaWidoku()"><b>${approved}</b><small>zatwierdzone</small></button><button class="${agentAIPlanFiltrStatusu==="wyslane"?"active":""}" aria-pressed="${agentAIPlanFiltrStatusu==="wyslane"}" onclick="agentAIPlanFiltrStatusu='wyslane';odswiezPlanZatowarowaniaWidoku()"><b>${sent}</b><small>wysłane / w dostawie</small></button><button class="${agentAIPlanFiltrStatusu==="przyjecie"?"active":""}" aria-pressed="${agentAIPlanFiltrStatusu==="przyjecie"}" onclick="agentAIPlanFiltrStatusu='przyjecie';odswiezPlanZatowarowaniaWidoku()"><b>${doPrzyjecia}</b><small>do przyjęcia</small></button><button class="${agentAIPlanFiltrStatusu==="zamkniete"?"active":""}" aria-pressed="${agentAIPlanFiltrStatusu==="zamkniete"}" onclick="agentAIPlanFiltrStatusu='zamkniete';odswiezPlanZatowarowaniaWidoku()"><b>${wszystkie.length-otwarteWszystkie.length}</b><small>historia</small></button></nav>
+  <div class="supplier-plan-filters"><label class="supplier-plan-search">Wyszukaj<input id="supplierPlanSearch" value="${esc(agentAIPlanSzukaj)}" placeholder="Nazwa, EXTERNAL_ID, SKU, kod producenta, EAN lub numer szkicu…" oninput="agentAIPlanSzukajDokumenty(this)" autocomplete="off"></label><label>Producent<select id="supplierPlanSupplierFilter" onchange="agentAIPlanFiltrProducenta=this.value;odswiezPlanZatowarowaniaWidoku()"><option value="wszyscy">Wszyscy producenci</option>${dostawcy.map(x=>`<option value="${esc(x)}" ${agentAIPlanFiltrProducenta===x?"selected":""}>${esc(x)}</option>`).join("")}</select></label><label>Status<select id="supplierPlanStatusFilter" onchange="agentAIPlanFiltrStatusu=this.value;odswiezPlanZatowarowaniaWidoku()">${[["aktywne","Aktywne — domyślnie"],["szkice","Szkice do kontroli"],["zatwierdzone","Zatwierdzone wersje"],["wyslane","Wysłane / w dostawie"],["przyjecie","Z rozpoczętym przyjęciem"],["zamkniete","Historia: zakończone, anulowane i zastąpione"],["wszystkie","Wszystkie"]].map(([v,l])=>`<option value="${v}" ${agentAIPlanFiltrStatusu===v?"selected":""}>${l}</option>`).join("")}</select></label><button class="btn ghost" onclick="agentAIPlanWyczyscFiltry()">Wyczyść filtry</button></div>
+  ${agentAIPlanReczneDodanieHTML()}<div class="admin-search-results-line"><span>Znaleziono <b>${lista.length}</b> dokumentów • aktywne ${aktywne.length}</span><span>Domyślnie historia jest zwinięta</span></div>
+  <div class="supplier-order-list">${aktywne.map(agentAIPlanKartaDokumentuHTML).join("")||`<div class="backend-note">Nie ma aktywnych szkiców pasujących do filtrów. Uzgodnij braki albo dodaj pozycję ręcznie powyżej.</div>`}</div>
+  <details class="supplier-order-history" ${agentAIPlanFiltrStatusu==="zamkniete"?"open":""}><summary>🕓 Historia zakończonych, anulowanych i zastąpionych (${historia.length})</summary><div class="supplier-order-list">${historia.map(agentAIPlanKartaDokumentuHTML).join("")||`<div class="backend-note">Brak zamkniętych dokumentów pasujących do filtrów.</div>`}</div></details></div>`;
+}
+function agentAIPowiekszPozycjeZlecenia(id, produktId, lineKey=""){
+  const raw=prompt("O ile sztuk powiększyć tę pozycję? Nadwyżka zostanie oznaczona do przyjęcia na magazyn po dostawie.","1");
+  if(raw===null) return;
+  const delta=Math.max(0,parseInt(String(raw).replace(",",".").replace(/[^\d.-]/g,""),10)||0);
+  if(!delta){ toast("Podaj dodatnią liczbę sztuk"); return; }
+  const z=(agentAIZlecenia||[]).find(x=>String(x.id)===String(id)),p=(z?.pozycje||[]).find(x=>(lineKey&&String(x.stableKey||x.lineKey||x.id||"")===String(lineKey))||String(x.produktId)===String(produktId));
+  if(!z||!p){toast("Nie znaleziono pozycji");return;}
+  agentAIUstawIloscPozycji(id,produktId,(Number(p.ilosc)||0)+delta,lineKey);
+}
+async function agentAIUstawIloscPozycji(id,produktId,wartosc,lineKey=""){
+  const wpisana=Math.max(0,parseInt(String(wartosc??0).replace(/[^\d-]/g,""),10)||0);
+  const z=(agentAIZlecenia||[]).find(x=>String(x.id)===String(id)),p=(z?.pozycje||[]).find(x=>(lineKey&&String(x.stableKey||x.lineKey||x.id||"")===String(lineKey))||String(x.produktId)===String(produktId));
+  if(!z||!p){toast("Nie znaleziono pozycji");return;}
+  const potrzebna=Math.max(0,Number(p.iloscPotrzebna)||0),ilosc=Math.max(potrzebna,wpisana);
+  try{
+    const body={draftId:z.id,supplier:String(p.dostawca||agentAIDostawcaZlecenia(z)),productId:String(produktId||p.produktId||""),lineKey:String(lineKey||p.stableKey||p.lineKey||p.id||""),quantity:ilosc,expectedRevision:Math.max(1,Number(z.revision)||1)};
+    const d=await chmura("supplier-order-line-upsert",{method:"POST",body,timeout:45000});
+    await agentAIPlanOdswiezPoOperacji(d,`✅ Ilość w szkicu: ${ilosc} szt.`);
+  }catch(e){await agentAIPlanBladOperacji(e,"Nie zmieniono ilości");}
+}
+function agentAIPrzesunIloscPozycji(id,produktId,delta,lineKey=""){
+  const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
+  const p=(z?.pozycje||[]).find(x=>(lineKey&&String(x.stableKey||x.lineKey||x.id||"")===String(lineKey))||String(x.produktId)===String(produktId));
+  if(!p){toast("Nie znaleziono pozycji");return;}
+  agentAIUstawIloscPozycji(id,produktId,Math.max(0,(Number(p.ilosc)||0)+Number(delta||0)),lineKey);
+}
+function agentAIDaneProducentaDoEmaila(p={}){return {name:p.name||p.nazwa||""};}
+async function agentAIWyslijZlecenieEmail(id,opcje={}){
+  const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
+  if(!z){toast("Nie znaleziono zamówienia producenta");return;}
+  const revision=Math.max(1,Number(z.revision)||1),forceResend=opcje.forceResend===true,resendReason=String(opcje.resendReason||"").trim(),status=String(z.status||"").toLowerCase();
+  const zwyklaWysylka=["zaakceptowane","częściowo wysłane e-mailem"].includes(status),ponowienie=forceResend&&!!z.emailSentAt&&["wysłane do producenta","wysłane do dostawcy","częściowo wysłane e-mailem","częściowo zrealizowane","zrealizowane"].includes(status);
+  const approvalOk=forceResend?ponowienie:(!!z.approvedAt&&Number(z.approvalRevision||0)===revision);
+  if((!zwyklaWysylka&&!ponowienie)||!approvalOk){toast(forceResend?"⚠️ Ten dokument nie ma potwierdzonej wcześniejszej wysyłki":"⚠️ Najpierw zatwierdź dokładnie tę wersję zamówienia");return;}
+  if(forceResend&&resendReason.length<3){toast("Podaj powód ponownej wysyłki");return;}
+  const names=[...new Set((z.pozycje||[]).map(p=>String(p.dostawca||agentAIDostawcaZlecenia(z)).trim()).filter(Boolean))];
+  const suppliers=names.map(producentPoNazwie).filter(Boolean);
+  const missing=names.filter(name=>!producentPoNazwie(name)?.orderEmail);
+  if(missing.length){toast(`⚠️ Uzupełnij e-mail zamówień w kartotece: ${missing.join(", ")}`);location.hash="#/admin/agent-ai/producenci";return;}
+  const adresaci=suppliers.map(p=>`${p.name||p.nazwa} <${p.orderEmail}>`).join("\n"),sztuk=(z.pozycje||[]).reduce((s,p)=>s+Number(p.ilosc||0),0);
+  if(!confirm(`${forceResend?"OSTATECZNE POTWIERDZENIE PONOWNEJ WYSYŁKI":"OSTATECZNE POTWIERDZENIE WYSYŁKI"}\n\nDokument: ${z.numer||z.id} • wersja ${revision}\nPozycji: ${(z.pozycje||[]).length} • sztuk: ${sztuk}${forceResend?`\nPowód: ${resendReason}`:""}\n\nAdresaci:\n${adresaci}\n\nKliknięcie OK naprawdę wyśle e-mail do producenta. Czy potwierdzasz?`)){toast("Wysyłka anulowana — żaden e-mail nie został wysłany");return;}
+  try{
+    toast("Wysyłam zatwierdzone zamówienie e-mailem do producenta…");
+    const d=await chmura("email-send-supplier-order",{method:"POST",body:{order:{id:z.id,revision},suppliers:suppliers.map(agentAIDaneProducentaDoEmaila),forceResend,resendReason},timeout:90000});
+    const sent=(d.results||[]).filter(x=>x.sent),failed=(d.results||[]).filter(x=>!x.sent);
+    if(Array.isArray(d.supplierOrders)||d.draft){
+      zapiszHistorieAgenta("email-producent",d.allSent?`Wysłano ${z.numer||z.id} e-mailem do producenta`:`Częściowa wysyłka ${z.numer||z.id}`,{zlecenieId:id,revision,wyslane:sent.map(x=>x.supplier),bledy:failed.map(x=>({supplier:x.supplier,error:x.error}))});
+      await agentAIPlanOdswiezPoOperacji(d,d.allSent?(forceResend?"✅ Ponownie wysłano e-mail. Próba została zapisana w historii.":"✅ Zamówienie wysłane e-mailem. Przyjęcie dostawy jest teraz dostępne."):`⚠️ Wysłano ${sent.length}, nie wysłano ${failed.length}. Ponów brakujące wiadomości.`);return;
+    }
+    zapiszHistorieAgenta("email-producent",d.allSent?`Wysłano ${z.numer||z.id} e-mailem do producenta`:`Częściowa wysyłka ${z.numer||z.id}`,{zlecenieId:id,revision,wyslane:sent.map(x=>x.supplier),bledy:failed.map(x=>({supplier:x.supplier,error:x.error}))});
+    await agentAIUzgodnijPlanZSerwerem({silent:true});
+    toast(d.allSent?"✅ Zamówienie wysłane e-mailem. Plan pobrano ponownie z serwera.":`⚠️ Wysłano ${sent.length}, nie wysłano ${failed.length}. Ponów przyciskiem — wysłane wiadomości nie zdublują się.`);
+  }catch(e){toast("⚠️ E-mail do producenta: "+(e.message||e));}
+}
+async function agentAIPrzyjmijPozycjeZlecenia(id, produktId, wartosc="", lineKey=""){
+  const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
+  const poz=(Array.isArray(z?.pozycje)?z.pozycje:[]).find(p=>(lineKey&&String(p.stableKey||p.lineKey||p.id||"")===String(lineKey))||String(p.produktId)===String(produktId));
+  if(!z||!poz){ toast("Nie znaleziono pozycji do przyjęcia"); return; }
+  const pozostalo=Math.max(0,(Number(poz.ilosc)||0)-(Number(poz.przyjeto)||0));
+  const raw=String(wartosc||"").trim()||prompt(`Ile sztuk faktycznie dostarczono dla: ${poz.nazwa}?`,String(Math.max(1,pozostalo)));
+  if(raw===null||raw==="") return;
+  const ilosc=Math.max(0,parseInt(String(raw).replace(",",".").replace(/[^\d.-]/g,""),10)||0);
+  if(!ilosc){ toast("Podaj dodatnią liczbę sztuk"); return; }
+  const nadwyzka=Math.max(0,ilosc-pozostalo),stanPrzed=stanMagazynuId(produktId);
+  if(!confirm(`${nadwyzka?`Dostawa jest większa od pozostałej ilości o ${nadwyzka} szt. Nadwyżka zwiększy stan magazynowy.\n\n`:""}Przyjąć faktycznie dostarczone ${ilosc} szt. produktu „${poz.nazwa}”?\nStan przed operacją: ${stanPrzed===null?"niemonitorowany":stanPrzed+" szt."}.`)){toast("Przyjęcie anulowane — stan nie został zmieniony");return;}
+  const button=document.activeElement instanceof HTMLButtonElement?document.activeElement:null;if(button)button.disabled=true;
+  try{
+    const requestId=`receive-${String(id)}-${String(lineKey||produktId)}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const d=await chmura("supplier-order-receive",{method:"POST",body:{draftId:z.id,productId:String(produktId||poz.produktId||""),lineKey:String(lineKey||poz.stableKey||poz.lineKey||poz.id||""),quantity:ilosc,requestId,expectedReceiptRevision:Math.max(0,Number(z.receiptRevision)||0)},timeout:60000});
+    await agentAIPlanOdswiezPoOperacji(d,`✅ Przyjęto ${ilosc} szt.${nadwyzka?` • nadwyżka ${nadwyzka} szt. zwiększyła stan`:""}`);
+  }catch(e){await agentAIPlanBladOperacji(e,"Nie przyjęto dostawy");}finally{if(button?.isConnected)button.disabled=false;}
+}
+async function agentAIPrzyjmijDokumentZlecenia(id,form=null,event=null){
+  if(event)event.preventDefault();
+  const z=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).find(x=>String(x.id)===String(id));
+  if(!z){toast("Nie znaleziono dokumentu do przyjęcia");return false;}
+  const pozycje=Array.isArray(z.pozycje)?z.pozycje:[],pozostalo=pozycje.reduce((s,p)=>s+Math.max(0,Number(p.ilosc||0)-Number(p.przyjeto||0)),0);
+  if(!pozostalo){toast("Dokument jest już w całości przyjęty");return false;}
+  let receipts=null,units=pozostalo,roznice=0;
+  if(form){
+    receipts=[...form.querySelectorAll("[data-line-key]")].map(input=>({lineKey:String(input.dataset.lineKey||""),productId:String(input.dataset.productId||""),quantity:Math.max(0,parseInt(String(input.value||0).replace(/[^\d-]/g,""),10)||0)}));
+    units=receipts.reduce((s,x)=>s+x.quantity,0);
+    roznice=receipts.filter((x,index)=>x.quantity!==Math.max(0,Number(pozycje[index]?.ilosc||0)-Number(pozycje[index]?.przyjeto||0))).length;
+  }
+  const komunikat=form
+    ? `Przyjąć dokument z korektą?\n\nDostarczono teraz: ${units} szt.\nPozycji ze zmienioną ilością: ${roznice}.\nBraki pozostaną otwarte, a nadwyżki zwiększą stan.`
+    : `Przyjąć cały dokument producenta?\n\nNa magazyn trafi ${units} szt. Jedna operacja rozdzieli ilości na właściwe zamówienia Allegro i przeniesie kompletne zlecenia do „Oczekuje na wysyłkę”.`;
+  if(!confirm(komunikat)){toast("Przyjęcie anulowane — żaden stan nie został zmieniony");return false;}
+  const button=form?.querySelector('button[type="submit"]')||(document.activeElement instanceof HTMLButtonElement?document.activeElement:null);if(button)button.disabled=true;
+  try{
+    const requestId=`receive-document-${String(id)}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const body={draftId:z.id,requestId,expectedReceiptRevision:Math.max(0,Number(z.receiptRevision)||0)};
+    if(receipts)body.receipts=receipts;
+    const d=await chmura("supplier-order-document-receive",{method:"POST",body,timeout:90000});
+    const batch=d.receiptBatch||{},workflow=Number(d.procurementWorkflow?.changed)||0;
+    await agentAIPlanOdswiezPoOperacji(d,`✅ Przyjęto dokument: ${batch.receivedUnits??units} szt.${batch.missingLines?` • ${batch.missingLines} pozycji czeka na uzupełnienie`:" • kompletne zamówienia oczekują na wysyłkę"}${workflow?` • zaktualizowano ${workflow} zleceń Allegro`:""}`);
+  }catch(e){await agentAIPlanBladOperacji(e,"Nie przyjęto dokumentu");}finally{if(button?.isConnected)button.disabled=false;}
+  return false;
+}
+function agentAINadwyzkiDoPrzyjecia(){
+  const out=[];
+  (Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).filter(agentAIPlanDokumentAktywny).forEach(z=>{
+    (Array.isArray(z.pozycje)?z.pozycje:[]).forEach(p=>{
+      const ilosc=Number(p.ilosc)||0, potrzebna=Number(p.iloscPotrzebna ?? ilosc)||0, przyjeto=Number(p.przyjeto)||0;
+      const nadwyzka=Math.max(0,ilosc-potrzebna);
+      const przyjetaNadwyzka=Math.max(0,przyjeto-potrzebna);
+      const doPrzyjecia=Math.max(0,nadwyzka-przyjetaNadwyzka);
+      if(doPrzyjecia>0) out.push({zlecenie:z,pozycja:p,nadwyzka,doPrzyjecia,przyjeto});
+    });
+  });
+  return out;
+}
+function agentAIPlanWierszeEksportu(dokumenty=agentAIZlecenia,braki=agentAIBrakiOperacyjne(),productFinder=produktMagazynowy){
+  const rows=[],znajdz=typeof productFinder==="function"?productFinder:(()=>({}));
+  const dodaj=(pozycja,ilosc,zrodlo)=>{
+    const qty=Math.max(0,Number(ilosc)||0);if(!qty)return;
+    const produkt=znajdz(pozycja.produktId)||{},identyfikator=agentAIStabilnyIdentyfikatorPozycji(pozycja,produkt);
+    rows.push({kod:identyfikator.wartosc||"",nazwa:String(pozycja.nazwa||produkt.nazwa||"Produkt").trim()||"Produkt",ilosc:qty,brakKodu:!identyfikator.wartosc,zrodlo});
+  };
+  (Array.isArray(dokumenty)?dokumenty:[]).filter(agentAIPlanDokumentAktywny).forEach(z=>(Array.isArray(z.pozycje)?z.pozycje:[]).forEach(p=>{
+    const wymagane=Math.max(0,Number(p.iloscPotrzebna??p.baseRequired)||0),nadwyzka=Math.max(0,Number(p.manualExtra??p.nadwyzka)||0),zamowiono=Math.max(0,Number(p.ilosc??p.quantity)||0);
+    dodaj(p,Math.max(zamowiono,wymagane+nadwyzka),"szkic");
+  }));
+  (Array.isArray(braki)?braki:[]).forEach(x=>dodaj(x,Math.max(0,Number(x.pozostaloDoZamowienia)||0),"brak"));
+  return rows;
+}
+function eksportujTabeleOperacyjnaMagazynuCSV(){
+  const rows=agentAIPlanWierszeEksportu();
+  if(!rows.length){toast("Brak aktywnych pozycji Planu do eksportu");return;}
+  const bezKodu=rows.filter(x=>x.brakKodu);
+  if(agentAIEksportZablokowanyPrzezBrakKodow(bezKodu,"Eksport Planu"))return false;
+  const csv=[["kod","nazwa","ilosc"],...rows.map(x=>[x.kod,x.nazwa,x.ilosc])].map(r=>r.map(csvPole).join(";")).join("\n");
+  pobierzPlik("plan-zatowarowania-bez-cen.csv","\uFEFF"+csv,"text/csv");
+  zapiszHistorieAgenta("eksport","Wyeksportowano bezcenowy Plan zatowarowania",{wiersze:rows.length,bezKodu:0});
+  toast(`Wyeksportowano ${rows.length} pozycji bez cen ✅`);return true;
+}
+function magazynBrakiDostawcyHTML(dostawca,rows){
+  const pozostalo=rows.reduce((s,x)=>s+Number(x.pozostaloDoZamowienia||0),0), pokryte=rows.reduce((s,x)=>s+Number(x.wZleceniach||0),0);
+  return `<section class="ops-supplier-card"><header><div><span class="supplier-chip">🏭 ${esc(dostawca)}</span><h3>Braki do aktywnych zamówień</h3><small>${rows.length} produktów • do zamówienia ${pozostalo} szt. • pokryte w szkicach ${pokryte} szt.</small></div><span class="lvl ${pozostalo?"lvl-ostrzezenie":"lvl-ok"}">${pozostalo?`${pozostalo} szt. zostanie dopisane`:"szkic pokrywa potrzeby"}</span></header><div class="warehouse-worktable-wrap"><table class="log-table ops-shortage-table"><thead><tr><th>Produkt i kod</th><th>Brak</th><th>W szkicach</th><th>Do zamówienia</th><th>Stan i zamówienia</th><th>Akcja</th></tr></thead><tbody>${rows.map(x=>{const produkt=produktMagazynowy(x.produktId)||x.product||{},identyfikator=agentAIStabilnyIdentyfikatorPozycji(x,produktMagazynowy(x.produktId)||x.product||{}),wirtualny=String(x.produktId||"").startsWith("allegro-offer:");return `<tr class="${x.pozostaloDoZamowienia>0?"row-alert":"row-covered"}"><td><div class="supplier-product-cell"><span class="admin-product-thumb">${produkt.zdjecie?`<img src="${esc(produkt.zdjecie)}" alt="" loading="lazy">`:`<span class="admin-product-thumb-fallback">${esc(produkt.ikona||"🎲")}</span>`}</span><div><b>${esc(x.nazwa)}</b><strong>${esc(identyfikator.wartosc||"uzupełnij kod")}</strong><small>${esc(identyfikator.typ||"brak stabilnego identyfikatora")}${x.ean?` • EAN ${esc(x.ean)}`:""}</small></div></div></td><td><b>${esc(x.brakCalkowity)} szt.</b></td><td><b>${esc(x.wZleceniach)} szt.</b></td><td><span class="lvl ${x.pozostaloDoZamowienia>0?"lvl-ostrzezenie":"lvl-ok"}"><b>${esc(x.pozostaloDoZamowienia)} szt.</b></span></td><td><b>${x.stan===null?"bez limitu":`${esc(x.stan)} szt.`}</b><small>rezerwacje ${esc(x.rezerwacje||0)} • ${esc((x.zamowienia||[]).join(", ")||"brak powiązania")}</small></td><td>${wirtualny?`<a class="btn ghost" href="#/admin/allegro/oferty">🟠 Oferta Allegro</a>`:`<a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(x.produktId)}">✏️ Produkt</a>`}</td></tr>`;}).join("")}</tbody></table></div></section>`;
+}
+function magazynTabelaOperacyjnaHTML(){
+  const braki=agentAIBrakiOperacyjne(),grupy=agentAIGrupujPoDostawcy(braki),pozostalo=braki.reduce((s,x)=>s+Number(x.pozostaloDoZamowienia||0),0),wZleceniach=braki.reduce((s,x)=>s+Number(x.wZleceniach||0),0);
+  const aktywne=(Array.isArray(agentAIZlecenia)?agentAIZlecenia:[]).filter(agentAIPlanDokumentAktywny);
+  return `<div class="panel warehouse-worktable-panel ops-control-center"><div class="order-section-head"><div><span class="order-pro-label">Aktualne zapotrzebowanie</span><h2 style="margin-top:.25rem">📑 Braki do zamówień</h2><p class="order-detail-lead">Każda pozycja z aktywnego zamówienia sklepu lub Allegro trafia tutaj automatycznie. Stan, rezerwacje i ilości w otwartych szkicach są liczone ponownie bez tworzenia duplikatów.</p></div><span class="supplier-plan-auto-badge">⚡ dane operacyjne na żywo</span></div><nav class="supplier-plan-statusbar" aria-label="Podsumowanie braków"><span><b>${braki.length}</b><small>produkty z brakiem</small></span><span><b>${pozostalo}</b><small>szt. do dodania</small></span><span><b>${wZleceniach}</b><small>szt. w szkicach</small></span><span><b>${grupy.length}</b><small>producenci</small></span><span><b>${aktywne.length}</b><small>aktywne dokumenty</small></span></nav><div class="ops-supplier-list">${grupy.map(([d,rows])=>magazynBrakiDostawcyHTML(d,rows)).join("")||`<div class="backend-note">✅ Brak realnych braków do aktywnych zamówień.</div>`}</div></div>${agentAIZleceniaPanelHTML()}`;
+}
+
+async function agentAIZlecenieProducentaTekst(){
+  const docs=(await agentAIUzgodnijPlanZSerwerem({silent:true})).filter(agentAIPlanDokumentAktywny);
+  if(!docs.length)return "Nie ma nowych braków; kanoniczny Plan zatowarowania na serwerze nie zawiera aktywnych dokumentów producentów.";
+  return docs.slice(0,20).map(agentAIFormatZleceniaProducenta).join("\n\n");
+}
+function agentAIProduktyDlaOfertyAllegro(fraza=""){
+  const q=agentAINormalizuj(fraza),slowa=q.split(" ").filter(Boolean);
+  if(!q)return [];
+  return produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p)).map(p=>{
+    const nazwa=agentAINormalizuj(p.nazwa||""),hay=agentAINormalizuj([p.nazwa,p.sku,p.externalId,p.gtin,p.ean,p.kodProducenta,p.mpn,p.id].filter(Boolean).join(" "));
+    let score=nazwa===q?100:nazwa.includes(q)?95:hay.includes(q)?92:slowa.every(w=>hay.includes(w))?80:0;
+    return score?{p,score}:null;
+  }).filter(Boolean).sort((a,b)=>b.score-a.score||String(a.p.nazwa).localeCompare(String(b.p.nazwa),"pl"));
+}
+async function agentAIWykonajOferteAllegro(fraza="",publicationAction="keep"){
+  if(!allegroStan.sprawdzono)await allegroWczytajDane(true);
+  const trafienia=agentAIProduktyDlaOfertyAllegro(fraza);
+  if(!trafienia.length)return `Nie znalazłem produktu „${fraza}”. Podaj dokładniejszą nazwę, SKU albo EAN.`;
+  const best=trafienia[0],remis=trafienia.filter(x=>x.score===best.score);
+  if(remis.length>1)return [`Znalazłem kilka produktów. Doprecyzuj nazwę, SKU albo EAN:`,...remis.slice(0,8).map(x=>`• ${x.p.nazwa} — ID ${x.p.id}, SKU ${x.p.sku||x.p.externalId||"—"}, EAN ${x.p.gtin||x.p.ean||"—"}`)].join("\n");
+  const p=best.p,baseStock=allegroStanOfertyProduktu(p),stock=publicationAction==="activate"?Math.max(1,baseStock):baseStock;
+  const d=await chmura("allegro-create-product-offer",{method:"POST",body:{product:p,options:{stock,publicationAction,publishNow:publicationAction==="activate"}},timeout:120000});
+  allegroOstatniBladWystawienia=null;
+  allegroZapiszWynikOperacji(p,d);await allegroZapiszAutoUzupelnienia(p,d);allegroZastosujWynikWystawienia(p,d);
+  if(d.offer?.id){
+    const categoryId=d.autoFilled?.allegroCategoryId||d.catalogMatch?.selected?.categoryId||p.allegroCategoryId||"";
+    const productId=d.autoFilled?.allegroProductId||d.catalogMatch?.selected?.id||p.allegroProductId||"";
+    await chmuraZapiszProduktyCentralnie([{productId:p.id,fields:{allegroOfferId:String(d.offer.id),...(categoryId?{allegroCategoryId:String(categoryId)}:{}),...(productId?{allegroProductId:String(productId)}:{})}}],"agent-allegro-publication");
+  }
+  await chmuraWczytajStan().catch(()=>{});await allegroWczytajDane(true).catch(()=>{});zbudujProdukty();
+  const updated=d.mode==="updated";
+  const finalStatus=d.offer?.publication?.status||d.offer?.status||(publicationAction==="activate"?"ACTIVE":"INACTIVE");
+  return [`✅ ${updated?"Znalazłem istniejącą ofertę i ją zaktualizowałem":finalStatus==="ACTIVE"?"Utworzyłem i aktywowałem nową ofertę":"Utworzyłem nowy szkic oferty"}: ${p.nazwa}.`,`Oferta: ${d.offer?.id||"—"}; status: ${finalStatus}; stan oferty Allegro: ${stock} szt. • stan magazynu pozostał bez zmian.`,`${d.duplicatePrevented?`Duplikat zablokowany — rozpoznano po ${d.match?.reason||"danych produktu"}.`:"Zapisano nowe potrójne powiązanie."}`,`Katalog: ${d.autoFilled?.allegroProductId||d.catalogMatch?.selected?.id||"—"}; kategoria: ${d.autoFilled?.allegroCategoryId||d.catalogMatch?.selected?.categoryId||"—"}.`].join("\n");
+}
+async function agentAIOdpowiedzPrzezCodex(tekst=""){
+  const requestId=`panel-${Date.now().toString(36)}-${globalThis.crypto?.randomUUID?.()||Math.random().toString(36).slice(2)}`;
+  const queued=await chmura("codex-agent-panel-enqueue",{method:"POST",body:{requestId,text:String(tekst||"").slice(0,2000)},timeout:15000});
+  if(!queued?.jobId)throw new Error("Serwer nie utworzył zadania dla Codex.");
+  const box=$("agentAICommandLiveResult");
+  if(box){box.hidden=false;box.className="agent-response-card agent-command-live-result";box.innerHTML=`<div class="agent-response-head"><b>🧠 Codex analizuje polecenie</b><small>bezpieczny plan i wykonanie</small></div><pre class="agent-answer-pre">Rozpoznaję zamiar i dobieram dozwoloną operację strony…</pre>`;}
+  for(let attempt=0;attempt<45;attempt++){
+    await new Promise(resolve=>setTimeout(resolve,1000));
+    const result=await chmura("codex-agent-result",{method:"POST",body:{id:queued.jobId},timeout:10000});
+    if(result.status==="completed")return result.response||"Codex zakończył zadanie bez treści odpowiedzi.";
+    if(result.status==="failed")throw new Error(result.error||"Codex nie wykonał zadania po trzech próbach.");
+  }
+  throw new Error("Codex nadal analizuje polecenie. Komputer z Agentem musi być włączony; spróbuj ponownie za chwilę.");
+}
+async function agentAIWykonajPolecenie(tekst=""){
+  const intent=agentAIRozpoznajPolecenie(tekst);
+  let odpowiedz="";
+  try{
+    if(intent.typ==="pomoc"){
+      odpowiedz=["Możesz pisać normalnie, np.:","• sprawdź samą funkcjonalność strony","• przeanalizuj błędy diagnostyczne","• sprawdź wydajność panelu administratora","• audyt produktów i katalogu","• sprawdź zapis i publikację zmian","• wstrzymaj / wznów kolejkę produktów","• anuluj wcześniejsze zadania produktów","• anuluj oczekujące zadania produktów","• ponów błędne kroki","• pobierz świeże dane ze wszystkich źródeł","• popraw opisy produktów","• sprawdź integracje","• pokaż centrum operacyjne / co jest dziś do poprawy?"].join("\n");
+    }else if(intent.typ==="magazyn-decyzja"){
+      odpowiedz=await agentAIWykonajDecyzjeMagazynowa(intent);
+    }else if(intent.typ==="magazyn-stan-zmiana"){
+      odpowiedz=await agentAIWykonajZmianeStanu(intent);
+    }else if(intent.typ==="plan-wykonaj"){
+      odpowiedz=await agentAIWykonajPlanBezpieczny("full");
+    }else if(intent.typ==="plan-data"){
+      odpowiedz=await agentAIWykonajPlanBezpieczny("data");
+    }else if(intent.typ==="plan-health"){
+      odpowiedz=await agentAIWykonajPlanBezpieczny("health");
+    }else if(intent.typ==="plan-retry"){
+      odpowiedz=await agentAIWykonajPlanBezpieczny("retry");
+    }else if(intent.typ==="link-producenta-analiza"){
+      const wynik=await agentAISprawdzLinkProducenta(intent.url,true);
+      if(wynik?.blad)odpowiedz=`Nie udało się teraz odczytać linku. Zaplanowałem kolejną próbę: ${wynik.rec?.nextRetryAt?new Date(wynik.rec.nextRetryAt).toLocaleString("pl-PL"):"później"}. Powód: ${wynik.blad.message||wynik.blad}`;
+      else{const d=wynik?.dane||{},alts=d.alternatives||[],audit=agentAIOcenaDodaniaProduktu(d.product||{},d);odpowiedz=[d.needsChoice?`Znalazłem ${alts.length} możliwe produkty — nie zgaduję, wybierz wariant w sekcji Linki producentów.`:`Znalazłem produkt: ${d.product?.nazwa||"bez nazwy"}.`,`Kompletność danych: ${d.confidence||0}%. Gotowość do dodania: ${audit.score}%. Braki: ${(wynik.braki||[]).join(", ")||"brak"}.`,`EAN: ${d.product?.ean||d.product?.gtin||"—"} • kod producenta: ${d.product?.kodProducenta||d.product?.mpn||"—"}.`,`Opis: ${String(d.product?.opis||"").length} znaków • zdjęcia: ${[d.product?.zdjecie,...(d.product?.zdjecia||[])].filter(Boolean).length}.`,audit.blockingDuplicate?`Zablokowałem duplikat: istnieje produkt #${audit.blockingDuplicate.product.id} ${audit.blockingDuplicate.product.nazwa}.`:intent.addProduct&&!d.needsChoice?"Przygotowuję bezpieczny formularz dodania produktu — przed zapisem zobaczysz kontrolę duplikatów i kompletności.":"",d.fromCache?`Użyłem pamięci Agenta z ${d.cacheSavedAt?new Date(d.cacheSavedAt).toLocaleString("pl-PL"):"poprzedniej kontroli"}.`:"",d.repaired?`Naprawiony adres: ${d.resolvedUrl||d.canonicalUrl}`:"",...alts.slice(0,5).map((x,i)=>`${i+1}. ${x.product?.nazwa||"Produkt"} • ${x.confidence||0}% • ${x.url}`)].filter(Boolean).join("\n");if(intent.addProduct&&!d.needsChoice&&!audit.blockingDuplicate&&wynik.rec?.id)setTimeout(()=>agentAIWypelnijNowyProduktZLinku(wynik.rec.id),700);}
+    }else if(intent.typ==="centrum"){
+      odpowiedz=agentAICentrumTekst();
+    }else if(intent.typ==="komunikacja"){
+      odpowiedz=agentAIKomunikacjaTekst();
+    }else if(intent.typ==="wysylki"){
+      odpowiedz=agentAIWysylkiTekst();
+    }else if(intent.typ==="produkty-audyt"){
+      odpowiedz=agentAIProduktyAudytTekst();
+    }else if(intent.typ==="producenci"){
+      odpowiedz=agentAIProducenciTekst();
+    }else if(intent.typ==="diagnostyka"){
+      odpowiedz=agentAIDiagnostykaTekst();
+    }else if(intent.typ==="pamiec-zapis"){
+      const rec=agentAIZapiszPamiec(intent.tresc||"");
+      odpowiedz=rec?`Zapamiętałem na przyszłość: ${rec.wyzwalacz?`gdy „${rec.wyzwalacz}” → `:""}${rec.akcja}`:"Nie podałeś treści do zapamiętania. Napisz np. „zapamiętaj: przy brakach najpierw sprawdź dostawcę”.";
+    }else if(intent.typ==="pamiec-lista"){
+      odpowiedz=agentAIPamiecTekst();
+    }else if(intent.typ==="lokalizacje"){
+      odpowiedz=agentAILokalizacjeTekst();
+    }else if(intent.typ==="kolejka-produktow-sterowanie"){
+      odpowiedz=await agentAIKolejkaProduktowSteruj(intent.action);
+    }else if(intent.typ==="opisy"){
+      odpowiedz=agentAIOpisyTekst();
+    }else if(intent.typ==="opisy-popraw"){
+      odpowiedz=await agentAIPoprawOpisyProduktow(agentAILimitProduktowZPolecenia(intent.raw,40));
+      renderuj();
+    }else if(intent.typ==="linki-producentow"){
+      odpowiedz=agentAILinkiProducentowTekst();
+    }else if(intent.typ==="linki-producentow-sprawdz"){
+      odpowiedz=await agentAISprawdzLinkiProducentow(5);
+    }else if(intent.typ==="dostepnosc-producentow-sprawdz"){
+      const d=await agentAISprawdzDostepnoscProducentow();const s=d?.summary||{};
+      odpowiedz=d?`Wyrywkowo sprawdziłem ${s.checked||0} produktów u producentów. Dostępne: ${s.available||0}, niski stan: ${s.low||0}, brak: ${s.unavailable||0}, niepotwierdzone: ${s.unknown||0}. Próg ostrzeżenia: ${s.threshold||50} szt.`:"Nie udało się zakończyć monitoringu producentów.";
+    }else if(intent.typ==="lokalizacja-dodaj"){
+      if(!intent.kod){
+        odpowiedz="Podaj kod lokalizacji, np. „utwórz lokalizację R1-P1”.";
+      }else if(magazynLokalizacjaPoKodzie(intent.kod)){
+        odpowiedz=`Lokalizacja ${intent.kod} już istnieje. Możesz ją edytować w Magazyn → Lokalizacje.`;
+      }else{
+        magazynLokalizacje=[{id:"LOC-"+Date.now().toString(36),kod:intent.kod,nazwa:"",typ:"regał",strefa:"",pojemnosc:0,priorytet:999,uwagi:"Utworzone przez Agenta AI",aktywna:true,utworzono:new Date().toISOString(),aktualizacja:new Date().toISOString(),operator:sesja?.email||"administrator"},...(Array.isArray(magazynLokalizacje)?magazynLokalizacje:[])].slice(0,1000);
+        zapiszLS("artway_magazyn_lokalizacje",magazynLokalizacje);
+        odpowiedz=`Utworzyłem lokalizację ${intent.kod}. Uzupełnij nazwę/strefę/pojemność w Magazyn → Lokalizacje.`;
+      }
+    }else if(intent.typ==="sync"){
+      await synchronizujBazeCentralna(true);
+      odpowiedz="Synchronizacja bazy została uruchomiona. Dane z panelu powinny być zapisane i odświeżone na serwerze.";
+    }else if(intent.typ==="faktury"){
+      const przed=szkiceFaktur.length;
+      utworzSzkiceFakturMasowo();
+      odpowiedz=`Sprawdziłem szkice FV. Przed akcją było ich ${przed}, teraz jest ${szkiceFaktur.length}.`;
+    }else if(intent.typ==="export-magazyn"){
+      eksportujMagazynCSV();
+      odpowiedz="Eksport magazynu CSV został przygotowany do pobrania.";
+    }else if(intent.typ==="audyt-magazynu"){
+      audytMagazynuAI();
+      odpowiedz="Audyt magazynu JSON został przygotowany do pobrania.";
+    }else if(intent.typ==="kartoteka-domyslna"){
+      wypelnijDomyslnaKartotekeMagazynu();
+      odpowiedz="Uzupełniłem domyślne pola kartoteki tam, gdzie było to bezpieczne.";
+    }else if(intent.typ==="allegro-oferta"){
+      odpowiedz=await agentAIWykonajOferteAllegro(intent.query,intent.publicationAction||"keep");
+    }else if(intent.typ==="allegro-zlecenia"){
+      odpowiedz=agentAIAllegroZleceniaTekst();
+    }else if(intent.typ==="sprawdz"||intent.typ==="zamowienia"){
+      odpowiedz=agentAIZamowieniaTekst();
+    }else if(intent.typ==="zlecenie"){
+      odpowiedz=await agentAIZlecenieProducentaTekst();
+    }else if(intent.typ==="braki"){
+      odpowiedz=agentAIBrakiTekst();
+    }else if(intent.typ==="status"){
+      odpowiedz=agentAIStatusTekst();
+    }else if(intent.typ==="magazyn"){
+      odpowiedz=agentAIMagazynTekst();
+    }else if(intent.typ==="produkt"){
+      odpowiedz=agentAIProduktTekst(intent.query);
+    }else{
+      const pamiec=agentAIZnajdzPamiecDlaPolecenia(tekst);
+      odpowiedz=pamiec.length
+        ? ["Znalazłem pasujące zapamiętane procedury:",...pamiec.map(x=>`• ${x.wyzwalacz?`Gdy: ${x.wyzwalacz} → `:""}${x.akcja||x.tresc}`)].join("\n")
+        : await agentAIOdpowiedzPrzezCodex(tekst);
+    }
+    zapiszHistorieAgenta("komenda",`Polecenie z panelu: ${tekst}`,{polecenie:tekst,intencja:intent.typ,tryb:intent.tryb||"",odpowiedz});
+    loguj("info",`Agent AI/panel: ${intent.typ} — ${tekst}`);
+    return {intent,odpowiedz,stabilnyWidok:["magazyn-stan-zmiana","magazyn-decyzja"].includes(intent.typ)};
+  }catch(err){
+    odpowiedz=`Nie udało się wykonać polecenia: ${err?.message||err}`;
+    zapiszHistorieAgenta("komenda",`Błąd polecenia z panelu: ${tekst}`,{polecenie:tekst,intencja:intent.typ,tryb:intent.tryb||"",odpowiedz,blad:String(err?.message||err)});
+    loguj("error",`Agent AI/panel błąd: ${err?.message||err}`);
+    return {intent,odpowiedz,blad:err,stabilnyWidok:["magazyn-stan-zmiana","magazyn-decyzja"].includes(intent.typ)};
+  }
+}
+function agentAIPokazWynikKomendyStabilnie(wynik={}){
+  const box=$("agentAICommandLiveResult"),cloud=$("agentAICommandCloudState");
+  if(box){
+    box.hidden=false;
+    box.className=`agent-response-card agent-command-live-result${wynik.blad?" is-error":""}`;
+    box.innerHTML=`<div class="agent-response-head"><b>${wynik.blad?"⚠️ Polecenie nie zostało zapisane":"✅ Wynik polecenia magazynowego"}</b><small>${esc(new Date().toLocaleString("pl-PL"))}</small></div><pre class="agent-answer-pre">${esc(wynik.odpowiedz||"")}</pre>`;
+  }
+  if(cloud){
+    cloud.className=`lvl ${chmuraStan.dostepna?"lvl-ok":"lvl-blad"}`;
+    cloud.textContent=chmuraStan.dostepna?`chmura • rewizja ${chmuraStan.rev||0}`:"brak połączenia z chmurą";
+  }
+}
+async function agentAIPrzyjmijKomende(e){
+  if(e) e.preventDefault();
+  const input=$("agentAICommandInput"), tekst=String(input?.value||"").trim();
+  if(!tekst){ toast("Wpisz polecenie dla agenta"); return false; }
+  const btn=e?.submitter;
+  if(btn) btn.disabled=true;
+  const wynik=await agentAIWykonajPolecenie(tekst);
+  toast(wynik.blad?"Agent zapisał błąd polecenia":["magazyn-stan-zmiana","magazyn-decyzja"].includes(wynik.intent?.typ)?"Agent obsłużył bezpieczny krok decyzji ✅":"Agent AI wykonał polecenie ✅");
+  if(input) input.value="";
+  if(btn) btn.disabled=false;
+  if(wynik.stabilnyWidok)agentAIPokazWynikKomendyStabilnie(wynik);else renderuj();
+  setTimeout(()=>{$("agentAICommandInput")?.focus();},30);
+  return false;
+}
+function agentAIWstawKomende(tekst){
+  const input=$("agentAICommandInput");
+  if(!input) return;
+  input.value=tekst;
+  input.focus();
+}
+function agentAIHashTekstu(value=""){
+  let hash=2166136261;
+  for(const char of String(value)){hash^=char.charCodeAt(0);hash=Math.imul(hash,16777619);}
+  return (hash>>>0).toString(36);
+}
+function agentAIOdciskZadania(task={}){
+  const id=String(task.id||"zadanie"),poziom=String(task.poziom||"ok");
+  const opis=id==="synchronizacja-danych"?poziom:String(task.opis||"").replace(/\s+/g," ").trim().toLowerCase();
+  return `${id}:${agentAIHashTekstu(`${poziom}|${opis}`)}`;
+}
+function agentAIProduktyWdrozenie(){
+  const addedIds=new Set((produktyDodane||[]).map(p=>String(p.id)));
+  return produktyDoAdministracji().filter(p=>addedIds.has(String(p.id))&&p.agentOnboardingStatus&&p.agentOnboardingStatus!=="completed");
+}
+function agentAISynchronizujCyklZadan(analiza=[]){
+  const now=new Date().toISOString(),next={...(agentAIPlanCykl&&typeof agentAIPlanCykl==="object"?agentAIPlanCykl:{})};let changed=false;
+  for(const task of analiza){
+    const id=String(task.id||"");if(!id)continue;
+    const fingerprint=agentAIOdciskZadania(task),current=next[id];
+    if(task.poziom==="ok"){
+      if(current&&current.state!=="resolved"){
+        next[id]={...current,state:"resolved",resolvedAt:now,lastStatus:"ok",updatedAt:now};changed=true;
+      }
+      continue;
+    }
+    if(!current||current.state==="resolved"||current.fingerprint!==fingerprint){
+      next[id]={id,fingerprint,state:"open",title:task.tytul||id,description:task.opis||"",severity:task.poziom||"warn",firstSeenAt:now,updatedAt:now};changed=true;
+    }else if(current.title!==task.tytul||current.description!==task.opis||current.severity!==task.poziom){
+      next[id]={...current,title:task.tytul||id,description:task.opis||"",severity:task.poziom||"warn",updatedAt:now};changed=true;
+    }
+  }
+  if(changed){agentAIPlanCykl=next;zapiszLS("artway_agent_ai_plan_cykl",agentAIPlanCykl);zaplanujZapisUstawien();}
+  return next;
+}
+function agentAIAnalizaAktywna(analiza=agentAIAnaliza()){
+  const cycle=agentAISynchronizujCyklZadan(analiza);
+  return analiza.filter(task=>task.poziom!=="ok"&&!(cycle[task.id]?.state==="done"&&cycle[task.id]?.fingerprint===agentAIOdciskZadania(task)));
+}
+function agentAIOznaczZadanieWykonane(id,source="administrator"){
+  const analiza=agentAIAnaliza(),task=analiza.find(x=>String(x.id)===String(id));if(!task)return;
+  agentAISynchronizujCyklZadan(analiza);
+  const now=new Date().toISOString(),fingerprint=agentAIOdciskZadania(task),current=agentAIPlanCykl[id]||{};
+  agentAIPlanCykl={...agentAIPlanCykl,[id]:{...current,id:String(id),fingerprint,state:"done",title:task.tytul||id,description:task.opis||"",severity:task.poziom||"warn",completedAt:now,completedBy:sesja?.email||"administrator",completionSource:source,updatedAt:now}};
+  zapiszLS("artway_agent_ai_plan_cykl",agentAIPlanCykl);
+  zapiszHistorieAgenta("zadanie-wykonane",`Zakończono zadanie planu: ${task.tytul}`,{taskId:id,fingerprint,source,opis:task.opis||""});
+  zaplanujZapisUstawien();toast("✅ Zadanie przeniesiono do historii. Wróci tylko, gdy pojawi się nowy problem.");renderuj();
+}
+function agentAIPrzywrocZadanie(id){
+  const current=agentAIPlanCykl?.[id];if(!current)return;
+  agentAIPlanCykl={...agentAIPlanCykl,[id]:{...current,state:"open",reopenedAt:new Date().toISOString(),reopenedBy:sesja?.email||"administrator",updatedAt:new Date().toISOString()}};
+  zapiszLS("artway_agent_ai_plan_cykl",agentAIPlanCykl);zapiszHistorieAgenta("zadanie-przywrocone",`Przywrócono zadanie planu: ${current.title||id}`,{taskId:id});zaplanujZapisUstawien();renderuj();
+}
+function agentAIAnaliza(){
+  const zam=pobierzZamowienia(), produktyAdmin=produktyDoAdministracji().filter(p=>!czyProduktAdminWKoszu(p));
+  const aktywne=zam.filter(z=>!["anulowane","zakończone","dostarczone"].includes(String(z.status||"").toLowerCase()));
+  const firmoweBezSzkicu=zam.filter(z=>(z.klient?.nip||z.klient?.firma)&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr));
+  const doPotwierdzenia=zam.filter(z=>z.wymagaPotwierdzeniaDostepnosci);
+  const bezNumeru=aktywne.filter(z=>!daneWysylki(z).numer);
+  const bezCeny=produktyAdmin.filter(p=>!produktMaCeneSprzedazy(p));
+  const niedostepne=produktyAdmin.filter(produktOznaczonyNiedostepny);
+  const bezZdjec=produktyAdmin.filter(p=>!p.zdjecie);
+  const prog=Number(ustawieniaMagazynuPelne().progNiski)||5, rez=rezerwacjeMagazynowe();
+  const niskiStan=produktyAdmin.filter(p=>{const s=stanMagazynuId(p.id);return s!==null&&s<=progNiskiProduktu(p);});
+  const plan=potrzebyZatowarowania(),planIds=new Set(plan.map(x=>String(x.produkt?.id||"")));
+  const nadrezerwacje=produktyAdmin.filter(p=>{const d=dostepneSztukiMagazynu(p,rez);return d!==null&&d<0;});
+  const brakKartoteki=produktyAdmin.filter(p=>planIds.has(String(p.id))&&!magazynMetaProduktu(p.id).dostawca);
+  const bezMonitoringu=produktyAdmin.filter(p=>stanMagazynuId(p.id)===null);
+  const stareInwentaryzacje=produktyAdmin.filter(p=>{
+    const s=stanMagazynuId(p.id), d=magazynMetaProduktu(p.id).ostatniaInwentaryzacja;
+    if(s===null) return false;
+    if(!d) return true;
+    return (Date.now()-new Date(d).getTime())>90*86400000;
+  });
+  const lokAktywne=magazynLokalizacjeAktywne(), statLok=statystykiLokalizacji(produktyAdmin), lokPozaSlownikiem=Object.keys(statLok).filter(k=>k!=="BRAK"&&!magazynLokalizacjaPoKodzie(k));
+  const nadwyzki=agentAINadwyzkiDoPrzyjecia();
+  const linkiProd=agentAILinkiOczekujace(),linkiDoWyboru=linkiProd.filter(x=>String(x.status||"").toLowerCase()==="wymaga wyboru"),linkiDoPonowienia=agentAILinkiGotoweDoPonowienia();
+  const monitoringProducentow=statystykiDostepnosciProducentow(), alertyProducentow=[...monitoringProducentow.braki,...monitoringProducentow.niskie];
+  const opisyDoPoprawy=agentAIProduktyZProblememOpisu(500);
+  const produktyWdrozenie=agentAIProduktyWdrozenie();
+  const allegroKontrola=aktywneZamowieniaAllegro().map(z=>({z,a:allegroAnalizaMagazynowaZamowienia(z)}));
+  const allegroBraki=allegroKontrola.filter(x=>x.a.braki>0||x.a.nierozpoznane>0);
+  const lokalizacjeDoUstalenia=new Map(),dodajBrakLokalizacji=p=>{const id=String(p?.produkt?.id??p?.id??"");if(id&&!lokalizacjeDoUstalenia.has(id))lokalizacjeDoUstalenia.set(id,p.produkt||produktMagazynowy(id)||{id,nazwa:p.nazwa||`Produkt ${id}`});};
+  allegroKontrola.flatMap(x=>x.a.pozycje||[]).filter(p=>p.brakLokalizacji).forEach(dodajBrakLokalizacji);
+  aktywne.flatMap(z=>pozycjeZamowieniaMagazyn(z)).forEach(p=>{const stan=stanMagazynuId(p.id),meta=magazynMetaProduktu(p.id);if(stan!==null&&stan>=Number(rez[p.id]||0)&&!meta.lokalizacja)dodajBrakLokalizacji(p);});
+  const allegroOfertaTasks=allegroAktywneZadaniaAgentaOfert();
+  const allegroDefaultsIssues=Object.values(allegroStan.offerDefaultsAudit?.items||{}).filter(x=>!x.stockUpdated||!x.republishUpdated);
+  const problemyFunkcji=[!chmuraStan.dostepna?"wspólna baza":null,stanBramki.sprawdzono&&stanBramki.email?.configured===false?"e-mail":null,stanBramki.sprawdzono&&stanBramki.inpost?.configured===false?"InPost":null,allegroStan.sprawdzono&&!allegroStan.connected?"Allegro":null,infaktStan.sprawdzono&&!infaktStan.connected?"inFakt":null].filter(Boolean);
+  const syncTime=Date.parse(chmuraStan.updated_at||""),syncAge=Number.isFinite(syncTime)?Math.max(0,Math.round((Date.now()-syncTime)/60000)):null,syncStale=syncAge!==null&&syncAge>5;
+  const pozycje=[
+    {id:"funkcjonalnosc-strony",poziom:problemyFunkcji.length?"bad":"ok",ikona:"🩺",tytul:"Funkcjonalność strony — priorytet 1",opis:problemyFunkcji.length?`Kontroli wymagają: ${problemyFunkcji.join(", ")}.`:`Baza i sprawdzone integracje krytyczne odpowiadają poprawnie.`,akcja:problemyFunkcji.length?"#/admin/system/diagnostyka":"plan-bezpieczny"},
+    {id:"synchronizacja-danych",poziom:!chmuraStan.admin?"bad":syncStale?"warn":"ok",ikona:"🔄",tytul:"Pobieranie i świeżość danych — priorytet 2",opis:!chmuraStan.admin?"Agent nie ma aktywnego dostępu do wspólnej bazy.":syncAge===null?"Brak potwierdzonego czasu ostatniej synchronizacji.":`Ostatnia synchronizacja wspólnej bazy: ${syncAge} min temu.`,akcja:"plan-bezpieczny"},
+    {id:"wdrozenie-produktow",poziom:produktyWdrozenie.some(p=>p.agentOnboardingStatus==="needs_attention")?"bad":produktyWdrozenie.length?"warn":"ok",ikona:"✨",tytul:"Nowe produkty administratora — wdrożenie Agenta",opis:produktyWdrozenie.length?`${produktyWdrozenie.length} nowych produktów wymaga dokończenia kontroli danych, duplikatów, opisów, zdjęć, producenta, kategorii sklepu lub przygotowania Allegro.`:"Każdy nowy produkt administratora przeszedł pełną kontrolę Agenta.",akcja:"#/admin/agent-ai/produkty"},
+    {id:"allegro-magazyn",poziom:allegroBraki.length?"bad":"ok",ikona:"🟠",tytul:"Zlecenia Allegro — braki i pakowanie",opis:allegroBraki.length?`${allegroBraki.length} aktywnych zleceń Allegro wymaga zamówienia brakujących sztuk albo poprawy EAN/SKU.`:`${allegroKontrola.length} aktywnych zleceń Allegro sprawdzono; stany pozwalają na kompletację.`,akcja:"#/admin/allegro/zamowienia"},
+    {id:"lokalizacje-kompletacja",poziom:lokalizacjeDoUstalenia.size?"warn":"ok",ikona:"📍",tytul:"Magazyn — lokalizacje do kompletacji",opis:lokalizacjeDoUstalenia.size?`${lokalizacjeDoUstalenia.size} produktów z aktywnych zamówień ma pokrycie w stanie, ale nie ma przypisanego miejsca. Towar pozostaje zarezerwowany; magazyn ustala lokalizację osobno.`:"Towar do aktywnych zamówień ma przypisane lokalizacje albo nie wymaga jeszcze kompletacji.",akcja:"#/admin/magazyn/stany"},
+    {id:"allegro-oferty-agent",poziom:allegroOfertaTasks.length?"warn":"ok",ikona:"🏷️",tytul:"Agent ofert Allegro",opis:allegroOfertaTasks.length?`${allegroOfertaTasks.length} produktów ma zapisane braki danych albo błąd API wystawiania.`:"Brak otwartych zadań dotyczących ofert Allegro.",akcja:"#/admin/allegro/oferty"},
+    {id:"allegro-ustawienia-ofert",poziom:allegroDefaultsIssues.length?"warn":"ok",ikona:"♻️",tytul:"Oferty Allegro — stan i wznawianie",opis:allegroDefaultsIssues.length?`${allegroDefaultsIssues.length} starszych ofert wymaga uzupełnienia danych wymaganych przez Allegro, aby włączyć automatyczne wznawianie. Domyślny stan sprzedażowy ${allegroStanOfertyProduktu()} jest niezależny od magazynu.`:`Oferty mają ustawiony domyślny stan ${allegroStanOfertyProduktu()} szt. i automatyczne wznawianie.`,akcja:"#/admin/allegro/ustawienia"},
+    {id:"dostepnosc",poziom:doPotwierdzenia.length?"warn":"ok",ikona:"🔎",tytul:"Zamówienia do potwierdzenia dostępności",opis:doPotwierdzenia.length?`${doPotwierdzenia.length} zamówień ma pozycje powyżej ${LIMIT_POTWIERDZENIA_DOSTEPNOSCI} szt.`:"Brak zamówień wymagających potwierdzenia ilości.",akcja:"#/admin/zamowienia"},
+    {id:"wysylki",poziom:bezNumeru.length?"warn":"ok",ikona:"🚚",tytul:"Przesyłki bez numeru nadania",opis:bezNumeru.length?`${bezNumeru.length} aktywnych zleceń czeka na numer/etykietę InPost.`:"Aktywne przesyłki mają komplet podstawowych danych.",akcja:"#/admin/wysylki"},
+    {id:"faktury",poziom:firmoweBezSzkicu.length?"warn":"ok",ikona:"🧾",tytul:"Szkice FV / inFakt",opis:firmoweBezSzkicu.length?`${firmoweBezSzkicu.length} zamówień firmowych nie ma jeszcze szkicu FV.`:"Szkice FV są przygotowane dla zamówień firmowych.",akcja:"masowe-fv"},
+    {id:"ceny",poziom:bezCeny.length?"bad":"ok",ikona:"💰",tytul:"Produkty bez ceny",opis:bezCeny.length?`${bezCeny.length} produktów wymaga uzupełnienia ceny przed sprzedażą.`:"Ceny produktów są poprawne.",akcja:"#/admin/produkty"},
+    {id:"sprzedaz",poziom:niedostepne.length?"warn":"ok",ikona:"🛒",tytul:"Produkty wyłączone ze sprzedaży",opis:niedostepne.length?`${niedostepne.length} produktów jest oznaczonych jako chwilowo niedostępne.`:"Wszystkie aktywne produkty są dostępne w sprzedaży.",akcja:"#/admin/magazyn"},
+    {id:"dostepnosc-producentow",poziom:monitoringProducentow.wymagajaDecyzji.length||monitoringProducentow.braki.length?"bad":monitoringProducentow.niskie.length||monitoringProducentow.nieznane.length?"warn":"ok",ikona:"🏭",tytul:"Dostępność u producentów",opis:monitoringProducentow.wymagajaDecyzji.length?`${monitoringProducentow.wymagajaDecyzji.length} produktów wymaga decyzji: pozostawić sprzedaż na określony czas, ukryć lub włączyć automatyczne wznowienie.`:alertyProducentow.length?`${monitoringProducentow.braki.length} braków i ${monitoringProducentow.niskie.length} niskich stanów u producentów ma zapisaną decyzję. Próg: ${ustawieniaMagazynuPelne().progNiskiProducenta} szt.`:`Monitorowanych linków: ${monitoringProducentow.products.length}; do odświeżenia lub bez potwierdzenia: ${monitoringProducentow.nieznane.length}.`,akcja:"#/admin/magazyn/dostawcy"},
+    {id:"magazyn",poziom:"ok",ikona:"🏬",tytul:"Stan lokalnego magazynu — pomocniczo",opis:niskiStan.length?`${niskiStan.length} produktów ma niski stan lokalny. Nie jest to samodzielny powód wyłączenia sprzedaży; ważniejszy jest producent i aktywne zamówienia.`:"Lokalne stany są informacją pomocniczą.",akcja:"#/admin/magazyn/stany"},
+    {id:"zatowarowanie",poziom:plan.length?"warn":"ok",ikona:"📦",tytul:"Plan zatowarowania — braki do zamówień",opis:plan.length?`${plan.length} produktów brakuje do aktywnych zamówień. Szacowana wartość braków: ${zl(plan.reduce((s,x)=>s+kwotaNum(x.ilosc*kwotaNum(x.produkt.cena)),0))}.`:"Brak produktów, których brakuje do aktywnych zamówień.",akcja:"utworz-zlecenie-braki"},
+    {id:"przyjecia-nadwyzek",poziom:nadwyzki.length?"warn":"ok",ikona:"📥",tytul:"Dzienne przyjęcie nadwyżek",opis:nadwyzki.length?`${nadwyzki.length} pozycji ze zleceń agenta ma nadwyżkę do decyzji/przyjęcia na magazyn.`:"Brak nadwyżek oczekujących na przyjęcie.",akcja:"#/admin/magazyn/plan"},
+    {id:"nadrezerwacje",poziom:nadrezerwacje.length?"bad":"ok",ikona:"🚨",tytul:"Rezerwacje większe niż stan",opis:nadrezerwacje.length?`${nadrezerwacje.length} produktów ma więcej sztuk w aktywnych zamówieniach niż fizycznie w magazynie.`:"Nie ma nadrezerwacji magazynowych.",akcja:"#/admin/magazyn"},
+    {id:"kartoteka",poziom:brakKartoteki.length?"warn":"ok",ikona:"🗂️",tytul:"Kartoteka zakupowa",opis:brakKartoteki.length?`${brakKartoteki.length} produktów z realnym brakiem nie ma przypisanego dostawcy.`:"Każdy realny brak ma dane potrzebne do Planu zatowarowania.",akcja:"#/admin/magazyn/stany"},
+    {id:"lokalizacje",poziom:(!lokAktywne.length||lokPozaSlownikiem.length)?"warn":"ok",ikona:"🗺️",tytul:"Słownik lokalizacji magazynu",opis:!lokAktywne.length?"Brak utworzonych lokalizacji magazynu.":lokPozaSlownikiem.length?`${lokPozaSlownikiem.length} lokalizacji przy produktach nie ma w słowniku.`:`Aktywne lokalizacje: ${lokAktywne.length}.`,akcja:"#/admin/magazyn"},
+    {id:"pamiec",poziom:(agentAIPamiec||[]).length?"ok":"warn",ikona:"🧠",tytul:"Pamięć i procedury agenta",opis:(agentAIPamiec||[]).length?`Agent ma ${(agentAIPamiec||[]).length} zapamiętanych procedur/notatek.`:"Agent nie ma jeszcze własnych procedur. Naucz go poleceniem „zapamiętaj: …”.",akcja:"#/admin/agent-ai"},
+    {id:"linki-producentow",poziom:linkiDoWyboru.length?"bad":linkiProd.length?"warn":"ok",ikona:"🔗",tytul:"Linki producentów do pobrania",opis:linkiProd.length?`${linkiProd.length} zadań linków: ${linkiDoWyboru.length} wymaga wyboru właściwego produktu, ${linkiDoPonowienia.length} jest gotowych do ponownego pobrania.`:"Brak zaległych linków producentów.",akcja:"sprawdz-linki-producentow"},
+    {id:"opisy-produktow",poziom:opisyDoPoprawy.length?"warn":"ok",ikona:"📝",tytul:"Opisy produktów",opis:opisyDoPoprawy.length?`${opisyDoPoprawy.length} produktów wymaga krótkiego opisu albo uporządkowania pełnego opisu.`:"Krótkie i pełne opisy produktów są uporządkowane.",akcja:"popraw-opisy"},
+    {id:"monitoring",poziom:bezMonitoringu.length?"warn":"ok",ikona:"📍",tytul:"Produkty bez monitorowanego stanu",opis:bezMonitoringu.length?`${bezMonitoringu.length} produktów działa bez limitu magazynowego — poprawne, jeśli to świadoma decyzja.`:"Wszystkie produkty mają monitorowany stan.",akcja:"#/admin/magazyn"},
+    {id:"inwentaryzacja",poziom:stareInwentaryzacje.length?"warn":"ok",ikona:"✅",tytul:"Inwentaryzacja",opis:stareInwentaryzacje.length?`${stareInwentaryzacje.length} monitorowanych produktów nie ma świeżej daty inwentaryzacji.`:"Inwentaryzacja monitorowanych produktów jest aktualna.",akcja:"audyt-magazynu"},
+    {id:"zdjecia",poziom:bezZdjec.length?"warn":"ok",ikona:"🖼️",tytul:"Zdjęcia produktów",opis:bezZdjec.length?`${bezZdjec.length} produktów używa ikony zamiast zdjęcia.`:"Produkty mają zdjęcia.",akcja:"#/admin/produkty"},
+    {id:"integracje",poziom:(stanBramki.email?.configured&&stanBramki.inpost?.configured)!==false?"ok":"warn",ikona:"🔌",tytul:"Integracje",opis:`E-mail: ${stanBramki.email?.configured?"OK":"sprawdź"} • InPost: ${stanBramki.inpost?.configured?"OK":"sprawdź"} • baza: ${chmuraStan.admin?"połączona":"wpisz hasło bazy"}`,akcja:"#/admin/personalizacja"}
+  ];
+  return pozycje;
+}
+function utworzSzkiceFakturMasowo(){
+  const zam=pobierzZamowienia().filter(z=>(z.klient?.nip||z.klient?.firma)&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr));
+  if(!zam.length){ toast("Brak nowych zamówień firmowych do szkiców FV"); return; }
+  const nowe=zam.map(z=>daneSzkicuFakturyZamowienia(z.nr)).filter(Boolean);
+  szkiceFaktur=[...nowe,...szkiceFaktur].slice(0,2000);
+  zapiszLS("artway_faktury_szkice",szkiceFaktur);
+  loguj("info",`Agent AI: utworzono ${nowe.length} szkiców FV`);
+  toast(`Utworzono ${nowe.length} szkiców FV ✅`);
+  renderuj();
+}
+function agentAIKonkretneDzialanie(x={}){
+  if(x.id==="linki-producentow"&&x.poziom==="bad")return {action:"",href:"#/admin/agent-ai/plan",label:"Wybierz właściwe produkty",done:"Każdy niejednoznaczny link ma ręcznie wybrany wariant; Agent nie zgaduje produktu.",eta:"do 30 min",mode:"approval",owner:"Administrator",requiresApproval:true};
+  const automatic={
+    "funkcjonalnosc-strony":{action:"plan-bezpieczny",label:"Sprawdź funkcje",done:"Baza i integracje krytyczne odpowiadają poprawnie.",eta:"1–3 min"},
+    "synchronizacja-danych":{action:"plan-bezpieczny",label:"Pobierz świeże dane",done:"Sklep, Allegro, InPost i inFakt mają aktualne dane.",eta:"1–3 min"},
+    faktury:{action:"masowe-fv",label:"Przygotuj szkice FV",done:"Każde zamówienie firmowe ma szkic dokumentu.",eta:"< 1 min"},
+    zatowarowanie:{action:"utworz-zlecenie-braki",label:"Aktualizuj szkice producentów",done:"Każdy realny brak jest w jednym bieżącym dokumencie producenta.",eta:"< 1 min"},
+    "linki-producentow":{action:"sprawdz-linki-producentow",label:"Sprawdź linki",done:"Każdy link ma zapisany wynik i listę brakujących danych.",eta:"1–5 min"},
+    "opisy-produktow":{action:"popraw-opisy",label:"Popraw opisy",done:"Krótki i pełny opis mają uporządkowaną strukturę.",eta:"< 2 min"},
+    kartoteka:{action:"kartoteka-domyslna",label:"Uzupełnij bezpieczne pola",done:"Produkty mają podstawową kartotekę do dalszej kontroli.",eta:"< 1 min"},
+    inwentaryzacja:{action:"audyt-magazynu",label:"Wykonaj audyt",done:"Powstał raport produktów wymagających inwentaryzacji.",eta:"< 1 min"}
+  };
+  if(automatic[x.id])return {...automatic[x.id],mode:"automatic",owner:"Agent AI",requiresApproval:false};
+  const approval={
+    "wdrozenie-produktow":{href:"#/admin/agent-ai/produkty",label:"Dokończ nowe produkty",done:"Każdy nowy produkt ma kompletną tożsamość, opis, zdjęcia, producenta, kategorię sklepu i gotowy szkic Allegro."},
+    "dostepnosc-producentow":{href:"#/admin/magazyn/dostawcy",label:"Wybierz termin lub ukrycie",done:"Każdy brak i niski stan ma decyzję: automat, termin 1–7 dni, ukrycie lub ręczne pozostawienie sprzedaży."},
+    dostepnosc:{href:"#/admin/zamowienia",label:"Potwierdź lub ustaw oczekiwanie",done:"Każde zamówienie ma decyzję: potwierdzone, oczekiwanie 1–2 dni, kontakt z klientem albo brak."},
+    sprzedaz:{href:"#/admin/magazyn/dostawcy",label:"Sprawdź powód i wybierz tryb",done:"Każdy wyłączony produkt ma termin albo jasną zasadę automatycznego wznowienia."},
+    "allegro-oferty-agent":{href:"#/admin/allegro/oferty",label:"Uzupełnij, ponów lub zamknij",done:"Każde zadanie oferty zostało uzupełnione, ponowione albo świadomie zamknięte."},
+    "przyjecia-nadwyzek":{href:"#/admin/magazyn/plan",label:"Przyjmij lub pozostaw",done:"Każda nadwyżka ma zapisaną decyzję i ewentualny ruch magazynowy."}
+  };
+  if(approval[x.id])return {...approval[x.id],action:"",eta:x.poziom==="bad"?"do 30 min":"dzisiaj",mode:"approval",owner:"Administrator",requiresApproval:true};
+  return {action:"",href:String(x.akcja||"").startsWith("#")?x.akcja:"#/admin/agent-ai/plan",label:"Otwórz i zdecyduj",done:agentAIOpisKroku(x),eta:x.poziom==="bad"?"do 30 min":"dzisiaj",mode:"approval",owner:"Administrator",requiresApproval:true};
+}
+function agentAIProfilePlanow(){
+  return {
+    full:{id:"full",icon:"🧭",label:"Pełny plan",description:"Funkcjonalność, pobieranie danych i bezpieczne przygotowanie pracy.",areas:["site-health","allegro-orders","inpost","infakt"],local:["database","suppliers","invoices","links"]},
+    data:{id:"data",icon:"🔄",label:"Pobieranie danych",description:"Odświeża źródła i bazę bez tworzenia dokumentów roboczych.",areas:["allegro-orders","inpost","infakt"],local:["database","links"]},
+    health:{id:"health",icon:"🩺",label:"Funkcjonalność",description:"Sprawdza stronę, integracje i wspólną bazę bez operacji biznesowych.",areas:["site-health"],local:["database"]}
+  };
+}
+function agentAIUstawProfil(profil="full"){
+  if(agentAIPlanStan.busy||!agentAIProfilePlanow()[profil])return;
+  agentAIPlanProfil=profil;zapiszLS("artway_agent_plan_profil",profil);agentAIPlanStan={...agentAIPlanStan,profile:profil};renderuj();
+}
+async function agentAIPobierzHistorieWykonan(cicho=false){
+  if(agentAIPlanStan.historyLoading||!chmuraToken)return [];
+  agentAIPlanStan={...agentAIPlanStan,historyLoading:true};
+  try{
+    const d=await chmura("agent-action-runs",{timeout:20000});
+    const history=Array.isArray(d.items)?d.items:[];agentAIPlanStan={...agentAIPlanStan,history,historyLoading:false};
+    if(!cicho)toast(`Pobrano ${history.length} wykonań Agenta`);renderuj();return history;
+  }catch(e){agentAIPlanStan={...agentAIPlanStan,historyLoading:false};if(!cicho)toast(`Historia Agenta: ${e.message||e}`);return [];}
+}
+function agentAIBledneObszary(){
+  const current=(agentAIPlanStan.results||[]).filter(x=>x.status==="error"&&x.area).map(x=>x.area);
+  if(current.length)return [...new Set(current)];
+  const last=(agentAIPlanStan.history||[]).find(x=>(x.results||[]).some(r=>r.status==="error"));
+  return [...new Set((last?.results||[]).filter(x=>x.status==="error"&&x.area).map(x=>x.area))];
+}
+async function agentAIWykonajPlanBezpieczny(profile=agentAIPlanProfil,overrideAreas=null){
+  if(agentAIPlanStan.busy)return "Plan Agenta jest już wykonywany.";
+  const profiles=agentAIProfilePlanow(),retry=profile==="retry",definition=retry?{id:"retry",label:"Ponowienie błędów",areas:agentAIBledneObszary(),local:[]}:profiles[profile]||profiles.full;
+  const areas=Array.isArray(overrideAreas)?overrideAreas:definition.areas;
+  if(retry&&!areas.length){toast("Nie ma błędnych kroków do ponowienia");return "Nie ma błędnych kroków do ponowienia.";}
+  const startedAt=new Date().toISOString(),results=[],runStarted=Date.now();
+  agentAIPlanStan={...agentAIPlanStan,busy:true,current:"Uruchamianie planu",startedAt,completedAt:null,results:[],error:"",profile:definition.id,runId:""};renderuj();
+  const add=(entry={})=>{const result={area:entry.area||"",name:entry.name||entry.label||"Działanie",status:entry.status||"completed",detail:String(entry.detail||entry.error||""),durationMs:Number(entry.durationMs)||0,at:new Date().toISOString()};results.push(result);agentAIPlanStan={...agentAIPlanStan,current:result.name,results:[...results]};renderuj();return result;};
+  const timed=async(area,name,fn)=>{const t=Date.now();try{return add({area,name,status:"completed",detail:await fn(),durationMs:Date.now()-t});}catch(e){return add({area,name,status:"error",error:e.message||e,durationMs:Date.now()-t});}};
+  try{
+    if(areas.length){
+      try{
+        const d=await chmura("agent-run-safe-checks",{method:"POST",body:{source:"admin-agent-ai",profile:definition.id,areas},timeout:180000});
+        agentAIPlanStan={...agentAIPlanStan,runId:d.run?.id||""};
+        (d.run?.results||[]).forEach(x=>{const detail=x.area==="allegro-orders"?`aktywne: ${x.active||0} • nowe: ${x.newItems||0} • odświeżone: ${x.refreshed||0} • przeskanowane: ${x.scanned||0}`:x.area==="site-health"?String(x.detail||"Strona i integracje odpowiadają"):`sprawdzono: ${x.count||0}`;add({area:x.area,name:x.label,status:x.status,detail:x.status==="completed"?detail:x.error,durationMs:x.durationMs});});
+      }catch(e){add({area:"server-checks",name:"Kontrole serwerowe",status:"error",error:e.message||e});}
+    }
+    if(definition.local.includes("database"))await timed("central-database","Wspólna baza sklepu",async()=>{const ok=await synchronizujBazeCentralna(true);if(!ok)throw new Error("Nie udało się potwierdzić synchronizacji");return "pobrano i zapisano najnowszy stan";});
+    if(definition.local.includes("suppliers")){
+      const t=Date.now(),docs=(await agentAIUzgodnijPlanZSerwerem({silent:true})).filter(agentAIPlanDokumentAktywny);
+      add({area:"supplier-drafts",name:"Plan zatowarowania producentów",status:docs.length?"completed":"skipped",detail:docs.length?`${docs.length} aktywnych dokumentów z kanonicznego serwera • bez wysyłania e-maili`:"brak realnych braków do aktywnych zamówień",durationMs:Date.now()-t});
+    }
+    if(definition.local.includes("invoices")){
+      const t=Date.now(),before=szkiceFaktur.length,missing=pobierzZamowienia().filter(z=>(z.klient?.nip||z.klient?.firma)&&!szkiceFaktur.some(f=>f.nrZamowienia===z.nr)).length;
+      if(missing){utworzSzkiceFakturMasowo();add({area:"invoice-drafts",name:"Szkice FV",status:"completed",detail:`utworzono ${Math.max(0,szkiceFaktur.length-before)} szkiców • bez wystawiania faktur`,durationMs:Date.now()-t});}
+      else add({area:"invoice-drafts",name:"Szkice FV",status:"skipped",detail:"brak nowych zamówień firmowych",durationMs:Date.now()-t});
+    }
+    if(definition.local.includes("links")){
+      if(agentAILinkiOczekujace().length)await timed("supplier-links","Linki producentów",()=>agentAISprawdzLinkiProducentow(profile==="data"?5:3));
+      else add({area:"supplier-links",name:"Linki producentów",status:"skipped",detail:"kolejka jest pusta"});
+    }
+    const completedAt=new Date().toISOString(),errors=results.filter(x=>x.status==="error").length;
+    agentAIPlanStan={...agentAIPlanStan,busy:false,current:"",startedAt,completedAt,results,error:errors?`${errors} kroków wymaga ponowienia`:""};
+    zapiszHistorieAgenta("plan-operacyjny",`${definition.label}: ${results.length-errors}/${results.length} kroków bez błędu`,{profile:definition.id,startedAt,completedAt,durationMs:Date.now()-runStarted,results});zaplanujZapisUstawien();
+    toast(errors?`⚠️ Plan zakończony • błędy: ${errors}`:`✅ ${definition.label}: wszystkie kroki zakończone`);renderuj();void agentAIPobierzHistorieWykonan(true);
+    return [`${errors?"⚠️":"✅"} ${definition.label} zakończony.`,...results.map(x=>`• ${x.status==="completed"?"✅":x.status==="skipped"?"➖":"⚠️"} ${x.name}: ${x.detail}`),"Nie wysłano e-maili, wiadomości do klientów, ofert, etykiet ani faktur bez zatwierdzenia."].join("\n");
+  }catch(e){agentAIPlanStan={...agentAIPlanStan,busy:false,current:"",completedAt:new Date().toISOString(),results,error:String(e.message||e)};zapiszHistorieAgenta("plan-operacyjny","Błąd planu Agenta",{profile:definition.id,results,error:String(e.message||e)});renderuj();throw e;}
+}
+async function agentAIWykonaj(akcja){
+  if(akcja==="plan-bezpieczny") return agentAIWykonajPlanBezpieczny(agentAIPlanProfil);
+  if(akcja==="plan-full") return agentAIWykonajPlanBezpieczny("full");
+  if(akcja==="plan-data") return agentAIWykonajPlanBezpieczny("data");
+  if(akcja==="plan-health") return agentAIWykonajPlanBezpieczny("health");
+  if(akcja==="plan-retry") return agentAIWykonajPlanBezpieczny("retry");
+  if(akcja==="masowe-fv") return utworzSzkiceFakturMasowo();
+  if(akcja==="sync") return synchronizujBazeCentralna(true);
+  if(akcja==="export-magazyn") return eksportujMagazynCSV();
+  if(akcja==="export-zakupy") return eksportujTabeleOperacyjnaMagazynuCSV();
+  if(akcja==="utworz-zlecenie-braki"||akcja==="utworz-zlecenie-niskie")return agentAIUzgodnijPlanZSerwerem();
+  if(akcja==="sprawdz-linki-producentow") return agentAISprawdzLinkiProducentow().then(t=>toast(t));
+  if(akcja==="sprawdz-dostepnosc-producentow") return agentAISprawdzDostepnoscProducentow();
+  if(akcja==="popraw-opisy"){ const t=await agentAIPoprawOpisyProduktow(40); toast(t); renderuj(); return t; }
+  if(akcja==="kartoteka-domyslna") return wypelnijDomyslnaKartotekeMagazynu();
+  if(akcja==="audyt-magazynu") return audytMagazynuAI();
+}
+async function agentAIWykonajZadaniePlanu(id,akcja){
+  try{
+    await agentAIWykonaj(akcja);
+    if(String(akcja).startsWith("plan-")&&agentAIPlanStan.error)throw new Error(agentAIPlanStan.error);
+    agentAIOznaczZadanieWykonane(id,"agent-action");
+  }catch(e){toast(`⚠️ Zadanie nie zostało zamknięte: ${e.message||e}`);}
+}
+function agentAIPriorytet(x){
+  if(x.id==="funkcjonalnosc-strony") return 0;
+  if(x.id==="synchronizacja-danych") return .5;
+  if(x.id==="wdrozenie-produktow") return .75;
+  if(x.poziom==="bad") return 1;
+  if(["wysylki","zatowarowanie","nadrezerwacje","dostepnosc","dostepnosc-producentow"].includes(x.id)) return 2;
+  if(x.poziom==="warn") return 3;
+  return 9;
+}
+function agentAIOpisKroku(x){
+  const mapa={
+    dostepnosc:"Zweryfikuj dostępność pozycji powyżej limitu i wpisz decyzję przy zamówieniu.",
+    wysylki:"Uzupełnij dane InPost, wygeneruj etykietę i zapisz numer nadania.",
+    faktury:"Utwórz lub odśwież szkice FV dla zamówień firmowych.",
+    "opisy-produktow":"Uruchom agenta opisów: uzupełni krótki opis i uporządkuje pełny opis bez zmiany danych technicznych.",
+    "wdrozenie-produktow":"Dokończ wdrożenie produktu dodanego przez administratora: tożsamość, duplikaty, opisy, zdjęcia, producent, kategorie sklepu i Allegro.",
+    ceny:"Uzupełnij cenę przed sprzedażą, żeby klient nie złożył błędnego zamówienia.",
+    magazyn:"Sprawdź produkty z niskim stanem i zdecyduj, czy zamówić uzupełnienie.",
+    zatowarowanie:"Przygotuj zamówienie do producenta tylko pod realne braki aktywnych zamówień.",
+    nadrezerwacje:"Najpierw obsłuż nadrezerwacje — blokują kompletację zamówień.",
+    kartoteka:"Uzupełnij dostawcę wyłącznie dla realnych braków obecnych w Planie zatowarowania.",
+    "lokalizacje-kompletacja":"Magazyn przypisuje miejsce towarom z aktywnych zamówień; rezerwacja i kompletacja pozostają aktywne.",
+    lokalizacje:"Utwórz brakujące lokalizacje w słowniku i przypisz je do produktów jako osobne zadanie magazynu.",
+    pamiec:"Dodaj procedury, których agent ma pilnować przy kolejnych poleceniach.",
+    "linki-producentow":"Ponów pobranie URL-i producentów i sprawdź, które dane trzeba jeszcze uzupełnić w karcie produktu.",
+    "allegro-oferty-agent":"Uzupełnij automatyczne sugestie producenta, kategorii i produktu katalogowego; pozostałe braki otwórz w edytorze produktu.",
+    monitoring:"Zdecyduj, które produkty mają mieć kontrolowany stan, a które bez limitu.",
+    inwentaryzacja:"Potwierdź stan produktów bez świeżej inwentaryzacji.",
+    zdjecia:"Dodaj zdjęcia do produktów, które nadal używają samej ikony.",
+    integracje:"Sprawdź konfigurację bramki, poczty i wspólnej bazy."
+  };
+  return mapa[x.id]||"Otwórz wskazany moduł i wykonaj kontrolę.";
+}
+function agentAIOtworzCentrumDecyzji(target=""){
+  if(target==="supplier"){filtrProducentowMagazynu="decyzje";stronaDostepnosciProducentow=1;location.hash="#/admin/magazyn/dostawcy";}
+  else if(target==="orders"){filtrZamowien="wymaga_decyzji";location.hash="#/admin/zamowienia";}
+  else if(target==="offers"){allegroCentrumOfertTryb="publikacja";filtrAllegroWystawiania="do_dzialania";allegroWystawianieStrona=1;location.hash="#/admin/allegro/oferty";}
+  else if(target==="messages"){filtrAllegroWiadomosci="wymaga";location.hash="#/admin/allegro/wiadomosci";}
+  else if(target==="issues"){filtrAllegroDyskusji="wymaga";location.hash="#/admin/allegro/dyskusje";}
+  else if(target==="surplus"){magazynPlanTryb="braki";agentAIPlanFiltrStatusu="przyjecie";location.hash="#/admin/magazyn/plan";}
+  else if(target==="supplier_docs"){magazynPlanTryb="braki";agentAIPlanFiltrStatusu="aktywne";location.hash="#/admin/magazyn/plan";}
+  else location.hash="#/admin/agent-ai/obsluga";
+  setTimeout(()=>document.querySelector(".orders-status-strip,.supplier-monitor-toolbar,.allegro-listing-workspace,.allegro-communication-list,.supplier-plan-statusbar")?.scrollIntoView({behavior:"smooth",block:"start"}),50);
+}
+function agentAICentrumDecyzjiHTML(){
+  const supplier=statystykiDostepnosciProducentow(),orders=pobierzZamowienia().filter(z=>z.wymagaPotwierdzeniaDostepnosci),communication=allegroKomunikacjaStaty(),messages=(communication.threads||[]).filter(allegroKomunikacjaWymagaOdpowiedzi),issues=(communication.issues||[]).filter(allegroKomunikacjaWymagaOdpowiedzi),offers=allegroAktywneZadaniaAgentaOfert(),surplus=agentAINadwyzkiDoPrzyjecia(),supplierDocs=(agentAIZlecenia||[]).filter(agentAIPlanDokumentAktywny);
+  const areas=[
+    {icon:"🏭",title:"Dostępność producenta",count:supplier.wymagajaDecyzji.length,target:"supplier",href:"#/admin/magazyn/dostawcy",choices:["automat","zostaw 1–7 dni","ukryj","wznów po powrocie","aktywny bez terminu"]},
+    {icon:"🔎",title:"Dostępność w zamówieniu",count:orders.length,target:"orders",href:"#/admin/zamowienia",choices:["potwierdź","poczekaj 1–2 dni","kontakt z klientem","potwierdź brak"]},
+    {icon:"🏷️",title:"Zadania ofert Allegro",count:offers.length,target:"offers",href:"#/admin/allegro/oferty",choices:["uzupełnij","ponów","otwórz produkt","zamknij zadanie"]},
+    {icon:"💬",title:"Wiadomości Allegro",count:messages.length,target:"messages",href:"#/admin/allegro/wiadomosci",choices:["odpowiedz","użyj propozycji Agenta","załatwione wewnętrznie"]},
+    {icon:"⚖️",title:"Dyskusje Allegro",count:issues.length,target:"issues",href:"#/admin/allegro/dyskusje",choices:["odpowiedz","dodaj dowód","oznacz jako rozwiązane"]},
+    {icon:"📥",title:"Nadwyżki magazynowe",count:surplus.length,target:"surplus",href:"#/admin/magazyn/plan",choices:["przyjmij","pozostaw","skoryguj ilość"]},
+    {icon:"🧾",title:"Plan zatowarowania",count:supplierDocs.length,target:"supplier_docs",href:"#/admin/magazyn/plan",choices:["sprawdź szkic","zatwierdź wersję","wyślij e-mail","przyjmij dostawę"]}
+  ];
+  return `<div class="panel agent-decision-center"><div class="order-section-head"><div><span class="order-pro-label">Kontrola człowieka</span><h2>🧭 Centrum decyzji administratora</h2><p class="order-detail-lead">Agent przygotowuje dane i bezpieczne propozycje, ale w miejscach wpływających na klienta, sprzedaż lub wysyłkę zawsze pokazuje konkretne warianty wyboru.</p></div><span class="lvl ${areas.some(x=>x.count)?"lvl-ostrzezenie":"lvl-ok"}">${areas.reduce((s,x)=>s+x.count,0)} otwartych decyzji</span></div><div class="agent-decision-grid">${areas.map(x=>`<article class="${x.count?"has-items":""}"><header><span>${x.icon}</span><div><b>${esc(x.title)}</b><small>${x.count?`${x.count} wymaga wyboru`:"brak otwartych decyzji"}</small></div><strong>${x.count}</strong></header><div>${x.choices.map(c=>`<span>${esc(c)}</span>`).join("")}</div><a class="btn ghost" href="${x.href}" onclick="agentAIOtworzCentrumDecyzji('${x.target}');return false">${x.count?"Podejmij decyzje":"Otwórz moduł"}</a></article>`).join("")}</div></div>`;
+}
+function agentAIPlanOperacyjnyHTML(analiza){
+  const zadania=agentAIAnalizaAktywna(analiza).sort((a,b)=>agentAIPriorytet(a)-agentAIPriorytet(b)).slice(0,12);
+  const gotowe=analiza.filter(x=>x.poziom==="ok").length;
+  const profiles=agentAIProfilePlanow(),selected=profiles[agentAIPlanProfil]||profiles.full,runResults=agentAIPlanStan.results||[],runDone=runResults.filter(x=>x.status==="completed"||x.status==="skipped").length,runErrors=runResults.filter(x=>x.status==="error").length;
+  const expected=Math.max(runResults.length,selected.areas.length+selected.local.length),progress=agentAIPlanStan.busy?Math.min(95,Math.round((runDone+runErrors)/Math.max(1,expected)*100)):runResults.length?100:0;
+  const runDuration=agentAIPlanStan.startedAt?Math.max(0,Math.round(((agentAIPlanStan.completedAt?Date.parse(agentAIPlanStan.completedAt):Date.now())-Date.parse(agentAIPlanStan.startedAt))/1000)):0;
+  const history=(agentAIPlanStan.history||[]).slice(0,5),retryCount=agentAIBledneObszary().length,archive=Object.values(agentAIPlanCykl||{}).filter(x=>["done","resolved"].includes(x.state)).sort((a,b)=>String(b.completedAt||b.resolvedAt||"").localeCompare(String(a.completedAt||a.resolvedAt||""))).slice(0,12);
+  return `<div class="panel agent-ops-panel">
+    <div class="order-section-head">
+      <div><span class="order-pro-label">Centrum wykonawcze</span><h2 style="margin-top:.2rem">🧭 Wykonywalny plan operacyjny</h2><p class="order-detail-lead">Najpierw funkcjonalność strony i świeże dane, następnie zamówienia, wysyłki, magazyn oraz katalog. Każdy krok ma właściciela, czas, wynik i jednoznaczny warunek zakończenia.</p></div>
+      <div class="diag-actions"><span class="lvl ${zadania.length?"lvl-ostrzezenie":"lvl-ok"}">${zadania.length?`${zadania.length} aktywnych zadań`:"wszystko pod kontrolą"}</span></div>
+    </div>
+    <div class="agent-run-profiles">${Object.values(profiles).map(p=>`<button type="button" class="${agentAIPlanProfil===p.id?"active":""}" onclick="agentAIUstawProfil(${jsArg(p.id)})" ${agentAIPlanStan.busy?"disabled":""}><span>${p.icon}</span><b>${esc(p.label)}</b><small>${esc(p.description)}</small></button>`).join("")}</div>
+    <div class="agent-run-toolbar"><div><b>Wybrany zakres: ${selected.icon} ${esc(selected.label)}</b><small>${selected.areas.length} kontroli serwerowych • ${selected.local.length} kroków lokalnych • operacje zewnętrzne zablokowane</small></div><div class="diag-actions"><button class="btn" onclick="agentAIWykonaj(${jsArg(`plan-${selected.id}`)})" ${agentAIPlanStan.busy?"disabled":""}>${agentAIPlanStan.busy?"⏳ Wykonuję…":"▶ Wykonaj bezpieczne działania"}</button><button class="btn ghost" onclick="agentAIWykonaj('plan-retry')" ${agentAIPlanStan.busy||!retryCount?"disabled":""}>↻ Ponów błędy${retryCount?` (${retryCount})`:""}</button></div></div>
+    ${agentAIPlanStan.busy||runResults.length?`<div class="agent-execution-status ${agentAIPlanStan.error?"has-error":""}"><div><div><b>${agentAIPlanStan.busy?`Agent wykonuje: ${esc(agentAIPlanStan.current||"kontrola")}`:"Ostatnie wykonanie planu"}</b><small>${agentAIPlanStan.runId?`ID audytu ${esc(agentAIPlanStan.runId.slice(0,8))} • `:""}${runDuration}s • ${runDone} zakończonych • ${runErrors} błędów</small></div><small>${agentAIPlanStan.completedAt?esc(new Date(agentAIPlanStan.completedAt).toLocaleString("pl-PL")):"operacja w toku"}</small></div><div class="agent-run-progress"><i style="width:${progress}%"></i></div><div class="agent-execution-results">${runResults.map(r=>`<span class="${esc(r.status)}"><b>${r.status==="completed"?"✅":r.status==="skipped"?"➖":"⚠️"} ${esc(r.name)}</b><small>${esc(r.detail)}</small><em>${r.durationMs?`${Math.max(1,Math.round(r.durationMs/1000))} s`:"—"}</em></span>`).join("")}</div>${agentAIPlanStan.error?`<p>${esc(agentAIPlanStan.error)}</p>`:""}</div>`:""}
+    <div class="agent-run-history"><div class="order-section-head"><div><b>Ostatnie wykonania na serwerze</b><small>Trwały audyt jest wspólny dla wszystkich urządzeń administratora.</small></div><button class="btn ghost" onclick="agentAIPobierzHistorieWykonan()" ${agentAIPlanStan.historyLoading?"disabled":""}>${agentAIPlanStan.historyLoading?"⏳":"↻"} Odśwież</button></div>${history.length?`<div class="agent-run-history-list">${history.map(h=>{const errors=(h.results||[]).filter(x=>x.status==="error").length;return `<article><span class="${errors?"error":"ok"}">${errors?"⚠️":"✅"}</span><div><b>${esc(agentAIProfilePlanow()[h.profile]?.label||h.profile||"Kontrola")}</b><small>${esc(new Date(h.completedAt||h.startedAt).toLocaleString("pl-PL"))} • ${Math.max(1,Math.round(Number(h.durationMs||0)/1000))} s • wynik ${esc(h.scoreAfter??"—")}%</small></div><code>${esc(String(h.id||"").slice(0,8))}</code></article>`;}).join("")}</div>`:`<p class="order-detail-lead">${agentAIPlanStan.historyLoading?"Pobieram historię wykonań…":"Historia pojawi się po pierwszej kontroli serwerowej."}</p>`}</div>
+    <div class="agent-ops-grid">
+      ${zadania.length?zadania.map((x,i)=>{const step=agentAIKonkretneDzialanie(x);return `<div class="agent-ops-step ${x.poziom} ${step.mode}">
+        <div class="agent-ops-no">${i+1}</div>
+        <div><div class="agent-step-heading"><b>${x.ikona} ${esc(x.tytul)}</b><span class="lvl ${step.requiresApproval?"lvl-ostrzezenie":"lvl-ok"}">${step.requiresApproval?"🔐 decyzja":"⚙️ Agent"}</span></div><p>${esc(x.opis)}</p><div class="agent-step-definition"><span><small>KONKRETNE DZIAŁANIE</small><b>${esc(step.label)}</b></span><span><small>WŁAŚCICIEL / CZAS</small><b>${esc(step.owner)} • ${esc(step.eta)}</b></span><span><small>GOTOWE, GDY</small><b>${esc(step.done)}</b></span></div></div>
+        <div class="agent-task-actions">${step.action?`<button class="btn ${step.requiresApproval?"ghost":""}" onclick="agentAIWykonajZadaniePlanu(${jsArg(x.id)},${jsArg(step.action)})">${esc(step.label)}</button>`:`<a class="btn ghost" href="${esc(step.href)}">${esc(step.label)}</a>`}<button class="btn task-complete" type="button" onclick="agentAIOznaczZadanieWykonane(${jsArg(x.id)})">✓ Wykonane</button></div>
+      </div>`;}).join(""):`<div class="agent-ops-empty">✅ Brak pilnych tematów. ${gotowe} kontroli ma status OK.</div>`}
+    </div>
+    <details class="agent-task-archive" ${zadania.length?"":"open"}><summary>✅ Zakończone zadania (${archive.length})</summary>${archive.length?`<div class="agent-task-archive-list">${archive.map(x=>`<article><span>✓</span><div><b>${esc(x.title||x.id)}</b><small>${esc(x.completedAt?new Date(x.completedAt).toLocaleString("pl-PL"):"rozwiązane automatycznie")} • ${esc(x.completedBy||"Agent")}</small></div>${x.state==="done"?`<button class="btn ghost" onclick="agentAIPrzywrocZadanie(${jsArg(x.id)})">Przywróć</button>`:`<em>problem rozwiązany</em>`}</article>`).join("")}</div>`:`<p class="order-detail-lead">Archiwum wypełni się po oznaczeniu pierwszego zadania jako wykonane.</p>`}</details>
+  </div>`;
+}
+
+function agentAIPodstronaNaglowekHTML(aktywna="pulpit",activeCount=0){
+  if(aktywna==="pulpit")return "";
+  const pages={
+    komendy:["💬","Komendy i odpowiedzi","Wydawaj polecenia zwykłym językiem. Odpowiedzi, wynik działania i audyt pozostają w jednym miejscu."],
+    specjalisci:["✦","Specjaliści OpenAI","Role do opisów, odpowiedzi, SEO, promocji, bannerów, Allegro i kontroli jakości z routingiem modeli, historią oraz kontrolą kosztów."],
+    uprawnienia:["🛡️","Uprawnienia i granice autonomii","Jedna centralna lista pokazuje, co Agent wykonuje sam, co zawsze wymaga zatwierdzenia i kiedy operacja zostaje zatrzymana."],
+    plan:["🧭","Plan operacyjny","Widzisz wyłącznie aktywne problemy. Wykonane zadania trafiają do historii i wracają tylko po nowym zdarzeniu."],
+    produkty:["✨","Wdrożenie nowych produktów","Agent koncentruje się na produktach dodawanych przez administratora i prowadzi je od kartoteki do gotowości sklepu oraz Allegro."],
+    zlecenia:["📑","Zlecenia i tabele producentów","Bieżące dokumenty robocze, ilości, zatwierdzenia i wysyłka do producentów bez mieszania z archiwum."],
+    producenci:["🏭","Producenci i kontakt","Kartoteki dostawców, adresy zamówień, warunki współpracy i szablony korespondencji."],
+    pamiec:["🧠","Pamięć i procedury","Reguły zapisane dla Agenta. Możesz je przeglądać, usuwać i dodawać nowe przez Komendy."],
+    historia:["🕓","Historia i audyt","Zakończone zadania, wykonania planów oraz pełny rejestr działań administratora i Agenta."]
+  },page=pages[aktywna]||pages.plan;
+  return `<section class="panel agent-page-header"><div><span>${page[0]}</span><div><span class="order-pro-label">Agent AI</span><h1>${esc(page[1])}</h1><p>${esc(page[2])}</p></div></div><div><b>${activeCount}</b><small>aktywnych zadań</small></div></section>`;
+}
+function ustawFiltrAgentAIProduktow(filtr="wszystkie"){filtrAgentAIProdukty=filtr;renderuj();}
+function agentAIProduktyWdrozeniePanelHTML(){
+  const addedIds=new Set((produktyDodane||[]).map(p=>String(p.id))),items=produktyDoAdministracji().filter(p=>addedIds.has(String(p.id))).sort((a,b)=>String(b.createdAt||b.agentImportAt||b.id||"").localeCompare(String(a.createdAt||a.agentImportAt||a.id||""))).slice(0,500);
+  const allRows=items.map(p=>({p,state:agentAIStanWdrozeniaProduktu(p),status:p.agentOnboardingStatus||"not_started"})),processing=allRows.filter(x=>x.status==="processing").length,completed=allRows.filter(x=>x.state.ready&&x.status!=="processing").length,attention=allRows.filter(x=>!x.state.ready&&x.status!=="processing").length;
+  const rows=allRows.filter(x=>filtrAgentAIProdukty==="uwaga"?!x.state.ready&&x.status!=="processing":filtrAgentAIProdukty==="przetwarzanie"?x.status==="processing":filtrAgentAIProdukty==="gotowe"?x.state.ready&&x.status!=="processing":true);
+  const cards=[["uwaga","⚠️",attention,"wymaga uzupełnienia",attention?"hot":""],["przetwarzanie","⏳",processing,"w trakcie kontroli",""],["gotowe","✅",completed,"gotowych produktów","money"],["wszystkie","📦",allRows.length,"produktów administratora",""]];
+  return `<section class="panel agent-product-onboarding-page"><div class="order-section-head"><div><span class="order-pro-label">Priorytet administratora</span><h2>✨ Wdrożenie nowych produktów</h2><p class="order-detail-lead">Każdy produkt przechodzi sześć kontroli. Kliknij kartę licznika, aby natychmiast wyświetlić odpowiadające jej produkty.</p></div><div class="diag-actions"><a class="btn" href="#/admin/produkty/dodaj">＋ Dodaj ręcznie lub z linku</a></div></div><div class="orders-stat-grid">${cards.map(([id,icon,count,label,cls])=>`<button type="button" class="order-stat-card stat-filter ${cls} ${filtrAgentAIProdukty===id?"active":""}" onclick="ustawFiltrAgentAIProduktow(${jsArg(id)})"><span>${icon}</span><b>${count}</b><small>${label}</small></button>`).join("")}</div><div class="agent-onboarding-filter-state"><span>Aktywny filtr: <b>${esc(cards.find(x=>x[0]===filtrAgentAIProdukty)?.[3]||"wszystkie")}</b></span><small>${rows.length} z ${allRows.length} produktów</small>${filtrAgentAIProdukty!=="wszystkie"?`<button class="btn ghost" onclick="ustawFiltrAgentAIProduktow('wszystkie')">Wyczyść filtr</button>`:""}</div><div class="agent-product-onboarding-list">${rows.map(({p,state,status})=>`<article class="${state.ready?"ready":"attention"}"><div class="agent-product-onboarding-main">${p.zdjecie?`<img src="${esc(p.zdjecie)}" alt="" loading="lazy">`:`<span>${esc(p.ikona||"📦")}</span>`}<div><b>${esc(p.nazwa||"Produkt bez nazwy")}</b><small>ID ${esc(p.id)} • EAN ${esc(p.gtin||p.ean||"—")} • ${esc(p.producent||p.marka||"producent —")}</small><em>${status==="processing"?"Agent pracuje":state.ready?"gotowy":"wymaga uzupełnienia"} • ${state.done}/${state.total} kontroli</em></div></div><div class="product-agent-checks">${state.checks.map(x=>`<span class="${x.ok?"done":"wait"}">${x.ok?"✓":"○"} ${esc(x.label)}</span>`).join("")}</div><div class="warehouse-worktable-actions"><button class="btn" onclick="agentAIUruchomWdrozenieProduktu(${jsArg(p.id)},this)" ${status==="processing"?"disabled":""}>🤖 ${status==="processing"?"Kontrola…":"Sprawdź i uzupełnij"}</button><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(p.id)}">✏️ Edytuj</a></div></article>`).join("")||`<div class="agent-ops-empty">Brak produktów dla wybranego filtra.</div>`}</div></section>`;
+}
+function agentAIPamiecPanelHTML(){
+  const memory=(agentAIPamiec||[]).slice(0,100);
+  return `<section class="panel agent-memory-page"><div class="order-section-head"><div><span class="order-pro-label">Procedury trwałe</span><h2>🧠 Pamięć Agenta</h2><p class="order-detail-lead">Każda reguła synchronizuje się między urządzeniami. Agent stosuje ją jako podpowiedź, ale działania zewnętrzne nadal wymagają zatwierdzenia.</p></div><a class="btn" href="#/admin/agent-ai/komendy" onclick="setTimeout(()=>agentAIWstawKomende('zapamiętaj: '),80)">＋ Naucz Agenta</a></div><div class="orders-stat-grid"><div class="order-stat-card"><span>🧠</span><b>${memory.length}</b><small>zapisanych procedur</small></div><div class="order-stat-card money"><span>☁️</span><b>${chmuraStan.admin?"TAK":"NIE"}</b><small>synchronizacja wspólna</small></div></div>${memory.length?`<div class="agent-memory-list">${memory.map(x=>`<article class="agent-memory-item"><div><b>${esc(x.wyzwalacz||"Procedura")}</b><p>${esc(x.akcja||x.tresc)}</p><small>${esc(x.dataTxt||"")} • ${esc(x.operator||"")}</small></div><button class="btn danger" type="button" onclick="agentAIUsunPamiec(${jsArg(x.id)})">Usuń</button></article>`).join("")}</div>`:`<div class="agent-ops-empty">Nie ma jeszcze zapisanych procedur. Przejdź do Komend i wpisz „zapamiętaj: …”.</div>`}</section>`;
+}
+function agentAIProductReportParams(){
+  const f=agentAIProductReportFilters||{};
+  return {
+    channel:f.channel||"all",status:f.status||"all",listing:f.listing||"all",
+    query:String(f.query||"").trim(),page:Number(f.page)||1,limit:Number(f.limit)||50
+  };
+}
+function agentAIProductReportUpdateDom(){
+  const box=$("agentAIProductReportPanel");if(!box||typeof agentAIProductReportHTML!=="function")return;
+  const focused=document.activeElement,restore=focused?.id==="agentAIProductReportSearch",start=restore?focused.selectionStart:null,end=restore?focused.selectionEnd:null;
+  box.innerHTML=agentAIProductReportHTML();
+  if(restore){const input=$("agentAIProductReportSearch");if(input){input.focus({preventScroll:true});if(Number.isInteger(start))input.setSelectionRange(start,end);}}
+}
+async function agentAIProductReportPobierz(silent=true){
+  const requestId=Number(agentAIProductReport.requestId||0)+1,params=agentAIProductReportParams();
+  agentAIProductReport={...agentAIProductReport,loading:true,error:"",requestId};
+  if(!silent)agentAIProductReportUpdateDom();
+  try{
+    const data=await chmura("agent-product-report",{params,timeout:20000});
+    if(requestId!==agentAIProductReport.requestId)return agentAIProductReport.data;
+    agentAIProductReport={...agentAIProductReport,loading:false,loaded:true,error:"",data:data.report||null,updatedAt:Date.now(),requestId};
+  }catch(error){
+    if(requestId!==agentAIProductReport.requestId)return agentAIProductReport.data;
+    agentAIProductReport={...agentAIProductReport,loading:false,loaded:true,error:String(error?.message||error),updatedAt:Date.now(),requestId};
+  }
+  agentAIProductReportUpdateDom();
+  return agentAIProductReport.data;
+}
+function agentAIProductReportFiltr(field,value){
+  if(!["channel","status","listing","page","limit"].includes(field))return;
+  agentAIProductReportFilters={...agentAIProductReportFilters,[field]:field==="page"||field==="limit"?Number(value)||1:String(value||"all"),...(field==="page"?{}:{page:1})};
+  agentAIProductReportPobierz(false);
+}
+function agentAIProductReportSzukaj(input){
+  agentAIProductReportFilters={...agentAIProductReportFilters,query:String(input?.value||""),page:1};
+  clearTimeout(agentAIProductReport.searchTimer);
+  agentAIProductReport.searchTimer=setTimeout(()=>agentAIProductReportPobierz(true),350);
+}
+function agentAIProductReportWyczysc(){
+  agentAIProductReportFilters={channel:"all",status:"all",listing:"all",query:"",page:1,limit:Number(agentAIProductReportFilters?.limit)||50};
+  agentAIProductReportPobierz(false);
+}
+function agentAIOperationsUpdateDom(){
+  const targets=document.querySelectorAll("[data-agent-operations-view]");
+  if(targets.length&&typeof agentAIOperationsHTML==="function")targets.forEach(target=>{target.innerHTML=agentAIOperationsHTML(target.dataset.agentOperationsView||"summary");});
+  if(typeof agentAIKontekstAktualizujDom==="function")agentAIKontekstAktualizujDom();
+}
+async function agentAIOperationsPobierz(silent=true){
+  if(agentAIOperations.loading)return agentAIOperations.data;
+  const requestId=Number(agentAIOperations.requestId||0)+1;
+  agentAIOperations={...agentAIOperations,loading:true,error:"",requestId};
+  if(!silent)agentAIOperationsUpdateDom();
+  try{
+    const data=await chmura("agent-operations-summary",{timeout:30000});
+    if(requestId!==agentAIOperations.requestId)return agentAIOperations.data;
+    agentAIOperations={...agentAIOperations,loading:false,loaded:true,error:"",data,updatedAt:Date.now(),requestId};
+  }catch(error){
+    if(requestId!==agentAIOperations.requestId)return agentAIOperations.data;
+    agentAIOperations={...agentAIOperations,loading:false,loaded:true,error:String(error?.message||error),updatedAt:Date.now(),requestId};
+  }
+  agentAIOperationsUpdateDom();
+  return agentAIOperations.data;
+}
+async function agentAIRuntimePobierz(silent=true){
+  if(agentAIRuntime.loading)return agentAIRuntime.runtime;
+  agentAIRuntime={...agentAIRuntime,loading:true,error:""};
+  if(!silent){const box=$("agentAIRuntimePanel");if(box)box.innerHTML=agentAIRuntimePanelHTML();}
+  try{
+    const route=String(location.hash||""),part=route.split("/")[3]||"pulpit",active=typeof agentAISekcjaKanoniczna==="function"?agentAISekcjaKanoniczna(part):part,includePreparation=["praca","obsluga","produkty"].includes(active);
+    const [data,preparation,publication,vonHalsky,seoAutomation,productReport]=await Promise.all([
+      chmura("agent-runtime-status",{timeout:20000}),
+      includePreparation?chmura("allegro-preparation-queue-status",{timeout:20000}).catch(()=>({queue:null})):Promise.resolve({queue:agentAIRuntime.preparationQueue||null}),
+      includePreparation?chmura("allegro-publication-queue-status",{timeout:20000}).catch(()=>({queue:null})):Promise.resolve({queue:agentAIRuntime.publicationQueue||null}),
+      includePreparation?chmura("von-halsky-overview",{timeout:20000}).catch(()=>null):Promise.resolve(agentAIRuntime.vonHalsky||null),
+      includePreparation?chmura("seo-automation-status",{timeout:20000}).catch(()=>null):Promise.resolve(agentAIRuntime.seoAutomation||null),
+      includePreparation?chmura("agent-product-report",{params:{channel:"all",status:"all",listing:"all",page:1,limit:10},timeout:20000}).catch(()=>({report:null})):Promise.resolve({report:agentAIRuntime.productReport||null})
+    ]);
+    agentAIRuntime={...agentAIRuntime,loading:false,loaded:true,error:"",runtime:data.runtime||null,preparationQueue:preparation.queue||null,publicationQueue:publication.queue||null,vonHalsky:vonHalsky||null,seoAutomation:seoAutomation||null,productReport:productReport.report||null,updatedAt:Date.now()};
+  }catch(error){
+    agentAIRuntime={...agentAIRuntime,loading:false,loaded:true,error:String(error?.message||error),updatedAt:Date.now()};
+  }
+  const live=$("agentAILivePanel"),box=$("agentAIRuntimePanel");
+  if(live&&typeof agentAIPracaNaZywoHTML==="function")live.innerHTML=agentAIPracaNaZywoHTML();
+  else if(box)box.innerHTML=agentAIRuntimePanelHTML();
+  agentAIProductReportUpdateDom();
+  const history=document.querySelector("[data-agent-history-view]");if(history&&typeof agentAIHistoriaScalonaHTML==="function")history.outerHTML=agentAIHistoriaScalonaHTML();
+  if(typeof agentAIOperationsUpdateDom==="function")agentAIOperationsUpdateDom();else if(typeof agentAIKontekstAktualizujDom==="function")agentAIKontekstAktualizujDom();
+  return agentAIRuntime.runtime;
+}
+function agentAIRuntimePolling(){
+  if(agentAIRuntime.pollTimer)clearTimeout(agentAIRuntime.pollTimer);
+  const route=String(location.hash||""),part=route.split("/")[3]||"pulpit",active=typeof agentAISekcjaKanoniczna==="function"?agentAISekcjaKanoniczna(part):part;
+  if(!route.startsWith("#/admin/agent-ai")||!["pulpit","praca","obsluga","produkty","zasady","historia"].includes(active)){agentAIRuntime.pollTimer=null;return;}
+  const delay=active==="praca"?10000:active==="produkty"?20000:30000;
+  agentAIRuntime.pollTimer=setTimeout(async()=>{await agentAIRuntimePobierz(true);agentAIRuntimePolling();},delay);
+}
+function agentAIRuntimeCzas(value=""){
+  const time=Date.parse(value||"");
+  if(!Number.isFinite(time))return "brak danych";
+  const diff=Math.max(0,Date.now()-time),seconds=Math.round(diff/1000);
+  if(seconds<60)return `${Math.max(1,seconds)} s temu`;
+  if(seconds<3600)return `${Math.round(seconds/60)} min temu`;
+  if(seconds<86400)return `${Math.round(seconds/3600)} godz. temu`;
+  return new Date(time).toLocaleString("pl-PL");
+}
+function agentAIEtapPracyLabel(value=""){
+  const key=String(value||"").trim(),labels={
+    kartoteka:"Pobranie kartoteki",
+    weryfikacja:"Weryfikacja aktualności",
+    "źródło":"Odczyt źródła producenta",
+    "źródło_pobrane":"Dopasowanie danych źródłowych",
+    parametry:"Dopasowanie parametrów",
+    opisy:"Redakcja nazwy i opisów",
+    kategoria_i_szkic:"Kategoria i szkic Allegro",
+    kontrola:"Kontrola EAN, GPSR i kompletności",
+    zapis:"Zapis centralny",
+    zapis_potwierdzony:"Potwierdzenie zapisu",
+    "uzupełnienie_zaplanowane":"Zaplanowane uzupełnienie",
+    automatyczna_korekta:"Automatyczna korekta",
+    oczekiwanie_na_dostawce:"Oczekiwanie na dostępność AI",
+    decyzja_wymagana:"Konkretna decyzja administratora",
+    running:"Uruchomienie zadania",
+    completed:"Zadanie zakończone",
+    attention:"Wymaga dalszego uzupełnienia",
+    failed:"Błąd wykonania"
+  };return labels[key]||key.replaceAll("_"," ")||"Wykonywanie";
+}
+function agentAIPolePracyLabel(value=""){
+  const key=String(value||"").trim(),labels={
+    nazwa:"nazwa produktu",opisKrotki:"opis krótki",opis:"opis długi",
+    allegroTitle:"tytuł Allegro",allegroDescription:"opis Allegro",
+    allegroDescriptionSections:"sekcje opisu Allegro",allegroCategoryId:"kategoria Allegro",
+    allegroProductId:"produkt katalogowy Allegro",allegroParameters:"parametry Allegro",
+    allegroSafetyInformation:"informacja GPSR",ean:"EAN",gtin:"GTIN",
+    kodProducenta:"kod producenta",producent:"producent",parametryProducenta:"parametry producenta",
+    zdjecie:"zdjęcie główne",zdjecia:"galeria zdjęć",sourceEvidence:"dowody źródłowe",
+    sourceMaterial:"materiał źródłowy"
+  };return labels[key]||key.replace(/([a-z])([A-Z])/g,"$1 $2").toLowerCase();
+}
+function agentAIRuntimePanelHTML(){
+  // Karta „TERAZ” pokazuje najświeższy etap wykonawczy, a trwała kolejka niżej
+  // pokazuje wszystkie równolegle zapisywane kartoteki bez mieszania z oczekującymi.
+  const state=agentAIRuntime,r=state.runtime||{},worker=r.worker||{},providers=r.providers||{},queue=r.queue||{},counts=queue.counts||{},eventQueue=r.eventQueue||{},eventCurrent=eventQueue.current||null,eventRecent=Array.isArray(eventQueue.recent)?eventQueue.recent:[],current=r.currentRun,last=r.lastRun,currentWork=r.currentWork||null,publication=r.publication||{},runtimePublicationRows=Array.isArray(publication.recent)?publication.recent:[],preparationQueue=state.preparationQueue||{},preparationCounts=preparationQueue.currentSummary||{},preparationCurrent=Array.isArray(preparationQueue.current)?preparationQueue.current:[],catalogSummary=state.productReport?.summary||{},activity=Array.isArray(r.activity)?r.activity:[],rawWarnings=Array.isArray(r.integrationWarnings)?r.integrationWarnings:[];
+  const warnings=[...new Map(rawWarnings.map(item=>[`${item.kind||"system"}:${item.error||item.label}`,item])).values()],aiWarnings=warnings.filter(item=>item.kind==="ai"),externalWarnings=warnings.filter(item=>item.kind!=="ai");
+  if(state.loading&&!state.loaded)return `<section class="panel agent-runtime-shell"><div class="agent-runtime-loading"><i></i><div><b>Łączę pulpit z procesem wykonawczym…</b><small>Pobieram kolejkę zdarzeń, wykonywaną pracę i stan dostawców AI.</small></div></div></section>`;
+  if(state.error&&!state.runtime)return `<section class="panel agent-runtime-shell"><div class="backend-note warn"><b>Nie udało się pobrać telemetrii Agenta.</b><p>${esc(state.error)}</p><button class="btn ghost" onclick="agentAIRuntimePobierz(false)">Ponów kontrolę</button></div></section>`;
+  const stateMeta={ready:["🟢","Agent czeka na sygnał","Nie wykonuje pustych kontroli. Nowe zdarzenie uruchomi wyłącznie właściwy moduł."],online:["🟢","Agent czeka na sygnał","Nie wykonuje pustych kontroli. Nowe zdarzenie uruchomi wyłącznie właściwy moduł."],working:["⚙️","Agent właśnie pracuje",currentWork?.message||eventCurrent?.payload?.action||"Obsługuję odebrane zdarzenie."],degraded:["🟠",aiWarnings.length?"Agent wymaga kontroli":"Agent gotowy • integracja wymaga uwagi",aiWarnings.length?"Dostawca AI zgłosił błąd podczas ostatniego zadania.":"Proces wykonawczy działa, ale wskazany kanał zewnętrzny wymaga sprawdzenia połączenia."],stale:["🟡","Agent jest w gotowości","Nie ma cyklu czasowego. Brak pracy oznacza brak nowego zdarzenia."],offline:["🔴","Agent wykonawczy offline","Proces nie wysłał aktualnego sygnału pracy."]}[r.state]||["⚪","Sprawdzam Agenta","Oczekiwanie na pierwszy sygnał procesu."];
+  const providerCards=[
+    ["codex","⌘","Codex — koordynator nadrzędny","Rozumienie poleceń, kolejność pracy, delegowanie pomocnikom i kontrola końcowego wyniku"],
+    ["openai","✦","OpenAI Responses API","Role: operacje, katalog, magazyn, komunikacja i zgodność"],
+    ["anthropic","◇","Claude","Drugi dostawca pracujący rotacyjnie i jako automatyczny fallback"],
+    ["xai","𝕏","Grok — xAI","Trzeci dostawca rotacyjny z osobnym limitem dziennym"]
+  ].map(([id,icon,label,detail])=>{const p=providers[id]||{},ready=p.connected===true,configured=p.configured===true,status=ready?"połączenie sprawdzone":configured?"skonfigurowany — ostatnia kontrola nieudana":"brak konfiguracji",quota=id==="xai"&&Number(p.dailyRequestLimit)>0?` • limit bezpieczeństwa ${Number(p.requestsToday)||0}/${Number(p.dailyRequestLimit)} • zostało ${Number(p.remainingToday)||0}`:"",billing=id==="xai"?" • płatne API xAI":"";return `<article class="${ready?"ready":configured?"configured":"attention"}"><span>${icon}</span><div><b>${label}</b><small>${esc(detail)}</small><em>${esc(p.model||"model automatyczny")} • ${status}${billing}${quota}${p.lastSuccessAt?` • ostatni sukces ${esc(agentAIRuntimeCzas(p.lastSuccessAt))}`:p.lastCheckedAt?` • kontrola ${esc(agentAIRuntimeCzas(p.lastCheckedAt))}`:""}</em>${p.error?`<p>${esc(p.error)}${id==="xai"?" • xAI jest pomijane, a zadanie przejmuje kolejny dostępny dostawca.":""}</p>`:""}</div><i></i></article>`;}).join("");
+  const steps=(current?.steps||last?.steps||[]),run=current||last,done=steps.filter(x=>["completed","skipped"].includes(x.status)).length,progress=steps.length?Math.round(done/steps.length*100):0;
+  const workTrace=activity.filter(item=>item.type==="work"&&(!currentWork?.productId||String(item.productId||"")===String(currentWork.productId))&&!['pending','running','automatyczna_korekta'].includes(String(item.phase||''))).slice(0,6).map(item=>({...item,fields:Array.isArray(item.fields)?item.fields.slice(0,5):[]}));
+  const channelLabel=(channel)=>channel==="allegro"?"Allegro":channel==="vonHalsky"?"InPost Von Halsky":channel==="store"?"Sklep Artway-TM":"System";
+  const workStatus=(work)=>work.status==="confirmed"||work.status==="completed"&&work.readbackConfirmed===true?"trwale zapisano i odczytano":work.status==="completed"?"zakończono — brak odczytu zapisu":work.status==="pending"?"czeka w kolejce serwera":work.status==="waiting_provider"?"oczekuje na odnowienie AI":work.status==="decision_required"?"wymaga konkretnej decyzji":work.status==="failed"?"odłożono do automatycznej naprawy":work.status==="attention"?"automatyczna korekta trwa":work.status==="running"?"wykonywane teraz":"pominięto";
+  const preparationActive=Array.isArray(preparationQueue.activeItems)&&preparationQueue.activeItems.length?preparationQueue.activeItems:preparationQueue.active?[preparationQueue.active]:[];
+  const preparationRows=preparationActive.map(task=>preparationCurrent.find(item=>String(item?.id||"")===String(task?.id||""))||{...task,status:"running"});
+  const preparationBusy=Number(preparationQueue.pending||0)+Number(preparationCounts.running||preparationRows.length||0);
+  const preparationWaiting=Number(preparationCounts.waitingProvider||0);
+  const preparationDecisions=Number(preparationCounts.decisionRequired||0)+Number(preparationCounts.failed||0);
+  const preparationCompleted=Number(catalogSummary.ready??preparationCounts.completed??0),preparationTotal=Number(catalogSummary.total||0);
+  const preparationPaused=preparationQueue.paused===true,preparationBatch=(Array.isArray(preparationQueue.batches)?preparationQueue.batches:[]).find(item=>Number(item.pending||0)+Number(item.running||0)>0)||(preparationQueue.batches||[])[0]||null,preparationPreviousPending=Math.max(0,(Number(preparationQueue.pending)||0)-Math.max(0,Number(preparationBatch?.pending)||0));
+  return `<section class="agent-runtime-dashboard">
+    <div class="panel agent-runtime-status ${esc(r.state||"unknown")}"><div class="agent-runtime-state"><span>${stateMeta[0]}</span><div><small>TRYB ZDARZENIOWY • BEZ CYKLI</small><h2>${stateMeta[1]}</h2><p>${esc(stateMeta[2])}</p></div></div><div class="agent-runtime-now"><span><small>Ostatni kontakt</small><b>${esc(agentAIRuntimeCzas(worker.lastSeenAt))}</b></span><span><small>Uruchomienie modułu</small><b>natychmiast po sygnale</b></span><span><small>Zdarzenia w toku</small><b>${esc(eventQueue.active||0)}</b></span><button class="btn ghost" onclick="agentAIRuntimePobierz(false)">${state.loading?"⏳":"↻"} Odśwież</button></div></div>
+    ${warnings.length?`<div class="panel agent-runtime-warning ${aiWarnings.length?"is-ai-warning":"is-external-warning"}"><span>${aiWarnings.length?"⚠️":"🔌"}</span><div><b>${aiWarnings.length?`${aiWarnings.length} elementów AI wymaga kontroli`:`Aktualne połączenie Allegro wymaga działania`}</b><p>${warnings.map(x=>`${esc(x.label)}: ${esc(x.error)}`).join(" • ")}</p></div><a class="btn" href="${aiWarnings.length?"#/admin/agent-ai/zasady":"#/admin/allegro/ustawienia"}">${aiWarnings.length?"Sprawdź ustawienia AI":"Otwórz naprawę połączenia"}</a></div>`:""}
+    ${currentWork?`<section class="panel agent-runtime-exact-work" data-agent-current-product="${esc(currentWork.productId||"")}"><div class="agent-runtime-exact-icon">⚙️</div><div><span class="order-pro-label">TERAZ • JEDNA RZECZYWISTA CZYNNOŚĆ</span><h2>${esc(currentWork.productName||currentWork.action||"Zadanie systemowe")}</h2><p><b>${esc(currentWork.action||"Operacja")}</b> • etap: ${esc(agentAIEtapPracyLabel(currentWork.phase))} • cel: ${esc(currentWork.target||channelLabel(currentWork.channel))} • próba ${esc(currentWork.attempt||1)}</p>${currentWork.fields?.length?`<small><b>Zmieniane pola w edytorze:</b> ${currentWork.fields.map(value=>esc(agentAIPolePracyLabel(value))).join(", ")}</small>`:""}${currentWork.productId?`<small><b>Miejsce zapisu:</b> centralna kartoteka produktu #${esc(currentWork.productId)}</small>`:""}<em>${esc(currentWork.message||"Trwa wykonanie i oczekiwanie na potwierdzenie wyniku.")}</em>${workTrace.length?`<ol class="agent-runtime-work-trace">${workTrace.map((item,index)=>`<li class="${esc(item.status)}"><i>${index===0?"●":"✓"}</i><div><b>${esc(agentAIEtapPracyLabel(item.phase))}</b>${item.fields?.length?`<small>${item.fields.map(value=>esc(agentAIPolePracyLabel(value))).join(", ")}</small>`:""}</div><time>${esc(agentAIRuntimeCzas(item.at))}</time></li>`).join("")}</ol>`:""}</div><strong>${esc(channelLabel(currentWork.channel))}<small>${esc(workStatus(currentWork))}</small>${currentWork.productId?`<a class="agent-current-editor-link" href="#/admin/produkty/edytuj/${encodeURIComponent(String(currentWork.productId))}">Otwórz zapis w edytorze →</a>`:""}</strong></section>`:`<section class="panel agent-runtime-exact-work is-idle"><div class="agent-runtime-exact-icon">✓</div><div><span class="order-pro-label">TERAZ</span><h2>Agent czeka na następny konkretny produkt</h2><p>Nie jest wykonywana żadna ukryta ani fikcyjna praca. Nowy wpis pojawi się dopiero po pobraniu zadania przez serwer.</p></div><strong>Gotowość<small>brak aktywnego zapisu</small></strong></section>`}
+    <div class="agent-runtime-grid"><section class="panel agent-runtime-run"><div class="order-section-head"><div><span class="order-pro-label">${eventCurrent?"Na żywo":"Ostatnie zdarzenia"}</span><h2>${eventCurrent?"⚙️ Co Agent robi teraz":"✅ Zdarzenia rozliczone przez serwer"}</h2><p class="order-detail-lead">Każdy wpis powstaje dopiero po rzeczywistym sygnale z produktu, zamówienia, wiadomości albo integracji.</p></div><span class="lvl ${eventCurrent?"lvl-info":"lvl-ok"}">${eventCurrent?"w toku":"gotowość"}</span></div><div class="agent-runtime-steps">${[...(eventCurrent?[eventCurrent]:[]),...eventRecent].slice(0,10).map(item=>`<article class="${esc(item.status)}"><span>${item.status==="running"?"⏳":item.status==="completed"?"✓":item.status==="decision_required"?"?":"×"}</span><div><b>${esc(item.payload?.action||item.type||"Zdarzenie")}</b><small>${esc(item.area||"system")} • ${esc(item.entityId||"bez identyfikatora")}${item.error?` • ${esc(item.error)}`:""}</small></div><em>${esc(agentAIRuntimeCzas(item.completedAt||item.startedAt||item.createdAt))}</em></article>`).join("")||`<div class="agent-ops-empty">Brak nowego sygnału. Agent nie zużywa zasobów na puste kontrole.</div>`}</div></section>
+      <aside class="panel agent-runtime-queue"><div class="order-section-head"><div><span class="order-pro-label">Kolejka poleceń</span><h2>⌘ Codex → agenci pomocniczy</h2></div><strong>${esc(queue.active||0)}</strong></div><div class="agent-runtime-queue-stats"><span><b>${esc(counts.queued||0)}</b><small>oczekuje</small></span><span><b>${esc((counts.processing||0)+(counts.delivering||0))}</b><small>wykonywane</small></span><span><b>${esc(counts.completed||0)}</b><small>wykonane</small></span><span><b>${esc(counts.failed||0)}</b><small>błędy</small></span></div><div class="agent-runtime-worker"><span>${worker.currentTask?"⚙️":"✓"}</span><div><b>${esc(worker.currentTask||"Gotowy na polecenie")}</b><small>${worker.currentTaskStartedAt?`od ${esc(agentAIRuntimeCzas(worker.currentTaskStartedAt))}`:`${esc(worker.completedJobs||0)} wykonanych • ${esc(worker.failedJobs||0)} nieudanych`}</small></div></div><a class="btn" href="#/admin/agent-ai/komendy">Wydaj polecenie</a></aside></div>
+    <section class="panel agent-publication-proof"><div class="order-section-head"><div><span class="order-pro-label">JEDNA KOLEJKA • RZECZYWISTY ZAPIS DO EDYTORA</span><h2>Stan przygotowania kartotek</h2><p class="order-detail-lead">Każdy produkt wykonywany teraz jest pokazany osobno. Oczekujące pozycje pozostają jednym licznikiem, a gotowość całego katalogu pochodzi z centralnego raportu wszystkich kanałów.</p></div><div class="agent-publication-counts"><span><b>${esc(preparationBusy)}</b><small>w kolejce lub w toku</small></span><span><b>${esc(preparationWaiting)}</b><small>czeka na AI</small></span><span><b>${esc(preparationDecisions)}</b><small>wymaga decyzji</small></span><span><b>${esc(preparationTotal?`${preparationCompleted} / ${preparationTotal}`:preparationCompleted)}</b><small>gotowe we wszystkich kanałach</small></span></div></div><div class="agent-publication-controls ${preparationPaused?"is-paused":""}"><div><b>${preparationPaused?"Kolejka produktów jest wstrzymana":"Sterowanie trwałą kolejką produktów"}</b><small>Każdy rozpoczęty zapis kończy się bezpiecznie, a status gotowości wymaga odczytu kontrolnego kartoteki.</small></div><div>${preparationPaused?`<button class="btn" onclick="asortymentSterujKolejkaSerwera('resume')">▶ Wznów</button>`:preparationBusy?`<button class="btn ghost" onclick="asortymentSterujKolejkaSerwera('pause')">⏸ Wstrzymaj</button>`:""}${preparationPreviousPending?`<button class="btn danger" onclick="asortymentSterujKolejkaSerwera('cancel_previous',${jsArg(String(preparationBatch?.id||""))})">⛔ Anuluj wcześniejsze (${preparationPreviousPending})</button>`:""}${Number(preparationBatch?.pending||0)?`<button class="btn danger" onclick="asortymentSterujKolejkaSerwera('cancel',${jsArg(String(preparationBatch?.id||""))})">⛔ Anuluj bieżące (${Number(preparationBatch.pending)||0})</button>`:""}<button class="btn ghost" onclick="agentAIRuntimePobierz(false)">↻ Odśwież</button><a class="btn ghost" href="#/admin/agent-ai/historia">Pełna historia →</a></div></div><div class="agent-publication-list">${preparationRows.map(work=>{const runtimeWork=runtimePublicationRows.find(item=>String(item.productId||"")===String(work.productId||"")),product=typeof pobierzProduktAdmin==="function"?pobierzProduktAdmin(work.productId):null,row={...runtimeWork,...work,productName:work.name||runtimeWork?.productName||product?.nazwa||`Produkt ${work.productId||""}`,channel:"store",action:"pełny przegląd produktu"};return `<article class="${esc(row.status)}"><span>⋯</span><div><b>${esc(row.productName||row.action||"Operacja systemowa")}</b><small>Produkt #${esc(row.productId||"—")} • ${esc(agentAIEtapPracyLabel(row.phase||row.status||workStatus(row)))}</small><p>${esc(row.error||row.message||workStatus(row))}</p></div><em>${esc(workStatus(row))}<small>${esc(agentAIRuntimeCzas(row.updatedAt||row.startedAt||row.requestedAt))}</small></em></article>`;}).join("")||`<div class="agent-ops-empty">Brak produktu wykonywanego teraz. Kolejka czeka na następne zadanie albo została zakończona.</div>`}</div></section>
+    <section class="panel agent-runtime-providers"><div class="order-section-head"><div><span class="order-pro-label">Kontrolowany routing AI</span><h2>Rzeczywiste połączenia i role Agenta</h2><p class="order-detail-lead">Polecenia z panelu są rozdzielane rotacyjnie między dostępne OpenAI, Claude i Groka. Każda zielona karta oznacza udany test API, a nie samo zapisanie klucza. Niedostępny dostawca jest pomijany. Codex pozostaje koordynatorem, a zapis danych przechodzi przez reguły serwera.</p></div></div><div>${providerCards}</div></section>
+    <section class="panel agent-runtime-activity"><div class="order-section-head"><div><span class="order-pro-label">Dziennik na żywo</span><h2>Każdy wykonany etap</h2><p class="order-detail-lead">Produkt, dokładna czynność, zmieniane pola, wynik oraz czas pozostają widoczne także po przejściu Agenta do następnego etapu.</p></div><a class="btn ghost" href="#/admin/agent-ai/historia">Pełna historia</a></div><div>${activity.slice(0,30).map(item=>`<article class="${esc(item.status)}"><span>${item.status==="success"?"✓":item.status==="warning"?"!":item.status==="error"?"×":item.status==="running"?"⋯":"•"}</span><div><b>${esc(item.productName||item.title||"Zdarzenie Agenta")}${item.phase?` • ${esc(agentAIEtapPracyLabel(item.phase))}`:""}</b><small>${esc(item.detail||item.source||"")}${item.fields?.length?`<em>Pola: ${item.fields.map(value=>esc(agentAIPolePracyLabel(value))).join(", ")}</em>`:""}</small></div><time>${esc(agentAIRuntimeCzas(item.at))}</time></article>`).join("")||`<div class="agent-ops-empty">Dziennik zapełni się po nadejściu rzeczywistego zdarzenia albo polecenia.</div>`}</div></section>
+  </section>`;
+}
+async function agentAISpecjalisciPobierz(silent=true){
+  if(agentAISpecjalisci.loading)return agentAISpecjalisci.data;
+  agentAISpecjalisci={...agentAISpecjalisci,loading:true,error:""};if(!silent)renderuj();
+  try{const data=await chmura("agent-specialists-status",{params:{historyLimit:30,includeInstructions:location.hash.includes("/admin/agent-ai/specjalisci")?1:0},timeout:30000});agentAISpecjalisci={...agentAISpecjalisci,loading:false,loaded:true,error:"",data,fetchedAt:Date.now()};}
+  catch(error){agentAISpecjalisci={...agentAISpecjalisci,loading:false,loaded:true,error:String(error?.message||error)};}
+  if(!silent)renderuj();else agentAISpecjalisciAktualizujWidocznePanele();return agentAISpecjalisci.data;
+}
+function agentAISpecjalisciAktualizujWidocznePanele(){
+  const initiative=document.querySelector(".agent-initiative-panel");if(initiative)initiative.outerHTML=agentAIInicjatywaPanelHTML();
+  const permissions=document.querySelector(".agent-permission-page");if(permissions)permissions.outerHTML=agentAIUprawnieniaPanelHTML();
+  const specialistsPage=document.querySelector(".agent-specialists-page");
+  if(specialistsPage){specialistsPage.querySelector(".agent-coordinator-card")?.remove();specialistsPage.querySelector(".agent-specialists-hero")?.insertAdjacentHTML("afterend",agentAICodexKoordynatorHTML(agentAISpecjalisci.data?.lastCycle||{}));const platform=specialistsPage.querySelector(".openai-platform-card");if(platform)platform.outerHTML=agentAIOpenAiPlatformHTML(agentAISpecjalisci.data?.openaiPlatform||{});agentAIKonfiguracjaRolWidok();}
+  document.querySelectorAll("[data-product-agent-card]").forEach(card=>{const id=card.dataset.productAgentCard,product=pobierzProduktAdmin(id)||produkty.find(p=>String(p.id)===String(id));if(product)card.outerHTML=agentAIWdrozenieProduktuHTML(product,true);});
+  const badge=document.querySelector("[data-agent-live-decision-count]");if(badge)badge.textContent=String(agentAISpecjalisci.data?.decisionStats?.open||0);
+  const decisions=document.querySelector("[data-agent-decisions-view]");
+  const decisionFormActive=Boolean(decisions&&decisions.contains(document.activeElement));
+  if(decisions&&!decisionFormActive&&typeof agentAIDecyzjeScaloneHTML==="function")decisions.outerHTML=agentAIDecyzjeScaloneHTML();
+  const history=document.querySelector("[data-agent-history-view]");if(history&&typeof agentAIHistoriaScalonaHTML==="function")history.outerHTML=agentAIHistoriaScalonaHTML();
+  if(typeof agentAIOperationsUpdateDom==="function")agentAIOperationsUpdateDom();else if(typeof agentAIKontekstAktualizujDom==="function")agentAIKontekstAktualizujDom();
+}
+function agentAISpecjalisciPolling(){
+  clearTimeout(agentAISpecjalisci.pollTimer);const route=String(location.hash||""),relevant=route.startsWith("#/admin/agent-ai")||route.includes("/admin/produkty/edytuj/");if(!relevant)return;
+  agentAISpecjalisci.pollTimer=setTimeout(async()=>{await agentAISpecjalisciPobierz(true);agentAISpecjalisciPolling();},60000);
+}
+async function agentAISpecjalistaWykonaj(specialist,context={},instruction="",target={},options={}){
+  const response=await chmura("agent-specialist-run",{method:"POST",body:{specialist,context,instruction,target,source:options.source||"manual"},timeout:120000});
+  const run=response.run||null;agentAISpecjalisci={...agentAISpecjalisci,activeRun:run};
+  if(agentAISpecjalisci.data&&run)agentAISpecjalisci.data={...agentAISpecjalisci.data,history:[run,...(agentAISpecjalisci.data.history||[]).filter(item=>item.id!==run.id)]};
+  return run;
+}
+function agentAISpecjalistaPola(result={}){return Object.fromEntries((Array.isArray(result.fields)?result.fields:[]).map(field=>[String(field.key||""),String(field.value||"")]));}
+async function agentAISpecjalistaProduktWdrozenie(product={}){
+  const response=await chmura("agent-specialist-product-proposal",{method:"POST",body:{productId:String(product.id)},timeout:120000});
+  if(response.run)agentAISpecjalisci={...agentAISpecjalisci,activeRun:response.run};
+  await agentAISpecjalisciPobierz(true);
+  return response.run||null;
+}
+function agentAISpecjalistaWynikHTML(run={},compact=false){
+  const result=run.result||{},fields=Array.isArray(result.fields)?result.fields:[],warnings=[...(result.warnings||[]),...(result.missingFacts||[]).map(item=>`Brak faktu: ${item}`)],status=result.complianceStatus||"needs_review";
+  const saved=["applied","auto_applied","not_needed"].includes(run.approvalStatus);
+  return `<article class="agent-specialist-result ${esc(status)}"><header><div><span>${run.source==="automatic"?"⚙️":"✍️"}</span><div><b>${esc(result.title||run.specialistLabel||"Szkic OpenAI")}</b><small>${esc(run.specialistLabel||run.specialist||"")} • ${esc(run.model||"model routowany")} • ${run.reasoningEffort?`reasoning ${esc(run.reasoningEffort)} • `:""}${run.platformAgent?.id?`profil OpenAI ${esc(run.platformAgent.name||run.platformAgent.id)} • `:""}reguły ${esc(run.promptVersion||"bieżące")} • ${esc(agentAIRuntimeCzas(run.createdAt))}${run.cached?" • pamięć wyniku":""}</small></div></div><span class="lvl ${saved?"lvl-ok":status==="ready"?"lvl-ok":status==="blocked_missing_facts"?"lvl-blad":"lvl-ostrzezenie"}">${saved?(run.approvalStatus==="auto_applied"?"bezpiecznie zapisano":"zapisano"):run.target?.type==="product"?"automatyczna ponowna próba":status==="ready"?"gotowy do decyzji":status==="blocked_missing_facts"?"brak faktów":"sprawdź szkic"}</span></header>${result.summary?`<p>${esc(result.summary)}</p>`:""}${fields.length?`<div class="agent-specialist-fields">${fields.map(field=>`<section><small>${esc(field.label||field.key)}</small>${field.currentValue?`<div class="agent-field-before"><b>Było</b><span>${esc(field.currentValue)}</span></div>`:""}<pre>${esc(field.value||"")}</pre>${field.reason?`<p><b>Dlaczego:</b> ${esc(field.reason)}</p>`:""}${field.evidence?`<p><b>Podstawa:</b> ${esc(field.evidence)}</p>`:""}</section>`).join("")}</div>`:""}${!compact&&result.content?`<details><summary>Główna treść</summary><pre>${esc(result.content)}</pre></details>`:""}${warnings.length?`<div class="agent-specialist-warnings">${warnings.map(item=>`<span>⚠️ ${esc(item)}</span>`).join("")}</div>`:""}<footer><span>Pewność: <b>${Math.round(Number(result.confidence||0)*100)}%</b></span><span>Tokeny: <b>${esc(run.usage?.totalTokens||0)}</b></span>${run.target?.type==="product"&&!saved?`<span class="lvl lvl-ostrzezenie">Agent ponowi redakcję automatycznie — bez klikania</span>`:saved?`<span class="lvl lvl-ok">${run.approvalStatus==="auto_applied"?"zapisano bezpieczną pełną redakcję":"zapisano w produkcie"}</span>`:""}</footer></article>`;
+}
+async function agentAISpecjalistaFormularz(e){
+  e?.preventDefault();const form=e.currentTarget,specialist=String(form.elements.specialist?.value||"product_content"),instruction=String(form.elements.instruction?.value||"").trim(),material=String(form.elements.material?.value||"").trim();
+  if(!material){toast("Wpisz fakty lub materiał wejściowy");return false;}agentAISpecjalisci={...agentAISpecjalisci,running:true,error:""};renderuj();
+  try{const run=await agentAISpecjalistaWykonaj(specialist,{material},instruction,{});toast(run.cached?"✅ Użyto aktualnego, sprawdzonego szkicu":"✅ Specjalista OpenAI przygotował szkic do zatwierdzenia");await agentAISpecjalisciPobierz(true);}
+  catch(error){agentAISpecjalisci={...agentAISpecjalisci,error:String(error?.message||error)};toast("⚠️ OpenAI: "+(error?.message||error));}
+  finally{agentAISpecjalisci={...agentAISpecjalisci,running:false};renderuj();}return false;
+}
+async function agentAISpecjalistaZatwierdzProdukt(id,button=null){
+  if(button)button.disabled=true;try{const data=await chmura("agent-specialist-apply",{method:"POST",body:{id},timeout:45000});await chmuraWczytajStan().catch(()=>{});const run=(agentAISpecjalisci.data?.history||[]).find(item=>item.id===id);if(run)run.approvalStatus="applied";toast(data.result?.duplicate?"ℹ️ Ten szkic był już zapisany":"✅ Zatwierdzone treści zapisano w produkcie");renderuj();}
+  catch(error){toast("⚠️ Zatwierdzenie szkicu: "+(error?.message||error));if(button)button.disabled=false;}
+}
+async function agentAISpecjalisciZapiszUstawienia(e){
+  e?.preventDefault();const form=e.currentTarget,f=new FormData(form),current=agentAISpecjalisci.data?.config||{},config={...current,enabled:f.get("enabled")==="on",automaticEnabled:f.get("automaticEnabled")==="on",safeAutoApply:f.get("safeAutoApply")==="on",autoApplyProductEditorial:f.has("autoApplyProductEditorial")?f.get("autoApplyProductEditorial")==="on":current.autoApplyProductEditorial!==false,autoUpdateLinkedAllegroContent:f.has("autoUpdateLinkedAllegroContent")?f.get("autoUpdateLinkedAllegroContent")==="on":current.autoUpdateLinkedAllegroContent!==false,learningEnabled:f.get("learningEnabled")==="on",approvalWarmupCount:Number(f.get("approvalWarmupCount")||0),learnedAutoApplyThreshold:Number(f.get("learnedAutoApplyThreshold")||86)/100,dailyLimit:Number(f.get("dailyLimit")||60),automaticDailyLimit:Number(f.get("automaticDailyLimit")||30),automaticBatchSize:Number(f.get("automaticBatchSize")||4),automaticInputTokenLimit:Number(f.get("automaticInputTokenLimit")||current.automaticInputTokenLimit||180000),automaticOutputTokenLimit:Number(f.get("automaticOutputTokenLimit")||current.automaticOutputTokenLimit||70000),cacheHours:Number(f.get("cacheHours")||72),confidenceThreshold:Number(f.get("confidenceThreshold")||92)/100,decisionRetentionDays:Number(f.get("decisionRetentionDays")||30)};agentAISpecjalisci={...agentAISpecjalisci,saving:true};renderuj();
+  try{await chmura("agent-specialists-config",{method:"POST",body:{config},timeout:30000});toast("✅ Zapisano routing modeli, kontrolę kosztów i automatykę");await agentAISpecjalisciPobierz(true);}catch(error){toast("⚠️ Ustawienia agentów: "+(error?.message||error));}finally{agentAISpecjalisci={...agentAISpecjalisci,saving:false};renderuj();}return false;
+}
+async function agentAIUprawnieniaZapisz(e){
+  e?.preventDefault();const f=new FormData(e.currentTarget),current=agentAISpecjalisci.data?.config||{},automatic=agentAISpecjalisci.data?.policy?.actionPolicy?.automatic||[],config={...current,safeAutoApply:true};automatic.filter(item=>item.configKey).forEach(item=>{config[item.configKey]=f.get(item.configKey)==="on";});agentAISpecjalisci={...agentAISpecjalisci,saving:true};renderuj();
+  try{await chmura("agent-specialists-config",{method:"POST",body:{config},timeout:30000});toast("✅ Polityka uprawnień Agenta została zapisana");await agentAISpecjalisciPobierz(true);}catch(error){toast("⚠️ Uprawnienia Agenta: "+(error?.message||error));}finally{agentAISpecjalisci={...agentAISpecjalisci,saving:false};renderuj();}return false;
+}
+async function agentAISpecjalisciCykl(){
+  agentAISpecjalisci={...agentAISpecjalisci,running:true};renderuj();try{const data=await chmura("allegro-preparation-queue-auto",{method:"POST",body:{source:"admin-manual"},timeout:180000}),work=data.automatic||{};toast(work.reason==="catalog_ready"?"✅ Wszystkie produkty są przygotowane":work.reason==="queue_busy"?"ℹ️ Agent już pracuje — nie utworzono duplikatu":`✅ Wznowiono zaległości: ${Number(work.enqueued||work.candidates?.length||0)} produktów`);await agentAISpecjalisciPobierz(true);}catch(error){toast("⚠️ Wznowienie pracy produktowej: "+(error?.message||error));}finally{agentAISpecjalisci={...agentAISpecjalisci,running:false};renderuj();}
+}
+async function agentAISpecjalistaDecyzja(id,decisionAction,days=1){
+  if(agentAISpecjalistaDecyzjeWToku.has(String(id)))return;
+  const fieldKeys=[...document.querySelectorAll("[data-agent-decision-field]")].filter(input=>input.dataset.agentDecisionField===String(id)&&input.checked).map(input=>input.value);
+  const item=(agentAISpecjalisci.data?.decisions||[]).find(entry=>String(entry.id)===String(id)),product=!!(item?.target?.type==="product"&&item?.runId);
+  if(decisionAction==="approve"&&product&&!fieldKeys.length){toast("Wybierz co najmniej jedną konkretną poprawkę do zapisania");return;}
+  agentAISpecjalistaDecyzjeWToku.add(String(id));renderuj();
+  try{const data=await chmura("agent-specialist-decision",{method:"POST",body:{id,decisionAction,days,fieldKeys},timeout:60000}),applied=Object.keys(data.decision?.executionResult?.patch||{}).length;if(decisionAction==="approve"&&product)await chmuraWczytajStan().catch(()=>{});toast(decisionAction==="approve"?(product?`✅ Zatwierdzenie wykonane — zapisano ${applied} ${applied===1?"pole":"pola"}`:"✅ Kierunek zatwierdzony — bez działania zewnętrznego"):decisionAction==="snooze"?`⏰ Decyzja odłożona na ${days} dni`:decisionAction==="dismiss"?"🗑️ Propozycja odrzucona":"✅ Sprawa zamknięta");await agentAISpecjalisciPobierz(true);}catch(error){const code=String(error?.code||"");toast(`⚠️ Zatwierdzenie nie zostało wykonane${code?` (${code})`:""}: ${error?.message||error}`);}finally{agentAISpecjalistaDecyzjeWToku.delete(String(id));renderuj();}
+}
+async function agentAISpecjalistaPoprawDecyzje(id){
+  const input=document.querySelector(`[data-agent-feedback="${CSS.escape(String(id))}"]`),note=String(input?.value||"").trim();
+  if(note.length<3){toast("Napisz krótko, co Agent ma zmienić");input?.focus();return;}
+  if(agentAISpecjalistaDecyzjeWToku.has(String(id)))return;agentAISpecjalistaDecyzjeWToku.add(String(id));renderuj();
+  try{await chmura("agent-specialist-decision",{method:"POST",body:{id,decisionAction:"revise",note},timeout:150000});toast("✨ Agent uwzględnił wskazówkę i przygotował nową wersję");await agentAISpecjalisciPobierz(true);}catch(error){toast("⚠️ Poprawa propozycji: "+(error?.message||error));}finally{agentAISpecjalistaDecyzjeWToku.delete(String(id));renderuj();}
+}
+function agentAISpecjalistaDecyzjaHTML(item={}){
+  const risk={low:["Niskie ryzyko","lvl-ok"],medium:["Wymaga kontroli","lvl-ostrzezenie"],high:["Decyzja administratora","lvl-blad"]}[item.risk]||["Wymaga kontroli","lvl-ostrzezenie"],product=item.target?.type==="product"&&item.runId,busy=agentAISpecjalistaDecyzjeWToku.has(String(item.id)),run=(agentAISpecjalisci.data?.history||[]).find(entry=>String(entry.id)===String(item.runId)),fields=run?.result?.fields||[],warnings=[...(run?.result?.warnings||[]),...(run?.result?.missingFacts||[]).map(value=>`Brak faktu: ${value}`)];
+  const changes=product&&fields.length?`<div class="agent-decision-changes"><b>Wybierz zatwierdzane poprawki</b>${fields.map(field=>`<label><input type="checkbox" data-agent-decision-field="${esc(item.id)}" value="${esc(field.key)}" checked><span><small>${esc(field.label||field.key)}</small>${field.currentValue?`<del>${esc(field.currentValue)}</del>`:""}<strong>${esc(field.value||"")}</strong>${field.reason?`<em>${esc(field.reason)}</em>`:""}</span></label>`).join("")}</div>`:"";
+  return `<article class="agent-proposal-card risk-${esc(item.risk||"medium")} ${item.executionStatus==="failed"?"execution-failed":""}"><header><span>${esc(item.icon||"🧭")}</span><div><b>${esc(item.title||"Propozycja Agenta")}</b><small>${esc(item.specialist||"koordynator")} • ${esc(agentAIRuntimeCzas(item.createdAt))}${item.revisionCount?` • poprawiona ${esc(item.revisionCount)}×`:""}${item.operationId?` • operacja ${esc(item.operationId.slice(-8))}`:""}</small></div><em class="lvl ${item.executionStatus==="failed"?"lvl-blad":risk[1]}">${item.executionStatus==="failed"?"Nie wykonano":busy?"Wykonuję…":risk[0]}</em></header><p>${esc(item.summary||"")}</p><section><small>Rekomendacja</small><b>${esc(item.recommendation||"Sprawdź dane i wybierz dalsze działanie.")}</b></section>${changes}${warnings.length?`<div class="agent-specialist-warnings">${warnings.map(value=>`<span>⚠️ ${esc(value)}</span>`).join("")}</div>`:""}${item.lastError?`<div class="agent-decision-error"><b>Błąd ${esc(item.lastErrorCode||"")}</b><span>${esc(item.lastError)}</span><small>Nic nie wysłano na zewnątrz. Możesz poprawić dane i bezpiecznie ponowić zatwierdzenie.</small></div>`:""}${product?`<details class="agent-decision-feedback"><summary>✍️ Powiedz Agentowi, co ma poprawić</summary><textarea data-agent-feedback="${esc(item.id)}" rows="3" placeholder="Np. krótszy wstęp, więcej czytelnych akapitów, bez powtarzania nazwy…">${esc(item.feedbackNote||"")}</textarea><button class="btn" type="button" onclick="agentAISpecjalistaPoprawDecyzje(${jsArg(item.id)})" ${busy?"disabled":""}>✨ Przygotuj poprawioną wersję</button></details>`:""}${item.alternatives?.length?`<details><summary>Możliwe warianty</summary><ul>${item.alternatives.map(value=>`<li>${esc(value)}</li>`).join("")}</ul></details>`:""}<footer>${item.href?`<a class="btn" href="${esc(item.href)}">Otwórz właściwy moduł</a>`:""}<button class="btn ${product?"":"ghost"}" onclick="agentAISpecjalistaDecyzja(${jsArg(item.id)},'approve')" ${busy?"disabled":""}>${busy?"⏳ Wykonuję…":product?(item.executionStatus==="failed"?"↻ Ponów wybrane poprawki":"✅ Zatwierdź wybrane poprawki"):"✓ Akceptuj kierunek (bez wysyłki)"}</button><button class="btn ghost" onclick="agentAISpecjalistaDecyzja(${jsArg(item.id)},'snooze',1)" ${busy?"disabled":""}>⏰ Jutro</button><button class="btn ghost" onclick="agentAISpecjalistaDecyzja(${jsArg(item.id)},'dismiss')" ${busy?"disabled":""}>Odrzuć</button></footer></article>`;
+}
+function agentAIUprawnieniaPanelHTML(){
+  const data=agentAISpecjalisci.data||{},cfg=data.config||{},policy=data.policy?.actionPolicy||{},automatic=Array.isArray(policy.automatic)?policy.automatic:[],approval=Array.isArray(policy.approvalRequired)?policy.approvalRequired:[],blocked=Array.isArray(policy.blockedOnUncertainty)?policy.blockedOnUncertainty:[];
+  if(agentAISpecjalisci.loading&&!agentAISpecjalisci.loaded)return `<section class="panel agent-permission-page"><div class="agent-runtime-loading"><i></i><div><b>Pobieram centralną politykę uprawnień…</b><small>Sprawdzam rzeczywiste reguły serwera.</small></div></div></section>`;
+  const isEnabled=item=>!item.configKey||cfg[item.configKey]!==false;
+  const configurable=automatic.filter(item=>item.configKey),enabled=configurable.filter(isEnabled).length;
+  return `<section class="agent-permission-page"><section class="panel agent-permission-hero"><div><span class="order-pro-label">Jedna polityka dla całej strony</span><h2>🛡️ Uprawnienia Agenta i zespołu</h2><p>Nadajesz Agentowi dostęp wyłącznie do bezpiecznych, odwracalnych działań. Operacje finansowe, sprzedażowe, wysyłkowe i zewnętrzna komunikacja pozostają stale zablokowane do decyzji administratora.</p></div><div class="agent-permission-summary"><span><b>${enabled}/${configurable.length}</b><small>nadanych automatyk</small></span><span><b>${approval.length}</b><small>stałych blokad</small></span></div></section><section class="panel agent-team-access"><div><span>👥</span><div><span class="order-pro-label">Dostęp konkretnych osób</span><h2>Administratorzy i prawo zatwierdzania</h2><p>Na kontach użytkowników osobno nadajesz dostęp do panelu, rozmowy z Agentem oraz zatwierdzania chronionych decyzji.</p></div></div><a class="btn" href="#/admin/klienci/uprawnienia">Zarządzaj dostępem osób →</a></section><div class="agent-permission-columns"><form class="panel agent-permission-list automatic" onsubmit="return agentAIUprawnieniaZapisz(event)"><div class="order-section-head"><div><span class="order-pro-label">Nadawane przez administratora • pełny audyt</span><h2>⚡ Agent może wykonywać</h2><p class="order-detail-lead">Przełączniki dotyczą tylko bezpiecznej automatyki. Każdy zapis pozostaje w historii.</p></div><button class="btn" type="submit" ${agentAISpecjalisci.saving?"disabled":""}>💾 Zapisz uprawnienia</button></div><div class="agent-permission-items">${automatic.map(item=>`<article class="${isEnabled(item)?"enabled":"disabled"}"><span>${esc(item.icon||"⚡")}</span><div><b>${esc(item.label)}</b><p>${esc(item.description)}</p></div>${item.configKey?`<label class="switch-check"><input type="checkbox" name="${esc(item.configKey)}" ${isEnabled(item)?"checked":""}><span>${isEnabled(item)?"Nadane":"Wstrzymane"}</span></label>`:`<em>✓ funkcja systemowa</em>`}</article>`).join("")}</div><div class="agent-permission-guard"><b>Ochrona synchronizacji Allegro</b><span>Automatyczna aktualizacja treści nie zmienia ceny, stanu, aktywności oferty ani warunków sprzedaży.</span></div></form><section class="panel agent-permission-list approval"><div class="order-section-head"><div><span class="order-pro-label">Niezmienne • zawsze decyzja administratora</span><h2>🔐 Agent nie może wykonać sam</h2><p class="order-detail-lead">Tych blokad nie może wyłączyć żadne zdarzenie ani polecenie automatyczne.</p></div><span class="agent-policy-lock">🔒 polityka stała</span></div><div class="agent-permission-items">${approval.map(item=>`<article><span>${esc(item.icon||"🔐")}</span><div><b>${esc(item.label)}</b><p>${esc(item.description)}</p></div><em>🔐 zatwierdza administrator</em></article>`).join("")}</div></section></div><section class="panel agent-permission-blocked"><div><span>⛔</span><div><span class="order-pro-label">Automatyczny bezpiecznik</span><h2>Kiedy Agent zatrzymuje wykonanie</h2></div></div><div>${blocked.map(item=>`<span>• ${esc(item)}</span>`).join("")}</div><p>Przy niepewności Agent nie zgaduje i niczego nie wysyła. Redakcję produktu może ponowić bezpiecznie, a rzeczywista operacja sprzedażowa lub zewnętrzna zawsze trafia do administratora.</p></section></section>`;
+}
+async function agentAIOpenAiPlatformOdswiez(){
+  try{await chmura("openai-platform-cycle",{method:"POST",body:{force:true},timeout:120000});toast("✅ Sprawdzono wszystkie połączenia OpenAI Platform");await agentAISpecjalisciPobierz(false);}
+  catch(error){toast("⚠️ OpenAI Platform: "+(error?.message||error));}
+}
+async function agentAIOpenAiBatchEval(){
+  try{const data=await chmura("openai-platform-batch-eval",{method:"POST",body:{force:false},timeout:90000});toast(data.skipped?"ℹ️ Dzisiejsza partia ewaluacyjna już istnieje":"✅ Utworzono bezpieczną partię ewaluacyjną");await agentAISpecjalisciPobierz(false);}
+  catch(error){toast("⚠️ Ewaluacja Batch: "+(error?.message||error));}
+}
+function agentAIOpenAiPlatformHTML(platform={}){
+  const capabilities=Array.isArray(platform.capabilities)?platform.capabilities:[],batches=Array.isArray(platform.batches)?platform.batches:[],last=batches[0]||{},score=last.score||{},active=["validating","in_progress","finalizing"].includes(last.status);
+  const icons={responses:"💬",ui:"▣",agents:"⌘",realtime:"◖",audio:"🎤",images:"🖼️",logs:"↗",batches:"{ }",evals:"✓",fineTuning:"⚗️",modelUpgrade:"↑",optimization:"◒",migration:"⇄",usage:"↗",apiKey:"🔑"};
+  return `<section class="panel openai-platform-card"><div class="order-section-head"><div><span class="order-pro-label">Jeden obecny klucz • jawna mapa możliwości Platformy</span><h2>OpenAI Platform w sklepie</h2><p class="order-detail-lead">Wszystkie rutynowe zadania i pełne redakcje wykonuje ekonomiczny GPT-5.4 nano. GPT-5.6 Luna może wykonać tylko jedną kontrolowaną próbę awaryjną, gdy podstawowy model zwróci niepoprawny wynik strukturalny albo trudny wyjątek.</p></div><div class="diag-actions"><button class="btn" onclick="agentAIOpenAiPlatformOdswiez()">↻ Sprawdź Platformę</button><button class="btn ghost" onclick="agentAIOpenAiBatchEval()" ${active?"disabled":""}>${active?"⏳ Batch w toku":"✓ Uruchom test Batch"}</button></div></div><div class="openai-capability-grid">${capabilities.map(item=>`<article class="${esc(item.state||"unknown")}"><span>${icons[item.id]||"✦"}</span><div><b>${esc(item.label)}</b><small>${esc(item.detail)}</small></div><em>${item.state==="active"?"aktywne":item.state==="available"?"dostępne / celowo niewłączone":"sprawdź"}</em></article>`).join("")||`<div class="agent-ops-empty">Status możliwości pojawi się po połączeniu z serwerem.</div>`}</div><footer class="openai-platform-footer"><span><b>Ostatni Batch:</b> ${last.id?`${esc(last.status)} • ${esc(last.cases||0)} przypadki${score.total?` • wynik ${esc(score.passed)}/${esc(score.total)}`:""}`:"oczekuje na pierwszy cykl"}</span><nav><a href="https://platform.openai.com/logs" target="_blank" rel="noopener">Dzienniki i trace ↗</a><a href="https://platform.openai.com/usage" target="_blank" rel="noopener">Stosowanie ↗</a><a href="https://platform.openai.com/evaluations" target="_blank" rel="noopener">Ewaluacje ↗</a></nav></footer></section>`;
+}
+function agentAICodexKoordynatorHTML(last={}){
+  const plan=last?.coordinatorPlan||{},assignments=Array.isArray(plan.assignments)?plan.assignments:[];
+  const labels={"catalog-editorial":"Redakcja katalogu","customer-reply-draft":"Szkice odpowiedzi","catalog-identity-control":"Kontrola tożsamości","supplier-order-draft":"Dokument producenta","seo-free-promotion":"Bezpłatne SEO"};
+  return `<section class="panel agent-coordinator-card"><div class="order-section-head"><div><span class="order-pro-label">Główny koordynator • rzeczywisty Codex CLI</span><h2>⌘ Codex rozdziela pracę wyspecjalizowanym agentom OpenAI</h2><p class="order-detail-lead">Codex analizuje wyłącznie odebrane zdarzenie, wybiera wersjonowany scenariusz i przypisuje właściwą rolę. Model dobierany jest według trudności, a reguły sklepu kontrolują zapis i wymagane potwierdzenia.</p></div><span class="lvl ${assignments.length?"lvl-ok":"lvl-info"}">${assignments.length?`● ${assignments.length} ${assignments.length===1?"scenariusz":"scenariusze"}`:"czeka na sygnał"}</span></div>${plan.summary?`<p class="agent-coordinator-summary">${esc(plan.summary)}</p>`:""}<div class="agent-coordinator-flow"><article><span>1</span><b>Zdarzenie</b><small>konkretny sygnał modułu</small></article><i>→</i><article><span>2</span><b>Scenariusz</b><small>reguły i bramki jakości</small></article><i>→</i><article><span>3</span><b>Model routowany</b><small>model dobrany do zadania</small></article><i>→</i><article><span>4</span><b>Sklep</b><small>waliduje i trwale zapisuje</small></article></div><div class="agent-coordinator-assignments">${assignments.map(item=>`<span><b>P${esc(item.priority||5)} · ${esc(labels[item.scenarioId]||item.scenarioId)}</b><small>${esc(item.specialist||"specjalista")} · v${esc(item.scenarioVersion||"—")}</small></span>`).join("")||`<small>Po nadejściu zdarzenia pojawi się tutaj faktyczny przydział zadania.</small>`}</div></section>`;
+}
+function agentAIKonfiguracjaRolWidok(){
+  const page=document.querySelector(".agent-specialists-page"),data=agentAISpecjalisci.data||{},roles=Array.isArray(data.specialists)?data.specialists:[],usage=data.usage||{},cfg=data.config||{};
+  if(!page)return;
+  const heroDescription=page.querySelector(".agent-specialists-hero p");
+  if(heroDescription)heroDescription.textContent="Każda rola korzysta z pełnego, wersjonowanego profilu serwerowego. Istniejące zapisane prompty OpenAI Platform są połączone bezpośrednio, a pozostałe role pokazują tutaj całą używaną instrukcję — Platforma nie udostępnia publicznego API do automatycznego tworzenia i edycji zapisanych promptów.";
+  const grid=page.querySelector(".agent-specialist-grid");
+  if(grid){
+    [...grid.querySelectorAll(":scope > article")].forEach((card,index)=>{
+      const role=roles[index];if(!role||card.dataset.instructionAudit==="1")return;
+      card.dataset.instructionAudit="1";card.classList.add("agent-role-audited");
+      const policy=role.modelPolicy||{},platformLink=role.platformUrl?`<a class="btn ghost" href="${esc(role.platformUrl)}" target="_blank" rel="noopener">Otwórz prompt w Platformie ↗</a>`:`<span class="lvl lvl-info">Pełny profil serwerowy — Platforma nie udostępnia publicznego API tworzenia promptów</span>`;
+      card.insertAdjacentHTML("beforeend",`<details class="agent-role-instruction"><summary>Pełna konfiguracja i instrukcja (${esc(role.instructionCharacters||0)} znaków)</summary><div class="agent-role-policy"><span><small>Model codzienny</small><b>${esc(policy.model||"—")}</b></span><span><small>Warstwa</small><b>${esc(policy.tier||"—")}</b></span><span><small>Rozumowanie</small><b>${esc(policy.reasoning||"—")}</b></span><span><small>Maks. wynik</small><b>${esc(policy.maxOutputTokens||"—")} tokenów</b></span><span><small>Reguły</small><b>${esc(role.promptVersion||"—")}</b></span><span><small>Sekcje</small><b>${esc(role.instructionSections||0)}</b></span></div><div class="agent-role-platform">${platformLink}</div><pre>${esc(role.fullInstruction||"Pełna instrukcja zostanie pobrana po otwarciu podstrony Specjaliści.")}</pre></details>`);
+    });
+  }
+  if(!page.querySelector(".agent-token-economy")){
+    const firstStats=page.querySelector(".orders-stat-grid");
+    const models=Array.isArray(usage.usageByModel)?usage.usageByModel:[];
+    const cacheRate=Number(usage.inputTokens)>0?Math.round(Number(usage.cachedTokens||0)/Number(usage.inputTokens)*100):0;
+    firstStats?.insertAdjacentHTML("afterend",`<section class="panel agent-token-economy"><div class="order-section-head"><div><span class="order-pro-label">Kontrolowany routing • dane z dzisiejszych wywołań</span><h2>🪙 Zużycie modeli i cache</h2><p class="order-detail-lead">GPT-5.4 nano jest modelem podstawowym. GPT-5.6 Luna uruchamia się najwyżej raz jako kontrola jakości po niepoprawnym wyniku lub trudnym wyjątku. Długi playbook pozostaje prefiksem cache.</p></div><strong>≈ ${esc(Number(usage.estimatedUsd||0).toFixed(2))} USD<small>szacunek wg cennika ${esc(usage.pricingSnapshot?.date||"—")}</small></strong></div><div class="agent-token-models">${models.map(item=>`<article><b>${esc(item.model)}</b><span>${esc(item.runs)} uruchomień</span><small>wejście ${Number(item.inputTokens||0).toLocaleString("pl-PL")} • wynik ${Number(item.outputTokens||0).toLocaleString("pl-PL")} • cache ${Number(item.cachedTokens||0).toLocaleString("pl-PL")}</small><em>≈ ${esc(Number(item.estimatedUsd||0).toFixed(2))} USD</em></article>`).join("")||`<div class="agent-ops-empty">Pomiar pojawi się po pierwszym wywołaniu nowej wersji.</div>`}</div><footer><span>Cache odczyt: <b>${esc(cacheRate)}%</b></span><span>Automatyka wejście: <b>${Number(usage.automaticInputTokens||0).toLocaleString("pl-PL")} / ${Number(usage.automaticInputTokenLimit||cfg.automaticInputTokenLimit||0).toLocaleString("pl-PL")}</b></span><span>Automatyka wynik: <b>${Number(usage.automaticOutputTokens||0).toLocaleString("pl-PL")} / ${Number(usage.automaticOutputTokenLimit||cfg.automaticOutputTokenLimit||0).toLocaleString("pl-PL")}</b></span></footer></section>`);
+  }
+  const settings=page.querySelector(".agent-specialist-settings>div:last-child");
+  if(settings&&!settings.querySelector('[name="automaticInputTokenLimit"]')){
+    settings.insertAdjacentHTML("beforeend",`<label>Limit wejścia automatyki / dzień<input type="number" name="automaticInputTokenLimit" min="20000" max="2000000" step="10000" value="${esc(cfg.automaticInputTokenLimit||180000)}"></label><label>Limit wyniku automatyki / dzień<input type="number" name="automaticOutputTokenLimit" min="10000" max="800000" step="5000" value="${esc(cfg.automaticOutputTokenLimit||70000)}"></label>`);
+  }
+}
+function agentAISpecjalisciPanelHTML(){
+  const state=agentAISpecjalisci,data=state.data||{},specialists=Array.isArray(data.specialists)?data.specialists:[],history=Array.isArray(data.history)?data.history:[],decisions=Array.isArray(data.decisions)?data.decisions:[],usage=data.usage||{},stats=data.decisionStats||{},last=data.lastCycle||{},cfg=data.config||{enabled:true,automaticEnabled:true,safeAutoApply:true,autoApplyProductEditorial:true,autoUpdateLinkedAllegroContent:true,learningEnabled:true,approvalWarmupCount:0,learnedAutoApplyThreshold:.84,dailyLimit:240,automaticDailyLimit:80,automaticBatchSize:3,cacheHours:72,confidenceThreshold:.9,decisionRetentionDays:30},learning=data.learning?.productContent||{};
+  if(state.loading&&!state.loaded)return `<section class="panel agent-specialists-page"><div class="agent-runtime-loading"><i></i><div><b>Uruchamiam zespół OpenAI…</b><small>Pobieram role, modele, limity i szkice.</small></div></div></section>`;
+  if(state.error&&!data.specialists)return `<section class="panel"><div class="backend-note warn"><b>Nie udało się uruchomić specjalistów.</b><p>${esc(state.error)}</p><button class="btn" onclick="agentAISpecjalisciPobierz(false)">Ponów</button></div></section>`;
+  const active=state.activeRun||history[0],never=(data.policy?.neverAutomatic||[]).join(", "),progress=last.editorialProgress||{},progressTotal=Number(progress.total||0),progressReady=Number(progress.ready||0),progressPercent=progressTotal?Math.round(progressReady/progressTotal*100):0;
+  setTimeout(()=>{const page=document.querySelector(".agent-specialists-page"),hero=page?.querySelector(".agent-specialists-hero");if(hero&&!page.querySelector(".openai-platform-card"))hero.insertAdjacentHTML("afterend",agentAIOpenAiPlatformHTML(data.openaiPlatform||{}));agentAIKonfiguracjaRolWidok();},0);
+  const autonomyHTML=`<section class="panel agent-learning-panel"><div><span>🧠</span><div><small>AUTONOMIA TREŚCI + PAMIĘĆ STYLU</small><h3>${cfg.autoApplyProductEditorial!==false?"Bezpieczne redakcje są zapisywane automatycznie":"Automatyczna redakcja jest wstrzymana"}</h3><p>Kompletne, zgodne opisy Agent zapisuje bez pytania. Twoje korekty nadal uczą go preferowanego tonu i układu; decyzja pojawia się tylko przy braku faktów, konflikcie lub ryzyku.</p></div></div><div><b>${esc(learning.approvals||0)}</b><small>zatwierdzeń</small><b>${esc(learning.corrections||0)}</b><small>korekt stylu</small><b>${esc(last.autoApplied||0)}</b><small>ostatnio zapisano</small></div></section>`;
+  const progressHTML=`<section class="panel agent-proposal-board"><div class="order-section-head"><div><span class="order-pro-label">Ciągła praca nad obecną zaległością</span><h2>Sklep, Von Halsky i Allegro w jednej kartotece</h2><p class="order-detail-lead">Agent bez przerwy opróżnia obecną kolejkę produktów. Po jej zakończeniu nie skanuje katalogu czasowo — ruszy dopiero po dodaniu lub zmianie produktu.</p></div><span class="lvl ${progressTotal&&progressReady>=progressTotal?"lvl-ok":"lvl-ostrzezenie"}">${progressTotal?`${esc(progressPercent)}% gotowe`:"gotowość zdarzeniowa"}</span></div><div class="orders-stat-grid"><div class="order-stat-card"><span>✅</span><b>${esc(progressReady)}</b><small>redakcja zakończona</small></div><div class="order-stat-card money"><span>⏳</span><b>${esc(progress.pending||0)}</b><small>w trwałej kolejce</small></div><div class="order-stat-card"><span>👁️</span><b>${esc(progress.review||0)}</b><small>wymaga decyzji</small></div><div class="order-stat-card"><span>✦</span><b>${esc(progress.processedThisCycle||0)}</b><small>ostatnio obsłużono</small></div></div></section>`;
+  return `<section class="agent-specialists-page"><section class="panel agent-specialists-hero"><div><span class="order-pro-label">Stała gotowość • uruchomienie po zdarzeniu</span><h2>✦ Zespół agentów OpenAI + routing modeli OpenAI</h2><p>Każda rola ma wersjonowany profil. Serwer uruchamia ją wyłącznie po nadejściu właściwego sygnału; wyjątkiem jest opróżnianie obecnej zaległości produktowej do końca. Nie ma szerokiego cyklu czasowego.</p></div><div><strong>${esc(data.model||"model routowany")} • reguły ${esc(data.promptVersion||"—")}</strong><span class="lvl ${data.configured&&data.platformAgents?.configured&&cfg.automaticEnabled!==false?"lvl-ok":"lvl-blad"}">${data.configured&&data.platformAgents?.configured&&cfg.automaticEnabled!==false?`● ${specialists.length} ról OpenAI aktywnych`:"automatyka zatrzymana"}</span><button class="btn ghost" onclick="agentAISpecjalisciCykl()" ${state.running?"disabled":""}>${state.running?"⏳ Kontroluję…":"↻ Uzupełnij zaległości"}</button></div></section>${autonomyHTML}<div class="orders-stat-grid"><div class="order-stat-card money"><span>🧭</span><b>${esc(stats.open||0)}</b><small>decyzji dla Ciebie</small></div><div class="order-stat-card"><span>✅</span><b>${esc(last.autoApplied||0)}</b><small>ostatnio bezpiecznie zapisano</small></div><div class="order-stat-card"><span>✦</span><b>${specialists.length}</b><small>aktywnych ról specjalistycznych</small></div><div class="order-stat-card"><span>🪙</span><b>${esc(usage.automaticToday||0)} / ${esc(cfg.automaticDailyLimit||200)}</b><small>automatycznych analiz dzisiaj</small></div></div>${progressHTML}<section class="panel agent-proposal-board"><div class="order-section-head"><div><span class="order-pro-label">Tylko sprawy wymagające człowieka</span><h2>Decyzje i propozycje Agenta</h2><p class="order-detail-lead">Opisy nie pojawiają się tutaj. Zewnętrzne działania nadal wymagają zgody: ${esc(never)}.</p></div><span class="lvl ${stats.high?"lvl-blad":decisions.length?"lvl-ostrzezenie":"lvl-ok"}">${decisions.length?`${decisions.length} otwartych`:`wszystko pod kontrolą`}</span></div><div class="agent-proposal-list">${decisions.map(agentAISpecjalistaDecyzjaHTML).join("")||`<div class="agent-ops-empty">✅ Brak trudnych decyzji. Zespół czeka na nowe zdarzenia.</div>`}</div></section><div class="agent-specialist-grid">${specialists.map(item=>`<article><span>${esc(item.icon||"✦")}</span><div><b>${esc(item.platformName||item.label)}</b><small>${esc(item.area)} • ${esc(item.platformPrompt?.id?item.platformPrompt.id.slice(0,10)+"…":"brak promptu")} • wersja ${esc(item.platformPrompt?.version||"—")}</small><p>${esc(item.description)}</p></div><i class="agent-role-live">● ${item.platformAvailable===false?"tryb awaryjny":"połączony"}</i></article>`).join("")}</div><details class="panel agent-specialist-manual"><summary>＋ Dodatkowe ręczne zadanie dla wybranej roli</summary><div class="agent-specialist-workspace"><form class="agent-specialist-form" onsubmit="return agentAISpecjalistaFormularz(event)"><label>Specjalista<select name="specialist">${specialists.map(item=>`<option value="${esc(item.id)}">${esc(item.icon)} ${esc(item.label)} • ${esc(item.area)}</option>`).join("")}</select></label><label>Co ma przygotować?<input name="instruction" maxlength="3000" placeholder="Np. przygotuj kampanię weekendową i tekst bannera"></label><label>Potwierdzone fakty<textarea name="material" rows="7" maxlength="12000" placeholder="Produkt, grupa odbiorców, rabat, daty lub obecna treść…"></textarea></label><button class="btn" type="submit" ${state.running?"disabled":""}>✦ Przygotuj dodatkowy szkic</button></form><aside>${active?agentAISpecjalistaWynikHTML(active):`<div class="agent-specialist-empty"><span>✦</span><b>Wynik pojawi się tutaj</b></div>`}</aside></div></details><form class="panel agent-specialist-settings" onsubmit="return agentAISpecjalisciZapiszUstawienia(event)"><div class="order-section-head"><div><span class="order-pro-label">Przepustowość pracy produktowej</span><h2>Tempo opróżniania zaległości</h2><p class="order-detail-lead">Treści produktów zapisują się samodzielnie. Ustawienia ograniczają jedynie zużycie modeli, nie tworzą cykli skanowania.</p></div><button class="btn" type="submit" ${state.saving?"disabled":""}>💾 Zapisz ustawienia</button></div><div><label><input type="checkbox" name="enabled" ${cfg.enabled!==false?"checked":""}> Role aktywne</label><label><input type="checkbox" name="automaticEnabled" ${cfg.automaticEnabled!==false?"checked":""}> Reaguj na nowe zdarzenia</label><label><input type="checkbox" name="learningEnabled" ${cfg.learningEnabled!==false?"checked":""}> Ucz się z moich korekt stylu</label><label><input type="checkbox" name="safeAutoApply" ${cfg.safeAutoApply!==false?"checked":""}> Automatycznie zapisuj redakcje</label><label>Zatwierdzeń przed autonomią<input type="number" name="approvalWarmupCount" min="0" max="20" value="${esc(cfg.approvalWarmupCount??0)}"></label><label>Min. akceptacja pól (%)<input type="number" name="learnedAutoApplyThreshold" min="60" max="100" value="${esc(Math.round(Number(cfg.learnedAutoApplyThreshold||.86)*100))}"></label><label>Próg pewności (%)<input type="number" name="confidenceThreshold" min="75" max="100" value="${esc(Math.round(Number(cfg.confidenceThreshold||.92)*100))}"></label><label>Automatyczne / dzień<input type="number" name="automaticDailyLimit" min="0" max="400" value="${esc(cfg.automaticDailyLimit??200)}"></label><label>Bezpieczna partia produktów<input type="number" name="automaticBatchSize" min="1" max="12" value="${esc(cfg.automaticBatchSize||10)}"></label><label>Wszystkie / dzień<input type="number" name="dailyLimit" min="1" max="500" value="${esc(cfg.dailyLimit||240)}"></label><label>Pamięć wyniku (godz.)<input type="number" name="cacheHours" min="1" max="168" value="${esc(cfg.cacheHours||24)}"></label><label>Historia decyzji (dni)<input type="number" name="decisionRetentionDays" min="7" max="90" value="${esc(cfg.decisionRetentionDays||30)}"></label></div></form><section class="panel agent-specialist-history"><div class="order-section-head"><div><span class="order-pro-label">Pełny audyt pracy</span><h2>Co agenci rzeczywiście wykonali</h2><p class="order-detail-lead">Każdy wynik ma model wykonawczy, wersję reguł, pewność, użyte tokeny i stan trwałego zapisu.</p></div><button class="btn ghost" onclick="agentAISpecjalisciPobierz(false)">↻ Odśwież</button></div><div>${history.slice(0,30).map(run=>agentAISpecjalistaWynikHTML(run,true)).join("")||`<div class="agent-ops-empty">Historia pojawi się po pierwszym rzeczywistym zdarzeniu.</div>`}</div></section></section>`;
+}
+function agentAIInicjatywaPanelHTML(){
+  const data=agentAISpecjalisci.data||{},learning=data.learning?.productContent||{},decisions=(data.decisions||[]).filter(item=>item.kind==="product_content_review"),history=data.history||[],last=data.lastCycle||{},usage=data.usage||{},limit=usage.dailyLimitReached||usage.automaticLimitReached||last.limitReached;
+  if(agentAISpecjalisci.loading&&!agentAISpecjalisci.loaded)return `<section class="panel agent-initiative-panel"><div class="agent-runtime-loading"><i></i><div><b>Sprawdzam inicjatywy redakcyjne…</b><small>Agent łączy kolejkę produktów i pamięć Twoich zatwierdzeń.</small></div></div></section>`;
+  const recent=history.filter(run=>run.specialist==="product_content").slice(0,5);
+  if(data.policy?.actionPolicy){const saved=recent.filter(run=>["auto_applied","applied","not_needed"].includes(run.approvalStatus));return `<section class="panel agent-initiative-panel"><div class="order-section-head"><div><span class="order-pro-label">Autonomiczna redakcja • bez czekania na komendę</span><h2>✨ Co Agent rzeczywiście wykonał</h2><p class="order-detail-lead">Agent opróżnia obecną zaległość bez przerwy, a później reaguje wyłącznie na dodanie lub zmianę produktu. Każdy wynik zapisuje w jednej centralnej kartotece.</p></div><div class="diag-actions"><button class="btn" onclick="agentAISpecjalisciCykl()" ${agentAISpecjalisci.running?"disabled":""}>${agentAISpecjalisci.running?"⏳ Analizuję…":"↻ Uzupełnij zaległości"}</button><a class="btn ghost" href="#/admin/agent-ai/uprawnienia">🛡️ Uprawnienia</a></div></div>${limit?`<div class="backend-note warn"><b>Limit analiz został wykorzystany.</b><p>Kolejne redakcje ruszą po północy czasu polskiego albo po zmianie limitu.</p></div>`:""}<div class="agent-initiative-stats"><span><b>${esc(last.autoApplied||0)}</b><small>ostatnio zapisano</small></span><span><b>${esc(last.editorialProgress?.pending||0)}</b><small>produktów w kolejce</small></span><span class="${decisions.length?"learning":"ready"}"><b>${esc(decisions.length)}</b><small>wyjątków do decyzji</small></span><span class="ready"><b>AKTYWNA</b><small>autonomia opisów i SEO</small></span></div><div class="agent-initiative-list">${decisions.slice(0,4).map(item=>{const run=history.find(x=>String(x.id)===String(item.runId));return `<article><span>⚠️</span><div><b>${esc(item.target?.name||item.title||"Produkt")}</b><small>${esc(run?.result?.fields?.length||0)} pól • ${esc(item.summary||"wyjątek wymaga sprawdzenia")}</small></div><a class="btn" href="${esc(item.href||"#/admin/agent-ai/specjalisci")}">Rozwiąż wyjątek</a></article>`;}).join("")||saved.slice(0,3).map(run=>`<article class="completed"><span>✓</span><div><b>${esc(run.target?.name||run.result?.title||"Produkt")}</b><small>treści zapisano automatycznie • ${esc(agentAIRuntimeCzas(run.appliedAt||run.createdAt))}</small></div><a class="btn ghost" href="#/admin/agent-ai/specjalisci">Audyt</a></article>`).join("")||`<div class="agent-ops-empty">✅ Agent czuwa i czeka na nowy sygnał.</div>`}</div></section>`;}
+  return `<section class="panel agent-initiative-panel"><div class="order-section-head"><div><span class="order-pro-label">Inicjatywa Agenta • bez czekania na komendę</span><h2>✨ Co Agent proponuje w edycji produktów</h2><p class="order-detail-lead">Serwer opróżnia obecną kolejkę produktów, a później reaguje natychmiast na konkretną zmianę. Panel pokazuje wynik bez przeładowywania całej strony.</p></div><div class="diag-actions"><button class="btn" onclick="agentAISpecjalisciCykl()" ${agentAISpecjalisci.running?"disabled":""}>${agentAISpecjalisci.running?"⏳ Analizuję…":"↻ Uzupełnij zaległości"}</button><a class="btn ghost" href="#/admin/agent-ai/specjalisci">Pełne decyzje</a></div></div>${limit?`<div class="backend-note warn"><b>Limit analiz został wykorzystany.</b><p>Agent nie ukrywa bezczynności: kolejne propozycje ruszą po północy czasu polskiego albo po świadomym zwiększeniu limitu w ustawieniach.</p></div>`:""}<div class="agent-initiative-stats"><span><b>${esc(decisions.length)}</b><small>pytań o zapis</small></span><span><b>${esc(last.editorialProgress?.pending||0)}</b><small>produktów w kolejce</small></span><span><b>${esc(learning.approvals||0)}</b><small>zatwierdzeń zapamiętanych</small></span><span class="${learning.ready?"ready":"learning"}"><b>${learning.ready?"aktywna":`${esc(learning.remainingApprovals??3)} do końca nauki`}</b><small>ograniczona autonomia</small></span></div><div class="agent-initiative-list">${decisions.slice(0,4).map(item=>{const run=history.find(x=>String(x.id)===String(item.runId));return `<article><span>✨</span><div><b>${esc(item.target?.name||item.title||"Produkt")}</b><small>${esc(run?.result?.fields?.length||0)} zmian • ${esc(run?.result?.summary||item.summary||"czeka na decyzję")}</small></div><a class="btn" href="${esc(item.href||"#/admin/agent-ai/specjalisci")}">Porównaj i zdecyduj</a></article>`;}).join("")||recent.slice(0,3).map(run=>`<article class="completed"><span>✓</span><div><b>${esc(run.target?.name||run.result?.title||"Produkt")}</b><small>${run.approvalStatus==="auto_applied"?"bezpieczna redakcja zapisana":run.approvalStatus==="applied"?"zatwierdzona przez administratora":"propozycja przygotowana"} • ${esc(agentAIRuntimeCzas(run.createdAt))}</small></div><a class="btn ghost" href="#/admin/agent-ai/specjalisci">Historia</a></article>`).join("")||`<div class="agent-ops-empty">Agent jest gotowy i czeka na produkt wymagający pracy.</div>`}</div></section>`;
+}
+
+/* Historia i audyt pracy Agenta — komunikatory zewnętrzne zostały usunięte. */
+function agentAIHistoriaPanelHTML(){
+  const archive=Object.values(agentAIPlanCykl||{}).filter(x=>["done","resolved"].includes(x.state)).sort((a,b)=>String(b.completedAt||b.resolvedAt||"").localeCompare(String(a.completedAt||a.resolvedAt||""))).slice(0,100),history=(agentAIHistoria||[]).slice(0,100),runs=(agentAIPlanStan.history||[]).slice(0,20);
+  return `<section class="panel agent-history-page"><div class="order-section-head"><div><span class="order-pro-label">Pełna rozliczalność</span><h2>🕓 Historia Agenta</h2><p class="order-detail-lead">Aktywne zadania nie mieszają się z wykonanymi. Każde zakończenie zawiera operatora, moment wykonania i wynik zapisu.</p></div><button class="btn ghost" onclick="agentAIPobierzHistorieWykonan()">↻ Odśwież audyt serwera</button></div><div class="orders-stat-grid"><div class="order-stat-card money"><span>✅</span><b>${archive.length}</b><small>zakończonych zadań</small></div><div class="order-stat-card"><span>🧭</span><b>${runs.length}</b><small>wykonań planu</small></div><div class="order-stat-card"><span>🧾</span><b>${history.length}</b><small>operacji w rejestrze</small></div></div><details class="agent-history-section" open><summary>Zakończone zadania (${archive.length})</summary>${archive.length?`<div class="agent-task-archive-list">${archive.map(x=>`<article><span>✓</span><div><b>${esc(x.title||x.id)}</b><small>${esc(new Date(x.completedAt||x.resolvedAt).toLocaleString("pl-PL"))} • ${esc(x.completedBy||"Agent")}</small><p>${esc(x.description||"")}</p></div>${x.state==="done"?`<button class="btn ghost" onclick="agentAIPrzywrocZadanie(${jsArg(x.id)})">Przywróć</button>`:`<em>rozwiązane</em>`}</article>`).join("")}</div>`:`<div class="agent-ops-empty">Brak zakończonych zadań.</div>`}</details><details class="agent-history-section"><summary>Rejestr działań (${history.length})</summary><div class="warehouse-worktable-wrap"><table class="log-table"><tr><th>Data</th><th>Typ</th><th>Opis</th><th>Operator</th></tr>${history.map(h=>`<tr><td>${esc(h.dataTxt||"")}</td><td><span class="lvl lvl-info">${esc(h.typ||"akcja")}</span></td><td>${esc(h.opis||"")}</td><td>${esc(h.operator||"")}</td></tr>`).join("")||`<tr><td colspan="4">Brak działań.</td></tr>`}</table></div></details></section>`;
+}
+
+/* Agent AI — centrum obserwowalności, decyzji i komunikacji zespołu */
+function agentAIDecyzjaRyzyko(item={}){
+  return {high:["Wymaga decyzji","critical"],medium:["Sprawdź przed wykonaniem","warning"],low:["Niskie ryzyko","safe"]}[item.risk]||["Sprawdź","warning"];
+}
+function agentAIDecyzjaCel(item={}){
+  const target=item.target||{};
+  return target.name||target.communicationId||target.orderId||target.offerId||target.productId||item.specialist||"sprawa operacyjna";
+}
+function agentAIDecyzjaSkutek(item={},run=null){
+  const product=item.target?.type==="product"&&item.runId,communication=item.kind==="customer_reply"||item.target?.type==="communication";
+  if(product)return "Zapisane zostaną wyłącznie zaznaczone pola tego produktu. Zatwierdzenie nie wystawi oferty, nie zmieni ceny ani stanu i nie wyśle żadnej wiadomości.";
+  if(communication)return "Zatwierdzenie zamknie wewnętrzną decyzję Agenta, ale nie wyśle wiadomości. Aby odpowiedzieć klientowi, przejdź do wskazanego modułu, sprawdź rozmowę i użyj osobnego przycisku wysyłki.";
+  if(run)return "Zatwierdzenie zapisze wyłącznie wewnętrzną decyzję. Żadna operacja zewnętrzna nie zostanie wykonana.";
+  return "Ta karta jest ostrzeżeniem i nie zawiera operacji do automatycznego wykonania. Akceptacja tylko zamknie ją jako przyjętą do wiadomości; poprawę wykonujesz we wskazanym module.";
+}
+function agentAIDecyzjaSzkicHTML(item={},run=null){
+  const result=run?.result||{},fields=Array.isArray(result.fields)?result.fields:[],product=item.target?.type==="product"&&item.runId,content=String(result.content||"").trim(),facts=Array.isArray(result.factsUsed)?result.factsUsed:[],warnings=[...(result.warnings||[]),...(result.missingFacts||[]).map(value=>`Brak faktu: ${value}`)],target=item.target||{};
+  const targetRows=[["Produkt",target.name],["ID produktu",target.productId],["Zamówienie",target.orderId],["Oferta Allegro",target.offerId],["Rozmowa",target.communicationId]].filter(([,value])=>value);
+  const fieldHtml=fields.length?`<div class="agent-decision-draft-fields">${fields.map(field=>`<label class="agent-decision-draft-field">${product?`<input type="checkbox" data-agent-decision-field="${esc(item.id)}" value="${esc(field.key)}" checked>`:""}<span><small>${esc(field.label||field.key)}</small><div class="agent-decision-compare"><section><em>PRZED</em><pre>${esc(field.currentValue||"(pole puste)")}</pre></section><section><em>PO ZATWIERDZENIU</em><pre>${esc(field.value||"(brak propozycji)")}</pre></section></div>${field.reason?`<p><b>Dlaczego:</b> ${esc(field.reason)}</p>`:""}${field.evidence?`<p><b>Podstawa:</b> ${esc(field.evidence)}</p>`:""}</span></label>`).join("")}</div>`:"";
+  const fallback=!fields.length&&content?`<div class="agent-decision-full-draft"><small>PEŁNY SZKIC</small><pre>${esc(content)}</pre></div>`:"";
+  return `<section class="agent-decision-approval-scope"><header><div><small>CO DOKŁADNIE ZATWIERDZASZ</small><h4>${fields.length?`${esc(fields.length)} konkretne ${fields.length===1?"zmianę":"zmiany"}`:run?"Szkic do weryfikacji":"Brak szkicu wykonawczego"}</h4></div><span>${product?"zapis lokalny":item.kind==="customer_reply"?"bez wysyłki":"decyzja wewnętrzna"}</span></header><div class="agent-decision-impact"><b>Skutek zatwierdzenia</b><p>${esc(agentAIDecyzjaSkutek(item,run))}</p></div>${targetRows.length?`<div class="agent-decision-target">${targetRows.map(([label,value])=>`<span><small>${esc(label)}</small><b>${esc(value)}</b></span>`).join("")}</div>`:""}${fieldHtml}${fallback}${!fields.length&&!content?`<div class="agent-decision-no-draft"><b>Nie ma treści, którą można tu zatwierdzić.</b><span>Najpierw otwórz właściwy moduł i uzupełnij brakujące dane. Ta karta nie wykona żadnej zmiany w produkcie, zamówieniu ani Allegro.</span></div>`:""}${facts.length?`<details><summary>Fakty użyte przez Agenta (${facts.length})</summary><ul>${facts.map(value=>`<li>${esc(value)}</li>`).join("")}</ul></details>`:""}${warnings.length?`<div class="agent-specialist-warnings">${warnings.map(value=>`<span>⚠️ ${esc(value)}</span>`).join("")}</div>`:""}</section>`;
+}
+async function agentAISpecjalistaDecyzja(id,decisionAction,days=1){
+  const key=String(id);if(agentAISpecjalistaDecyzjeWToku.has(key))return;
+  const data=agentAISpecjalisci.data||{},before=Array.isArray(data.decisions)?data.decisions:[],item=before.find(entry=>String(entry.id)===key),fieldKeys=[...document.querySelectorAll("[data-agent-decision-field]")].filter(input=>input.dataset.agentDecisionField===key&&input.checked).map(input=>input.value),product=!!(item?.target?.type==="product"&&item?.runId);
+  if(decisionAction==="approve"&&product&&!fieldKeys.length){toast("Wybierz co najmniej jedną poprawkę");return;}
+  agentAISpecjalistaDecyzjeWToku.add(key);
+  agentAISpecjalisci={...agentAISpecjalisci,data:{...data,decisions:before.filter(entry=>String(entry.id)!==key),decisionStats:{...(data.decisionStats||{}),open:Math.max(0,Number(data.decisionStats?.open||before.length)-1)}}};renderuj();
+  try{
+    const response=await chmura("agent-specialist-decision",{method:"POST",body:{id,decisionAction,days,fieldKeys},timeout:60000}),applied=Object.keys(response.decision?.executionResult?.patch||{}).length;
+    if(decisionAction==="approve"&&product)await chmuraWczytajStan().catch(()=>{});
+    toast(decisionAction==="approve"?(product?`✅ Wykonano i zapisano ${applied} ${applied===1?"zmianę":"zmiany"}`:"✅ Decyzja zaakceptowana"):decisionAction==="snooze"?`⏰ Odłożono na ${days} ${days===1?"dzień":"dni"}`:decisionAction==="dismiss"?"✅ Zamknięto bez wykonania":"✅ Sprawa zamknięta");
+    await agentAISpecjalisciPobierz(true);
+  }catch(error){
+    agentAISpecjalisci={...agentAISpecjalisci,data:{...(agentAISpecjalisci.data||data),decisions:before}};
+    toast(`⚠️ Decyzja nie została zapisana: ${error?.message||error}`);
+  }finally{agentAISpecjalistaDecyzjeWToku.delete(key);renderuj();}
+}
+function agentAISpecjalistaDecyzjaHTML(item={}){
+  const [riskLabel,riskClass]=agentAIDecyzjaRyzyko(item),product=item.target?.type==="product"&&item.runId,communication=item.kind==="customer_reply"||item.target?.type==="communication",busy=agentAISpecjalistaDecyzjeWToku.has(String(item.id)),run=(agentAISpecjalisci.data?.history||[]).find(entry=>String(entry.id)===String(item.runId));
+  return `<article class="agent-decision-ticket ${riskClass} ${item.executionStatus==="failed"?"failed":""}">
+    <header><span class="agent-decision-icon">${esc(item.icon||"◉")}</span><div><small>${esc(item.specialist||"Agent operacyjny")} • ${esc(agentAIRuntimeCzas(item.createdAt))}</small><h3>${esc(item.title||"Decyzja Agenta")}</h3><em>${esc(agentAIDecyzjaCel(item))}</em></div><span class="agent-decision-risk">${esc(riskLabel)}</span></header>
+    <div class="agent-decision-body"><p>${esc(item.summary||"")}</p><section><small>REKOMENDOWANE DZIAŁANIE</small><b>${esc(item.recommendation||"Sprawdź dane i wybierz dalsze działanie.")}</b></section>${item.lastError?`<div class="agent-decision-error"><b>${esc(item.lastErrorCode||"Nie wykonano")}</b><span>${esc(item.lastError)}</span></div>`:""}</div>
+    ${agentAIDecyzjaSzkicHTML(item,run)}
+    ${product?`<details class="agent-decision-correction"><summary>Poproś Agenta o inną wersję</summary><div><textarea data-agent-feedback="${esc(item.id)}" rows="3" placeholder="Napisz konkretnie, co ma zmienić…">${esc(item.feedbackNote||"")}</textarea><button class="btn ghost" onclick="agentAISpecjalistaPoprawDecyzje(${jsArg(item.id)})" ${busy?"disabled":""}>Przygotuj korektę</button></div></details>`:""}
+    <footer><div>${item.href?`<a class="btn ghost" href="${esc(item.href)}">${communication?"Otwórz rozmowę i wyślij":"Otwórz właściwy moduł"}</a>`:""}</div><div><button class="btn ghost" onclick="agentAISpecjalistaDecyzja(${jsArg(item.id)},'snooze',1)" ${busy?"disabled":""}>Jutro</button><button class="btn ghost" onclick="agentAISpecjalistaDecyzja(${jsArg(item.id)},'dismiss')" ${busy?"disabled":""}>Nie wykonuj</button><button class="btn" onclick="agentAISpecjalistaDecyzja(${jsArg(item.id)},'approve')" ${busy?"disabled":""}>${busy?"Zapisuję…":product?"Zapisz wybrane pola":communication?"Zaakceptuj szkic — bez wysyłki":"Przyjmij do wiadomości"}</button></div></footer>
+  </article>`;
+}
+function agentAIAktywnyCyklHTML(last={}){
+  const plan=last.coordinatorPlan||{},assignments=Array.isArray(plan.assignments)?plan.assignments:[],progress=last.editorialProgress||{};
+  const communicationMode={new_event:"nowe zdarzenie przeanalizowane",safety_12h:"kontrola bezpieczeństwa po 12 h",unchanged_skipped:"bez zmian — analiza pominięta"}[last.communicationMode]||"oczekiwanie na zdarzenie";
+  const stages=[
+    ["1","Pobranie danych",`${last.productsChecked||0} produktów • komunikacja: ${communicationMode}`,last.completedAt?"done":"active"],
+    ["2","Plan Codex",assignments.length?`${assignments.length} przydzielone scenariusze`:"ocena priorytetów",assignments.length?"done":"waiting"],
+    ["3","Praca specjalistów",`${last.prepared||0} przygotowanych • ${last.autoApplied||0} zapisanych`,last.prepared||last.autoApplied?"done":"waiting"],
+    ["4","Kontrola i decyzje",`${last.decisionsCreated||0} nowych decyzji`,last.decisionsCreated?"attention":"done"],
+  ];
+  return `<div class="agent-live-flow">${stages.map(([number,label,detail,status])=>`<article class="${status}"><span>${number}</span><div><b>${esc(label)}</b><small>${esc(detail)}</small></div><i>${status==="done"?"✓":status==="active"?"…":status==="attention"?"!":"○"}</i></article>`).join("")}</div>${progress.total?`<div class="agent-catalog-progress"><span><b>Przygotowanie katalogu</b><small>${esc(progress.ready||0)} z ${esc(progress.total)} gotowych</small></span><i><em style="width:${Math.min(100,Math.round(Number(progress.ready||0)/Math.max(1,Number(progress.total))*100))}%"></em></i></div>`:""}`;
+}
+function agentAIHistoriaDecyzjiHTML(items=[]){
+  return `<div class="agent-decision-history">${items.slice(0,12).map(item=>`<article><span>${item.status==="dismissed"?"—":"✓"}</span><div><b>${esc(item.title||item.kind||"Rozstrzygnięta sprawa")}</b><small>${esc(item.resolvedBy||"Agent / administrator")} • ${esc(agentAIRuntimeCzas(item.resolvedAt||item.updatedAt))}</small></div><em>${item.status==="dismissed"?"zamknięto":"wykonano"}</em></article>`).join("")||`<div class="agent-ops-empty">Historia rozstrzygnięć pojawi się po pierwszej decyzji.</div>`}</div>`;
+}
+function agentAISpecjalisciPanelHTML(){
+  const state=agentAISpecjalisci,data=state.data||{},specialists=Array.isArray(data.specialists)?data.specialists:[],history=Array.isArray(data.history)?data.history:[],decisions=Array.isArray(data.decisions)?data.decisions:[],recent=Array.isArray(data.recentDecisions)?data.recentDecisions:[],usage=data.usage||{},stats=data.decisionStats||{},last=data.lastCycle||{},cfg=data.config||{},connected=!!(data.configured&&data.platformAgents?.configured&&cfg.automaticEnabled!==false),completedToday=history.filter(run=>["auto_applied","applied","not_needed"].includes(run.approvalStatus)).length;
+  if(state.loading&&!state.loaded)return `<section class="panel agent-specialists-page"><div class="agent-runtime-loading"><i></i><div><b>Łączę centrum pracy Agenta…</b><small>Pobieram bieżące zdarzenie, decyzje i potwierdzone wykonania.</small></div></div></section>`;
+  if(state.error&&!data.specialists)return `<section class="panel"><div class="backend-note warn"><b>Nie udało się pobrać pracy Agenta.</b><p>${esc(state.error)}</p><button class="btn" onclick="agentAISpecjalisciPobierz(false)">Ponów</button></div></section>`;
+  return `<section class="agent-specialists-page agent-observability-page">
+    <section class="panel agent-observer-head"><div><span class="agent-live-dot ${connected?"online":"offline"}"></span><div><small>CENTRUM PRACY AGENTA • BEZ CYKLI</small><h2>${connected?"Agent działa i czuwa":"Automatyka wymaga kontroli"}</h2><p>${last.completedAt?`Ostatnie zdarzenie obsłużono ${esc(agentAIRuntimeCzas(last.completedAt))}. Nowy sygnał uruchamia tylko właściwy moduł, a obecna zaległość produktowa jest opróżniana do końca.`:"Agent czeka na pierwsze zdarzenie. Brak pracy oznacza brak nowego sygnału."}</p></div></div><button class="btn" onclick="agentAISpecjalisciCykl()" ${state.running?"disabled":""}>${state.running?"⏳ Wznawiam…":"↻ Uzupełnij zaległości"}</button></section>
+    <section class="agent-observer-metrics"><article class="${last.status==="warning"?"warning":"active"}"><span>⚙</span><div><b>${state.running?"PRACUJE":last.status==="warning"?"UWAGA":"GOTOWY"}</b><small>stan kolejki zdarzeń</small></div></article><article class="${decisions.length?"warning":"safe"}"><span>◉</span><div><b>${esc(decisions.length)}</b><small>decyzji wymagających Ciebie</small></div></article><article class="safe"><span>✓</span><div><b>${esc(completedToday)}</b><small>wykonań widocznych dziś</small></div></article></section>
+    <section class="panel agent-live-work"><div class="order-section-head"><div><span class="order-pro-label">Rzeczywisty przebieg</span><h2>Co Agent wykonał po ostatnim sygnale</h2></div><span class="lvl ${last.status==="warning"?"lvl-ostrzezenie":"lvl-ok"}">${esc(last.status||"oczekuje")}</span></div>${agentAIAktywnyCyklHTML(last)}</section>
+    <section class="panel agent-decision-board"><div class="order-section-head"><div><span class="order-pro-label">Tylko decyzje człowieka</span><h2>Do zatwierdzenia — z pełnym szkicem i skutkiem</h2><p class="order-detail-lead">Każda karta pokazuje dane „przed” i „po”, źródło sprawy oraz dokładny skutek przycisku. Po decyzji karta znika i pozostaje w trwałej historii.</p></div><strong>${esc(decisions.length)}</strong></div><div class="agent-decision-list">${decisions.map(agentAISpecjalistaDecyzjaHTML).join("")||`<div class="agent-decision-empty"><span>✓</span><div><b>Nie czeka żadna decyzja</b><small>Agent nadal wykonuje bezpieczne zadania w tle.</small></div></div>`}</div></section>
+    <details class="panel agent-observer-history"><summary><span><b>Ostatnie rozstrzygnięcia</b><small>${recent.length} zapisanych decyzji</small></span><i>⌄</i></summary>${agentAIHistoriaDecyzjiHTML(recent)}</details>
+    <details class="panel agent-observer-settings"><summary><span><b>Role, limity i ustawienia techniczne</b><small>${specialists.length} profili OpenAI • ${usage.automaticToday||0}/${cfg.automaticDailyLimit||200} analiz automatycznych</small></span><i>⌄</i></summary><div><section class="agent-role-compact">${specialists.map(item=>`<article><span>${esc(item.icon||"✦")}</span><div><b>${esc(item.platformName||item.label)}</b><small>${esc(item.area)} • v${esc(item.platformPrompt?.version||"—")}</small></div><em>${item.platformAvailable===false?"rezerwa":"online"}</em></article>`).join("")}</section><form class="agent-specialist-settings" onsubmit="return agentAISpecjalisciZapiszUstawienia(event)"><div><label><input type="checkbox" name="enabled" ${cfg.enabled!==false?"checked":""}> Role aktywne</label><label><input type="checkbox" name="automaticEnabled" ${cfg.automaticEnabled!==false?"checked":""}> Natychmiastowa kolejka zdarzeń</label><label><input type="checkbox" name="learningEnabled" ${cfg.learningEnabled!==false?"checked":""}> Pamięć korekt</label><label><input type="checkbox" name="safeAutoApply" ${cfg.safeAutoApply!==false?"checked":""}> Bezpieczne zapisy automatyczne</label><label>Zatwierdzeń przed autonomią<input type="number" name="approvalWarmupCount" min="0" max="20" value="${esc(cfg.approvalWarmupCount??0)}"></label><label>Min. akceptacja (%)<input type="number" name="learnedAutoApplyThreshold" min="60" max="100" value="${esc(Math.round(Number(cfg.learnedAutoApplyThreshold||.86)*100))}"></label><label>Próg pewności (%)<input type="number" name="confidenceThreshold" min="75" max="100" value="${esc(Math.round(Number(cfg.confidenceThreshold||.92)*100))}"></label><label>Automatyczne / dzień<input type="number" name="automaticDailyLimit" min="0" max="400" value="${esc(cfg.automaticDailyLimit??200)}"></label><label>Analiz w jednej porcji<input type="number" name="automaticBatchSize" min="1" max="12" value="${esc(cfg.automaticBatchSize||10)}"></label><label>Wszystkie / dzień<input type="number" name="dailyLimit" min="1" max="500" value="${esc(cfg.dailyLimit||240)}"></label><label>Pamięć wyniku (h)<input type="number" name="cacheHours" min="1" max="168" value="${esc(cfg.cacheHours||24)}"></label><label>Historia decyzji (dni)<input type="number" name="decisionRetentionDays" min="7" max="90" value="${esc(cfg.decisionRetentionDays||30)}"></label></div><button class="btn" type="submit">💾 Zapisz ustawienia</button></form></div></details>
+  </section>`;
+}
+function agentAIPulpitObserwowalnoscHTML(score=0){
+  const m=agentAIMetrykiScalone(),[state,label,detail]=agentAIStanSystemuMeta(),runtime=agentAIRuntime.runtime||{},run=runtime.currentRun||runtime.lastRun||{},steps=Array.isArray(run.steps)?run.steps:[],activity=Array.isArray(runtime.activity)?runtime.activity:[],decisions=agentAISpecjalisci.data?.decisions||[];
+  return `<section class="agent-command-center agent-command-center-v2"><div class="agent-command-center-main"><span class="order-pro-label">SYSTEM ZDARZENIOWY • AKTUALIZACJA NA ŻYWO</span><h1>Agent AI pod pełną kontrolą</h1><p>Widzisz tylko pracę uruchomioną prawdziwym sygnałem, trwałe zapisy produktów i sprawy wymagające decyzji. Brak nowych zdarzeń nie uruchamia pustych kontroli.</p><div class="agent-command-center-actions"><a class="btn" href="#/admin/agent-ai/raport">▦ Raport produktów</a><a class="btn ghost" href="#/admin/agent-ai/rozmowa">💬 Wydaj polecenie</a><a class="btn ghost" href="#/admin/agent-ai/zadania">◉ Decyzje</a></div></div><aside><div class="health-score">${score}%</div><span class="agent-command-health ${state}"><i></i><b>${esc(label)}</b><small>${esc(detail)}</small></span></aside></section>
+  <section class="agent-observer-metrics"><article class="${m.working?"active":"safe"}"><span>⚙</span><div><b>${esc(m.working)}</b><small>zadań wykonywanych teraz</small></div></article><article class="${m.readyToList?"active":"safe"}"><span>↗</span><div><b>${esc(m.readyToList)}</b><small>produktów gotowych do wystawienia</small></div></article><article class="${m.productDecisions?"warning":"safe"}"><span>!</span><div><b>${esc(m.productDecisions)}</b><small>kartotek wymagających decyzji</small></div></article></section>
+  <div class="agent-observer-dashboard"><section class="panel agent-now-card"><div class="order-section-head"><div><span class="order-pro-label">${runtime.currentWork?"Agent pracuje teraz":"Ostatnie wykonanie"}</span><h2>${esc(runtime.currentWork?.message||run.summary||"Agent czeka na zdarzenie")}</h2><p class="order-detail-lead">${esc(agentAIRuntimeCzas(runtime.currentWork?.updatedAt||run.startedAt||run.completedAt||runtime.worker?.lastSeenAt))}</p></div><button class="btn ghost" onclick="agentAIRuntimePobierz(false)">↻ Odśwież</button></div><div class="agent-now-steps">${steps.slice(0,8).map(step=>`<article class="${esc(step.status||"waiting")}"><span>${step.status==="completed"?"✓":step.status==="running"?"…":step.status==="warning"?"!":"○"}</span><div><b>${esc(step.label||step.id)}</b><small>${esc(step.error||step.detail||"Oczekuje")}</small></div><em>${step.durationMs?`${Math.max(1,Math.round(step.durationMs/1000))} s`:""}</em></article>`).join("")||`<div class="agent-ops-empty">Agent jest gotowy. Nowy sygnał uruchomi wyłącznie właściwy moduł.</div>`}</div></section>
+  <section class="panel agent-decision-preview"><div class="order-section-head"><div><span class="order-pro-label">Twoja kolejka</span><h2>Decyzje administratora</h2></div><a class="btn ghost" href="#/admin/agent-ai/obsluga">Wszystkie →</a></div><div>${decisions.slice(0,3).map(item=>`<article><span>${esc(item.icon||"◉")}</span><div><b>${esc(item.title||"Decyzja")}</b><small>${esc(item.recommendation||item.summary||"")}</small></div><a class="btn" href="#/admin/agent-ai/obsluga">Zdecyduj</a></article>`).join("")||`<div class="agent-decision-empty"><span>✓</span><div><b>Wszystko zatwierdzone</b><small>Nie ma decyzji oczekujących na Ciebie.</small></div></div>`}</div></section></div>
+  <section class="panel agent-activity-compact"><div class="order-section-head"><div><span class="order-pro-label">Ostatnie działania</span><h2>Co Agent rzeczywiście wykonał</h2></div><a class="btn ghost" href="#/admin/agent-ai/audyt">Pełny audyt →</a></div><div>${activity.slice(0,8).map(item=>`<article class="${esc(item.status||"")}"><span>${item.status==="success"?"✓":item.status==="error"?"×":item.status==="warning"?"!":"•"}</span><div><b>${esc(item.title||"Działanie Agenta")}</b><small>${esc(item.detail||item.source||"")}</small></div><time>${esc(agentAIRuntimeCzas(item.at))}</time></article>`).join("")||`<div class="agent-ops-empty">Historia pojawi się po pierwszym rzeczywistym zdarzeniu.</div>`}</div></section>`;
+}
+
+/* ═══════════ AGENT AI — SCALONE PROFESJONALNE CENTRUM ═══════════ */
+const AGENT_AI_SEKCJE_KANONICZNE=Object.freeze({
+  pulpit:"pulpit",centrum:"pulpit",
+  rozmowa:"pulpit",komendy:"pulpit",
+  praca:"praca",status:"praca",runtime:"praca",
+  raport:"produkty",wyniki:"produkty",produkty:"produkty",kanaly:"produkty",producenci:"produkty",
+  zadania:"obsluga",plan:"obsluga",zlecenia:"obsluga",obsluga:"obsluga",jakosc:"obsluga",diagnostyka:"obsluga",
+  automatyzacje:"obsluga",specjalisci:"zasady",uprawnienia:"zasady",pamiec:"zasady",zasady:"zasady",
+  audyt:"historia",historia:"historia"
+});
+function agentAISekcjaKanoniczna(value="pulpit"){return AGENT_AI_SEKCJE_KANONICZNE[String(value||"").toLowerCase()]||"pulpit";}
+function agentAIMetrykiScalone(){
+  const operations=agentAIOperations.data||{},priorities=Array.isArray(operations.priorities)?operations.priorities:[],summary=operations.summary||{},runtime=agentAIRuntime.runtime||{},events=runtime.eventQueue||{},queue=runtime.queue||{},report=agentAIProductReport.data?.summary||{},specialistDecisions=(agentAISpecjalisci.data?.decisions||[]).length,preparation=agentAIRuntime.preparationQueue||{},publication=agentAIRuntime.publicationQueue||{},publicationCounts=publication.counts||{},vonQueue=agentAIRuntime.vonHalsky?.sync?.publicationQueue||{},vonRemaining=Math.max(0,Number(vonQueue.remaining??((vonQueue.productIds||[]).length-(vonQueue.completedIds||[]).length))||0),vonRunning=["running","queued"].includes(String(vonQueue.status||""))?Number(vonQueue.current??vonQueue.currentBatchIds?.length)||0:0,vonBlockers=Number(vonQueue.failed??vonQueue.failures?.length)||0;
+  const inventoryDecisions=Array.isArray(agentAIDecyzjeMagazynowe?.items)?agentAIDecyzjeMagazynowe.items.length:0;
+  const prepDecisions=(Array.isArray(preparation.current)?preparation.current:[]).filter(task=>["decision_required","failed"].includes(String(task?.status||""))).length;
+  const publicationDecisions=(Array.isArray(publication.current)?publication.current:[]).filter(task=>["decision_required","failed"].includes(String(task?.status||""))).length;
+  const productDecisions=prepDecisions+publicationDecisions,inlineDecisions=specialistDecisions+inventoryDecisions+productDecisions;
+  const operationalDecisions=priorities.filter(item=>item.requiresApproval===true&&item.href).reduce((total,item)=>total+Math.max(1,Number(item.count)||0),0);
+  return {tasks:priorities.length,bad:priorities.filter(x=>x.severity==="critical").length,warn:priorities.filter(x=>x.severity==="warning").length,decisions:inlineDecisions+operationalDecisions,inlineDecisions,operationalDecisions,blockers:vonBlockers,messages:Number(summary.communicationWaiting||0),onboarding:Number(report.not_started||0)+Number(report.needs_data||0),docs:Number(summary.supplierOrders||0),queue:Number(events.active||queue.active||0)+Number(publicationCounts.running||0)+vonRunning,queued:Number(events.queued||queue.counts?.queued||0)+Number(publicationCounts.queued||0)+vonRemaining,working:Number(events.running||0)+Number(queue.counts?.processing||0)+Number(queue.counts?.delivering||0)+Number(publicationCounts.running||0)+vonRunning,readyToList:Number(report.ready_to_list||0),productDecisions,specialistDecisions,inventoryDecisions,history:Number(runtime.activity?.length||0)+Number(events.recent?.length||0)};
+}
+function agentAIWynikOperacyjny(){
+  if(agentAIOperations.loaded)return Math.max(0,Math.min(100,Number(agentAIOperations.data?.score)||0));
+  const state=String(agentAIRuntime.runtime?.state||"");return ({ready:100,online:100,working:100,degraded:70,stale:60,offline:0})[state]??0;
+}
+function agentAIStanSystemuMeta(){
+  const runtime=agentAIRuntime.runtime||{},state=String(runtime.state||(!agentAIRuntime.loaded?"loading":"stale")),map={ready:["online","Agent gotowy","Czeka na rzeczywiste zdarzenie"],online:["online","Agent gotowy","Czeka na rzeczywiste zdarzenie"],working:["working","Agent pracuje",runtime.currentWork?.productName||runtime.worker?.currentTask||"Obsługuje odebrany sygnał"],degraded:["warning","Ograniczone działanie","Jedna integracja wymaga kontroli"],stale:["waiting","Agent w gotowości","Brak pracy oznacza brak nowego sygnału"],offline:["offline","Agent offline","Worker wymaga uruchomienia"],loading:["loading","Sprawdzam stan","Pobieranie sygnału z serwera"]};return map[state]||map.loading;
+}
+function agentAINawigacjaScalonaHTML(active="pulpit"){
+  const m=agentAIMetrykiScalone(),groups=[
+    {label:"Sterowanie",items:[{id:"pulpit",href:"#/admin/agent-ai",icon:"⌂",label:"Centrum"},{id:"praca",href:"#/admin/agent-ai/praca",icon:"◉",label:"Praca i decyzje",badge:m.inlineDecisions||m.working||""}]},
+    {label:"Działanie",items:[{id:"obsluga",href:"#/admin/agent-ai/obsluga",icon:"✓",label:"Obsługa sklepu",badge:m.tasks||""},{id:"produkty",href:"#/admin/agent-ai/produkty",icon:"▦",label:"Produkty i kanały",badge:m.onboarding||""}]},
+    {label:"System",items:[{id:"zasady",href:"#/admin/agent-ai/zasady",icon:"⚙",label:"Zasady",badge:m.specialistDecisions||""},{id:"historia",href:"#/admin/agent-ai/historia",icon:"▤",label:"Historia"}]}
+  ];
+  return `<nav class="panel agent-module-nav" aria-label="Podsekcje Agenta AI"><div class="agent-module-brand"><span>🤖</span><div><small>Centrum wykonawcze</small><b>Agent AI</b></div></div><div class="agent-module-groups">${groups.map(group=>`<section><small>${esc(group.label)}</small><div>${group.items.map(item=>`<a class="${item.id===active?"active":""}" href="${item.href}" ${item.id===active?'aria-current="page"':""}><span>${item.icon}</span><b>${esc(item.label)}</b>${item.badge?`<em>${esc(item.badge)}</em>`:""}</a>`).join("")}</div></section>`).join("")}</div></nav>`;
+}
+agentAISubnavHTML=function(active="pulpit"){return agentAINawigacjaScalonaHTML(agentAISekcjaKanoniczna(active));};
+
+function agentAIKontekstHTML(){
+  const m=agentAIMetrykiScalone(),[state,label,detail]=agentAIStanSystemuMeta(),runtime=agentAIRuntime.runtime||{},events=runtime.eventQueue||{},last=events.recent?.[0],lastAt=last?.completedAt||last?.startedAt||last?.createdAt;
+  return `<section class="agent-context-strip" data-agent-context><span class="agent-context-state ${state}"><i></i><b>${esc(label)}</b><small>${esc(detail)}</small></span><span><small>KOLEJKA ZDARZEŃ</small><b>${m.queue} aktywnych • ${m.queued} oczekuje</b></span><span><small>OBSŁUGA SKLEPU</small><b>${m.tasks} spraw • ${m.decisions} decyzji</b></span><span><small>OSTATNI SYGNAŁ</small><b>${lastAt?esc(agentAIRuntimeCzas(lastAt)):"brak nowego zdarzenia"}</b></span><button class="btn ghost" onclick="Promise.all([agentAIRuntimePobierz(false),agentAIOperationsPobierz(false)])">↻ Odśwież dane</button></section>`;
+}
+function agentAIKontekstAktualizujDom(){
+  const current=document.querySelector("[data-agent-context]");if(current)current.outerHTML=agentAIKontekstHTML();
+  const part=String(location.hash||"").split("/")[3]||"pulpit",active=agentAISekcjaKanoniczna(part),nav=document.querySelector(".agent-module-nav");if(nav)nav.outerHTML=agentAINawigacjaScalonaHTML(active);
+  const metrics=agentAIMetrykiScalone();if(typeof adminMenuUstawPowiadomienie==="function")adminMenuUstawPowiadomienie("/admin/agent-ai",metrics.tasks+metrics.inlineDecisions,"spraw i decyzji Agenta");
+  const guide=document.querySelector("[data-agent-action-guide]");if(guide)guide.outerHTML=agentAIObslugaPrzewodnikHTML();
+  const fold=document.getElementById("agent-work-decisions");if(fold){const badge=fold.querySelector(":scope > summary > em"),previous=Number(fold.dataset.agentDecisionTotal||0);fold.dataset.agentDecisionTotal=String(metrics.inlineDecisions);if(badge)badge.textContent=`${metrics.inlineDecisions} otwartych`;if(metrics.inlineDecisions>0&&previous!==metrics.inlineDecisions)fold.open=true;}
+  const decisions=document.querySelector("[data-agent-decisions-view]");if(decisions&&Number(decisions.dataset.agentDecisionTotal||0)!==metrics.inlineDecisions)decisions.outerHTML=agentAIDecyzjeScaloneHTML();
+  const score=document.querySelector(".agent-command-center .health-score");if(score)score.textContent=`${agentAIWynikOperacyjny()}%`;
+  const health=document.querySelector(".agent-command-health");if(health){const [state,label,detail]=agentAIStanSystemuMeta();health.className=`agent-command-health ${state}`;const title=health.querySelector("b"),note=health.querySelector("small");if(title)title.textContent=label;if(note)note.textContent=detail;}
+}
+function agentAIPodstronaScalonyNaglowekHTML(active="pulpit"){
+  if(active==="pulpit")return "";const m=agentAIMetrykiScalone(),pages={
+    praca:["◉","Praca, publikacje i decyzje","Jeden stan z serwera: co Agent wykonuje teraz, pełne kolejki przygotowania i publikacji oraz każda decyzja z działającą akcją.","odświeżanie co 10 s"],
+    obsluga:["✓","Obsługa całego sklepu","Jedna serwerowa kolejka spraw z zamówień, magazynu, wysyłek, komunikacji, faktur, kanałów sprzedaży, integracji i diagnostyki.",`${m.tasks} aktywnych`],
+    produkty:["▦","Produkty i kanały","Jedna praca nad kartoteką produktu: źródła, treść sklepu, Allegro i Von Halsky, z trwałym zapisem i bez ponawiania zakończonych kontroli.","dane z PostgreSQL"],
+    zasady:["⚙","Zasady działania","Role pomocnicze, granice autonomii, potwierdzenia i pamięć procedur w jednym miejscu konfiguracji.",`${m.specialistDecisions} wyjątków`],
+    historia:["▤","Historia i audyt","Rozliczalny rejestr zdarzeń, wykonanych działań, decyzji oraz potwierdzonych zapisów.",`${m.history} zakończonych`]
+  },p=pages[active]||pages.obsluga;
+  return `<section class="panel agent-workspace-header"><div><span>${p[0]}</span><div><small>AGENT AI • ${esc(p[1].toUpperCase())}</small><h1>${esc(p[1])}</h1><p>${esc(p[2])}</p></div></div><strong>${esc(p[3])}</strong></section>`;
+}
+agentAIPodstronaNaglowekHTML=function(active="pulpit"){return agentAIPodstronaScalonyNaglowekHTML(agentAISekcjaKanoniczna(active));};
+
+function agentAIPulpitScalonyHTML(score=agentAIWynikOperacyjny()){
+  const m=agentAIMetrykiScalone(),[state,label,detail]=agentAIStanSystemuMeta();
+  return `<section class="panel agent-command-center"><div class="agent-command-center-main"><span class="order-pro-label">JEDEN AGENT CAŁEGO SKLEPU • SYSTEM ZDARZENIOWY</span><h1>🤖 Centrum dowodzenia</h1><p>Codex koordynuje właściwe moduły po nowym zamówieniu, wiadomości, zmianie produktu, zdarzeniu magazynowym, błędzie integracji albo Twoim poleceniu. Każdy wynik musi zostać zapisany i odczytany z serwera.</p><div class="agent-command-center-actions"><a class="btn" href="#/admin/agent-ai/obsluga">✓ Obsługa sklepu</a><a class="btn ghost" href="#/admin/agent-ai/praca">◉ Praca, kolejki i decyzje</a><a class="btn ghost" href="#/admin/agent-ai/produkty">▦ Produkty i kanały</a></div></div><aside><div class="health-score">${score}%</div><span class="agent-command-health ${state}"><i></i><b>${esc(label)}</b><small>${esc(detail)}</small></span></aside></section><section class="agent-command-metrics">${[["!",m.tasks,"Sprawy operacyjne",`${m.bad} pilnych • ${m.warn} ostrzeżeń`,`#/admin/agent-ai/obsluga`],["✓",m.decisions,"Decyzje administratora","każda prowadzi do czynności","#/admin/agent-ai/obsluga"],["⚙",m.queue,"Kolejki serwerowe",`${m.working} wykonywane • ${m.queued} oczekuje`,`#/admin/agent-ai/praca`],["↗",m.readyToList,"Produkty gotowe","do wystawienia w kanałach","#/admin/agent-ai/produkty"]].map(([icon,value,title,note,href])=>`<a href="${href}"><span>${icon}</span><div><b>${value}</b><strong>${esc(title)}</strong><small>${esc(note)}</small></div><em>→</em></a>`).join("")}</section><section class="agent-home-grid"><div>${agentAIRozmowaScalonaHTML()}</div><section class="panel agent-home-operations"><header><div><span class="order-pro-label">PRIORYTETY Z SERWERA</span><h2>Co wymaga uwagi</h2><p>Każda karta ma konkretną akcję albo prowadzi do właściwego modułu.</p></div><button class="btn ghost" onclick="agentAIOperationsPobierz(false)">↻</button></header><div data-agent-operations-view="summary">${agentAIOperationsHTML("summary")}</div></section></section>`;
+}
+function agentAIRozmowaScalonaHTML(){
+  const answers=(agentAIHistoria||[]).filter(h=>h.typ==="komenda"&&h.dane&&h.dane.odpowiedz).slice(0,8);
+  const quick=[["📦","Sprawdź nowe zamówienia","sprawdź czy wpadło nowe zlecenie"],["🏬","Pokaż realne braki","czego brakuje do aktywnych zamówień"],["🚚","Sprawdź wysyłki","sprawdź wysyłki i InPost"],["🏷️","Audyt produktów","audyt produktów i katalogu"],["🏭","Sprawdź producentów","sprawdź dostępność u producentów"],["🔄","Synchronizuj dane","synchronizuj bazę"]];
+  const more=[["Przygotuj zamówienie do producenta","przygotuj zamówienie do producenta"],["Popraw opisy produktów","popraw opisy produktów"],["Pokaż stan magazynu","pokaż stan magazynu"],["Sprawdź integracje","diagnostyka integracji"],["Pokaż pamięć","pokaż pamięć"],["Naucz Agenta","zapamiętaj: "]];
+  return `<section class="panel agent-conversation"><div class="agent-conversation-head"><div><span>🤖</span><div><small>CODEX + GPT‑5.4 NANO + DANE SKLEPU</small><h2>Co mam zrobić?</h2><p>Pisz normalnie po polsku. Agent najpierw sprawdza dane i pokazuje plan; zmiany magazynowe oraz działania zewnętrzne wymagają osobnego potwierdzenia.</p></div></div><span id="agentAICommandCloudState" class="lvl ${chmuraStan.dostepna?"lvl-ok":"lvl-info"}">${chmuraStan.dostepna?`wspólna baza • rewizja ${chmuraStan.rev||0}`:"łączenie z bazą"}</span></div><form class="agent-conversation-form" onsubmit="return agentAIPrzyjmijKomende(event)"><textarea id="agentAICommandInput" rows="4" placeholder="Np. sprawdź nowe zamówienia i przygotuj listę brakujących produktów…"></textarea><div><button class="btn" type="submit">🤖 Przekaż Agentowi</button><button class="btn ghost" type="button" onclick="agentAIWstawKomende('wykonaj bezpieczny plan agenta')">▶ Bezpieczna kontrola</button></div></form><div class="agent-command-presets">${quick.map(([icon,label,command])=>`<button type="button" onclick="agentAIWstawKomende(${jsArg(command)})"><span>${icon}</span><b>${esc(label)}</b></button>`).join("")}</div><details class="agent-more-commands"><summary>Więcej gotowych poleceń</summary><div>${more.map(([label,command])=>`<button class="btn ghost" type="button" onclick="agentAIWstawKomende(${jsArg(command)})">${esc(label)}</button>`).join("")}</div></details><div class="agent-command-safety"><span>🛡️</span><div><b>Bezpieczna zasada wykonania</b><small>Rozmowa nie zmienia stanu sama. Agent tworzy osobną decyzję z lokalizacją, ilością i przyciskami Potwierdzam / Odrzucam.</small></div></div><div id="agentAICommandLiveResult" class="agent-response-card agent-command-live-result" hidden></div><div id="agentInventoryDecisionPanel">${agentAIDecyzjeMagazynowePanelHTML()}</div>${answers.length?`<section class="agent-conversation-history"><div><b>Ostatnie odpowiedzi</b><a href="#/admin/agent-ai/historia">Pełny audyt →</a></div>${answers.map(h=>`<article><header><b>${esc(h.dane.polecenie||"Polecenie")}</b><small>${esc(h.dataTxt||"")}</small></header><pre>${esc(h.dane.odpowiedz||"")}</pre></article>`).join("")}</section>`:`<div class="agent-ops-empty">Nie ma jeszcze odpowiedzi z panelu. Wpisz pierwsze polecenie powyżej.</div>`}</section>`;
+}
+function agentAIOperationAreaMeta(area="system"){
+  const map={zamowienia:["🧾","Zamówienia i klienci"],allegro:["🟠","Allegro"],wysylki:["🚚","Wysyłki"],magazyn:["🏬","Magazyn"],producent:["🏭","Dostępność producentów"],producenci:["🏭","Zaopatrzenie"],produkty:["📦","Produkty"],faktury:["💳","Faktury"],synchronizacja:["↻","Synchronizacja"],system:["🛠","System i diagnostyka"]};
+  return map[String(area||"")]||["•",String(area||"Pozostałe")];
+}
+function agentAIOperationAkcjaHTML(item={}){
+  const actionId=String(item.actionId||""),hasDecision=!!item.decisionId&&item.requiresApproval===true;
+  if(item.execution==="safe_check"){
+    const busy=agentAIOperationBusy===actionId,label=busy?"Kontrola trwa…":item.actionLabel||"Uruchom kontrolę";
+    return `<button class="btn agent-operation-run" type="button" data-agent-operation="${esc(actionId)}" onclick="agentAIOperationWykonaj(${jsArg(actionId)},this)" ${agentAIOperationBusy?"disabled":""}>${busy?"⏳":"▶"} ${esc(label)}</button>`;
+  }
+  const href=hasDecision?"#/admin/agent-ai/obsluga":item.href||"#/admin/agent-ai/praca",label=hasDecision?"Zdecyduj":item.actionLabel||"Otwórz właściwy moduł";
+  return `<a class="btn ${hasDecision?"":"ghost"}" href="${esc(href)}">${esc(label)} <span aria-hidden="true">→</span></a>`;
+}
+async function agentAIOperationWykonaj(actionId="",button=null){
+  const action=String(actionId||"");if(!action||agentAIOperationBusy||agentAIPlanStan.busy)return;
+  const profiles={site_function_check:["health",null],data_sync:["data",null],producer_link_check:["data",[]]},definition=profiles[action];
+  if(!definition){toast("Ta sprawa wymaga otwarcia właściwego modułu.");return;}
+  agentAIOperationBusy=action;if(button){button.disabled=true;button.textContent="⏳ Kontrola trwa…";}agentAIOperationsUpdateDom();
+  try{
+    await agentAIWykonajPlanBezpieczny(definition[0],definition[1]);
+    await Promise.all([agentAIOperationsPobierz(true),agentAIRuntimePobierz(true)]);
+    toast("✅ Kontrola zakończona — stan spraw został odczytany ponownie z serwera");
+  }catch(error){toast("Nie ukończono kontroli: "+(error?.message||error));}
+  finally{agentAIOperationBusy="";agentAIOperationsUpdateDom();}
+}
+function agentAIOperationsHTML(mode="summary"){
+  const state=agentAIOperations,data=state.data||{},priorities=Array.isArray(data.priorities)?data.priorities:[];
+  if(state.loading&&!state.loaded)return `<div class="agent-runtime-loading"><i></i><div><b>Pobieram wspólną kolejkę obsługi…</b><small>Zamówienia, magazyn, kanały, wysyłki, faktury i diagnostyka są liczone na serwerze.</small></div></div>`;
+  if(state.error&&!state.loaded)return `<div class="backend-note warn"><b>Nie udało się pobrać kolejki obsługi.</b><p>${esc(state.error)}</p><button class="btn" onclick="agentAIOperationsPobierz(false)">Ponów</button></div>`;
+  const rows=mode==="summary"?priorities.slice(0,6):priorities,integrations=data.integrations||{},summary=data.summary||{};
+  const metrics=agentAIMetrykiScalone();
+  return `<div class="agent-operations-shell is-${mode}">${mode==="full"?`<section class="agent-operations-overview"><article><span>!</span><div><b>${esc(priorities.filter(x=>x.severity==="critical").length)}</b><small>pilnych obszarów</small></div></article><article><span>✓</span><div><b>${esc(metrics.decisions)}</b><small>decyzji z miejscem działania</small></div></article><article><span>⚙</span><div><b>${esc((data.score??0)+"%")}</b><small>kondycja operacyjna</small></div></article><article><span>↻</span><div><b>${esc(data.generatedAt?agentAIRuntimeCzas(data.generatedAt):"brak")}</b><small>ostatni odczyt serwera</small></div></article></section>`:""}<div class="agent-operations-list">${rows.map(item=>{const [icon,area]=agentAIOperationAreaMeta(item.area),level=item.severity==="critical"?"critical":item.severity==="warning"?"warning":"info",actionType=item.requiresApproval===true?"Decyzja lub operacja chroniona":item.execution==="draft"?"Bezpieczne przygotowanie — bez publikacji":item.execution==="safe_check"?"Kontrola możliwa do uruchomienia tutaj":"Przejście do właściwego modułu";return `<article class="${level}"><span>${icon}</span><div><header><b>${esc(item.title||area)}</b><em>${esc(area)} • ${esc(item.count||0)}</em></header><p>${esc(item.action||"")}</p><small>${esc(actionType)} • odpowiedzialny: ${esc(item.owner||"Agent AI")}</small>${mode==="full"&&item.doneWhen?`<strong>Gotowe, gdy: ${esc(item.doneWhen)}</strong>`:""}</div>${agentAIOperationAkcjaHTML(item)}</article>`;}).join("")||`<div class="agent-decision-empty"><span>✓</span><div><b>Brak aktywnych spraw</b><small>Nowa pozycja pojawi się dopiero po rzeczywistym zdarzeniu w sklepie.</small></div></div>`}</div>${mode==="summary"&&priorities.length>rows.length?`<a class="agent-operations-more" href="#/admin/agent-ai/obsluga">Pokaż wszystkie ${esc(priorities.length)} spraw →</a>`:""}${mode==="full"?`<section class="agent-integration-strip">${Object.entries(integrations).map(([name,ready])=>`<span class="${ready?"ready":"attention"}"><i>${ready?"✓":"!"}</i><b>${esc(name)}</b><small>${ready?"połączono":"wymaga konfiguracji"}</small></span>`).join("")}</section><small class="agent-operations-summary-note">Aktywne zamówienia: ${esc(summary.activeOrders||0)} • Allegro: ${esc(summary.activeAllegro||0)} • bez numeru nadania: ${esc(summary.shipmentsWithoutTracking||0)} • komunikacja: ${esc(summary.communicationWaiting||0)}</small>`:""}</div>`;
+}
+function agentAIPublikacjaStatusMeta(status=""){
+  return ({running:["Wykonywana teraz","working","⚙"],queued:["Oczekuje w kolejce","queued","…"],completed:["Opublikowano i sprawdzono","ready","✓"],repaired:["Naprawione — czeka na zatwierdzenie","ready","✓"],decision_required:["Wymaga decyzji","decision","!"],failed:["Błąd wykonania","failed","×"],cancelled:["Anulowano","cancelled","Ⅱ"]})[String(status||"")]||["Sprawdzanie","queued","•"];
+}
+function agentAIPublikacjaOperacjaLabel(operation=""){
+  return ({activate:"Publikacja / aktywacja",draft:"Utworzenie nieaktywnej oferty",update:"Aktualizacja istniejącej oferty"})[operation]||"Operacja Allegro";
+}
+async function agentAIPublikacjaSteruj(action="pause",batchId=""){
+  const op=String(action||"");
+  if(op.startsWith("cancel")&&!confirm(op==="cancel_previous"?"Anulować wcześniejsze oczekujące publikacje? Bieżąca pozycja zostanie bezpiecznie dokończona.":"Anulować oczekujące pozycje tej partii? Bieżąca publikacja zostanie bezpiecznie dokończona."))return;
+  try{
+    const data=await chmura("allegro-publication-queue-control",{method:"POST",body:{action:op,batchId:String(batchId||"")},timeout:30000});
+    agentAIRuntime={...agentAIRuntime,publicationQueue:data.queue||null};toast(op==="pause"?"⏸ Publikacje wstrzymane na serwerze":op==="resume"?"▶ Publikacje wznowione na serwerze":"⛔ Oczekujące publikacje anulowane");
+    const live=$("agentAILivePanel");if(live)live.innerHTML=agentAIPracaNaZywoHTML();
+  }catch(error){toast("Nie zmieniono kolejki publikacji: "+(error?.message||error));}
+}
+async function agentAIWybierzRozwiazanie(taskId,productId,resolutionId){
+  const remember=$("agentDecisionRemember-"+String(taskId).replace(/[^a-zA-Z0-9_-]/g,""))?.checked!==false;
+  try{
+    const data=await chmura("allegro-preparation-decision",{method:"POST",body:{taskId:String(taskId),productId:String(productId),resolutionId:String(resolutionId),remember},timeout:30000});
+    agentAIRuntime={...agentAIRuntime,preparationQueue:data.queue||agentAIRuntime.preparationQueue};
+    toast(data.openEditor?(data.remembered?"🧠 Wybór zapamiętany — otwieram właściwy edytor":"Otwieram właściwy edytor"):(data.remembered?"🧠 Agent zapamiętał wybór i ustawił naprawę jako następną":"🤖 Naprawa została ustawiona jako następna"));
+    if(data.openEditor){location.hash=`#/admin/produkty/edytuj/${encodeURIComponent(productId)}`;return;}
+    await agentAIRuntimePobierz(true);
+  }catch(error){toast("Nie wykonano decyzji: "+(error?.message||error));}
+}
+async function agentAIDodajRozwiazanie(taskId,productId,formId){
+  const root=$(formId),title=root?.querySelector('[data-solution-title]')?.value?.trim()||"",description=root?.querySelector('[data-solution-description]')?.value?.trim()||"",baseResolutionId=root?.querySelector('[data-solution-base]')?.value||"official_source";
+  if(title.length<3||description.length<10){toast("Podaj nazwę i konkretny opis rozwiązania.");return;}
+  try{
+    const data=await chmura("allegro-preparation-solution",{method:"POST",body:{taskId:String(taskId),productId:String(productId),title,description,baseResolutionId},timeout:30000});
+    agentAIRuntime={...agentAIRuntime,preparationQueue:data.queue||agentAIRuntime.preparationQueue};
+    toast("🧠 Rozwiązanie zapisano trwale dla tej klasy problemu. Możesz je teraz wybrać.");
+    const live=$("agentAILivePanel");if(live)live.innerHTML=agentAIPracaNaZywoHTML();
+  }catch(error){toast("Nie zapisano rozwiązania: "+(error?.message||error));}
+}
+async function agentAIPriorytetPrzygotowania(scope){
+  try{
+    const data=await chmura("allegro-preparation-queue-prioritize",{method:"POST",body:{scope:String(scope)},timeout:30000});
+    agentAIRuntime={...agentAIRuntime,preparationQueue:data.queue||agentAIRuntime.preparationQueue};
+    toast(data.matched?`✅ Ustawiono priorytet dla ${data.matched} oczekujących produktów. Bieżący produkt zostanie bezpiecznie dokończony.`:"ℹ️ W obecnej kolejce nie ma produktów pasujących do wybranego priorytetu.");
+    const live=$("agentAILivePanel");if(live)live.innerHTML=agentAIPracaNaZywoHTML();
+  }catch(error){toast("Nie zmieniono priorytetu pracy: "+(error?.message||error));}
+}
+function agentAIPriorytetPracyHTML(){
+  const queue=agentAIRuntime.preparationQueue||{},policy=queue.priorityPolicy||{},options=[
+    ["allegro_repairs","🛠","Naprawy ofert Allegro","Błędy i braki istniejących ofert"],
+    ["new_allegro","＋","Nowe oferty Allegro","Produkty, których jeszcze nie ma na Allegro"],
+    ["von_halsky","📦","Przygotowanie Von Halsky","Kategoria, parametry i dane kanału"],
+    ["full_review","✓","Pełny przegląd kartotek","Sklep, Allegro i Von Halsky według kolejki"],
+  ];
+  return `<section class="panel agent-work-priority"><header><div><span class="order-pro-label">RZECZYWISTA KOLEJNOŚĆ • POSTGRESQL</span><h2>Co Agent ma zrobić najpierw?</h2><p>Wybór zmienia kolejność oczekujących zadań na serwerze. Aktualnie wykonywany produkt zostanie dokończony — żadna publikacja nie jest tu uruchamiana.</p></div>${policy.scope?`<span class="lvl lvl-info">wybrano: ${esc(policy.label||policy.scope)} • ${esc(policy.matched||0)}</span>`:`<span class="lvl lvl-neutral">automatyczna kolejność</span>`}</header><div>${options.map(([id,icon,title,description])=>`<button class="${policy.scope===id?"active":""}" onclick="agentAIPriorytetPrzygotowania('${id}')"><span>${icon}</span><b>${esc(title)}</b><small>${esc(description)}</small>${policy.scope===id?`<em>AKTUALNY PRIORYTET</em>`:""}</button>`).join("")}</div>${policy.selectedAt?`<footer>Ostatnia decyzja: ${esc(agentAIRuntimeCzas(policy.selectedAt))} • dopasowano ${esc(policy.matched)} oczekujących produktów.</footer>`:""}</section>`;
+}
+async function agentAIPonowPublikacjeProduktu(productId,operation="activate",stock=0){
+  if(!confirm(`Ponownie wykonać przez API Allegro operację „${agentAIPublikacjaOperacjaLabel(operation)}” dla produktu ${productId}?`))return;
+  try{
+    await chmura("allegro-publication-queue-enqueue",{method:"POST",body:{operation,items:[{productId:String(productId),stock:Number(stock)||0}]},timeout:30000});toast("🟠 Ponowienie zapisano w trwałej kolejce publikacji");await agentAIRuntimePobierz(true);
+  }catch(error){toast("Nie uruchomiono publikacji: "+(error?.message||error));}
+}
+async function agentAIWybierzRozwiazaniePublikacji(taskId,productId,resolutionId,operation="activate",stock=0){
+  const remember=$("agentPublicationDecisionRemember-"+String(taskId).replace(/[^a-zA-Z0-9_-]/g,""))?.checked!==false;
+  try{
+    const data=await chmura("allegro-publication-decision",{method:"POST",body:{taskId:String(taskId),productId:String(productId),resolutionId:String(resolutionId),remember},timeout:30000});
+    agentAIRuntime={...agentAIRuntime,publicationQueue:data.queue||agentAIRuntime.publicationQueue,preparationQueue:data.preparationQueue||agentAIRuntime.preparationQueue};
+    if(data.openEditor){toast(data.remembered?"🧠 Wybór zapamiętany — otwieram właściwy edytor":"Otwieram właściwy edytor");location.hash=`#/admin/produkty/edytuj/${encodeURIComponent(productId)}`;return;}
+    if(data.requiresPublicationConfirmation){
+      toast(data.remembered?"🧠 Wybór zapamiętany — publikacja wymaga jeszcze potwierdzenia":"Publikacja wymaga osobnego potwierdzenia");
+      await agentAIPonowPublikacjeProduktu(productId,operation,stock);return;
+    }
+    toast(data.remembered?"🧠 Agent zapamiętał wybór i ustawił bezpieczną naprawę jako następną":"🤖 Bezpieczna naprawa została ustawiona jako następna");
+    await agentAIRuntimePobierz(true);
+  }catch(error){toast("Nie wykonano decyzji publikacji: "+(error?.message||error));}
+}
+function agentAIPublikacjaKolejkaHTML(){
+  const queue=agentAIRuntime.publicationQueue;
+  const preparation=agentAIRuntime.preparationQueue||{},prepCounts=preparation.currentSummary||{},prepPending=Number(preparation.pending??prepCounts.pending)||0,prepRunning=Number(prepCounts.running)||0,prepDecisions=Number(prepCounts.decisionRequired||0)+Number(prepCounts.failed||0),prepActive=preparation.active||null,von=agentAIRuntime.vonHalsky||{},vonQueue=von.sync?.publicationQueue||{},seo=agentAIRuntime.seoAutomation||{};
+  if(!queue&&!agentAIRuntime.vonHalsky&&!agentAIRuntime.seoAutomation)return `<section class="panel agent-publication-queue is-loading"><div class="agent-runtime-loading"><i></i><div><b>Pobieram wszystkie kolejki Agenta…</b><small>Przygotowanie, Allegro, Von Halsky i SEO są odczytywane bezpośrednio z serwera.</small></div></div></section>`;
+  const counts=queue?.counts||{},batches=Array.isArray(queue?.batches)?queue.batches:[],batch=batches.find(item=>Number(item.pending||0)+Number(item.running||0)>0)||batches[0]||null,active=queue?.active||null,pending=Number(counts.queued||0),running=Number(counts.running||0),decisions=Number(counts.decision_required||0)+Number(counts.failed||0),busy=pending+running>0;
+  const productIds=Array.isArray(vonQueue.productIds)?vonQueue.productIds:[],completedIds=Array.isArray(vonQueue.completedIds)?vonQueue.completedIds:[],vonTotal=Number(vonQueue.total??productIds.length)||0,vonCompleted=Number(vonQueue.completed??completedIds.length)||0,vonFailed=Number(vonQueue.failed??vonQueue.failures?.length)||0,vonRemaining=Math.max(0,Number(vonQueue.remaining??(vonTotal-vonCompleted))||0),vonCurrent=Number(vonQueue.current??vonQueue.currentBatchIds?.length)||0,vonStatus=String(vonQueue.status||"idle"),vonBusy=["queued","running"].includes(vonStatus)&&vonRemaining>0,vonPaused=vonStatus==="paused";
+  const seoToday=seo.today||{},seoChannels=seo.channels||{},seoIndexNow=seoChannels.indexNow||{},seoReady=seo.enabled!==false,seoDone=seoToday.completed===true;
+  const statusLabel=(paused,working,idle="czujna i gotowa")=>paused?"wstrzymana":working?"serwer wykonuje":idle;
+  return `<section class="panel agent-all-queues" aria-live="polite"><header class="agent-all-queues-head"><div><span class="order-pro-label">WSPÓLNY PULPIT • NIEZALEŻNE TRWAŁE KOLEJKI SERWERA</span><h2>Przygotowanie, publikacje i pozycjonowanie</h2><p>Każdy kanał ma własny bezpieczny proces w tle. Tutaj widać ich rzeczywisty stan, postęp, blokady i ostatni potwierdzony wynik.</p></div><button class="btn ghost" onclick="agentAIRuntimePobierz(false)">↻ Odśwież wszystko</button></header><div class="agent-channel-queues">
+    <article class="agent-channel-queue preparation ${prepRunning+prepPending?"is-running":"is-ready"}"><header><div><span>🤖</span><div><small>WSPÓLNA KARTOTEKA • POSTGRESQL</small><h3>Przygotowanie wszystkich kanałów</h3></div></div><em>${prepRunning+prepPending?"Agent pracuje":"monitor aktywny"}</em></header><p>${prepActive?`Teraz: produkt ${esc(prepActive.productId||"")} • ${esc(agentAIEtapPracyLabel(prepActive.phase||prepActive.status||"running"))}.`:"Co 5 minut Agent dobiera następną bezpieczną partię i uzupełnia sklep, Allegro oraz Von Halsky bez dublowania zakończonych kontroli."}</p><div class="agent-channel-metrics"><span><b>${prepRunning}</b><small>w toku</small></span><span><b>${prepPending}</b><small>oczekuje</small></span><span><b>${Number(prepCounts.completed||0)}</b><small>zakończone</small></span><span class="${prepDecisions?"attention":""}"><b>${prepDecisions}</b><small>konkretne braki</small></span></div><footer><span>✓ Jedna kartoteka zasila sklep i oba kanały sprzedaży</span><a class="btn ghost" href="#/admin/agent-ai/praca">Pełna praca</a></footer></article>
+    <article class="agent-channel-queue allegro ${queue?.paused?"is-paused":busy?"is-running":"is-ready"}"><header><div><span>🟠</span><div><small>ALLEGRO • POSTGRESQL</small><h3>Publikacja ofert</h3></div></div><em>${esc(statusLabel(queue?.paused,busy,"monitor aktywny"))}</em></header><p>${active?`Teraz: ${esc(active.productName)} • ${esc(agentAIPublikacjaOperacjaLabel(active.operation))}`:queue?.paused?"Nowe zatwierdzone zadania nie ruszą, dopóki kolejka jest wstrzymana.":"Worker sprawdza kolejkę w sposób ciągły; obecnie nie ma zatwierdzonej publikacji."}</p><div class="agent-channel-metrics"><span><b>${running}</b><small>w toku</small></span><span><b>${pending}</b><small>oczekuje</small></span><span><b>${Number(counts.completed||0)}</b><small>potwierdzone</small></span><span class="${decisions?"attention":""}"><b>${decisions}</b><small>decyzje</small></span></div><footer>${queue?.paused?`<button class="btn" onclick="agentAIPublikacjaSteruj('resume')">▶ Wznów pracę w tle</button>`:busy?`<button class="btn ghost" onclick="agentAIPublikacjaSteruj('pause')">⏸ Wstrzymaj</button>`:`<span>✓ Odczyt serwera ${esc(queue?.updatedAt?agentAIRuntimeCzas(queue.updatedAt):"przed chwilą")}</span>`}${batch&&Number(batch.pending||0)?`<button class="btn danger" onclick="agentAIPublikacjaSteruj('cancel',${jsArg(batch.id)})">Anuluj oczekujące (${esc(batch.pending)})</button>`:""}</footer></article>
+    <article class="agent-channel-queue von ${vonPaused?"is-paused":vonBusy?"is-running":"is-ready"}"><header><div><span>📦</span><div><small>INPOST VON HALSKY • SERWER</small><h3>Publikacja i aktualizacja</h3></div></div><em>${esc(statusLabel(vonPaused,vonBusy,vonStatus==="completed"?"partia zakończona":"monitor aktywny"))}</em></header><p>${vonBusy?`Partia ${esc(vonQueue.id||"")} • przetwarzanie ${vonCompleted} z ${vonTotal}.`:vonStatus==="completed"?`Ostatnia partia zakończona: ${vonCompleted-vonFailed} poprawnych, ${vonFailed} bezpiecznie zatrzymanych konfliktów.`:"Worker sprawdza publikacje co 10 sekund i synchronizuje kanał w tle."}</p><div class="agent-channel-metrics"><span><b>${vonCurrent}</b><small>w toku</small></span><span><b>${vonRemaining}</b><small>pozostało</small></span><span><b>${Math.max(0,vonCompleted-vonFailed)}</b><small>potwierdzone</small></span><span class="${vonFailed?"attention":""}"><b>${vonFailed}</b><small>blokady danych</small></span></div><footer>${vonPaused?`<button class="btn" onclick="agentAIVonHalskySteruj('resume')">▶ Wznów pracę w tle</button>`:vonBusy?`<button class="btn ghost" onclick="agentAIVonHalskySteruj('pause')">⏸ Wstrzymaj</button>`:`<span>✓ Ostatni odczyt API ${esc(von.sync?.lastCatalogVerifiedAt?agentAIRuntimeCzas(von.sync.lastCatalogVerifiedAt):"oczekuje")}</span>`}${vonBusy?`<button class="btn danger" onclick="agentAIVonHalskySteruj('cancel')">Anuluj pozostałe</button>`:""}<a class="btn ghost" href="#/admin/von-halsky/wystawianie">Pełna kolejka</a></footer></article>
+    <article class="agent-channel-queue seo ${seoReady?"is-ready":"is-paused"}"><header><div><span>🔎</span><div><small>SEO • AUTOMAT SERWEROWY</small><h3>Pozycjonowanie produktów</h3></div></div><em>${seoReady?"automat aktywny":"wyłączone"}</em></header><p>${seoDone?`Dzisiejszy plan wykonany: ${Number(seoToday.processed||0)} z ${Number(seoToday.limit||seo.settings?.dailyLimit||0)} produktów. Następny przebieg ${esc(seo.schedule?.nextRun||"jutro rano")}.`:`Najbliższy przebieg ${esc(seo.schedule?.nextRun||seo.schedule?.window||"04:15–04:23")}. Ustawienia ogólne sterują limitem i zakresem.`}</p><div class="agent-channel-metrics"><span><b>${Number(seoToday.processed||0)}</b><small>dzisiaj</small></span><span><b>${Number(seoChannels.sitemap?.count||0)}</b><small>w mapie strony</small></span><span><b>${Number(seoChannels.googleFeed?.count||0)}</b><small>w Google feed</small></span><span class="${seoIndexNow.status&&seoIndexNow.status!=="accepted"?"attention":""}"><b>${seoIndexNow.status==="accepted"?"200":esc(seo.promotion?.httpStatus||"—")}</b><small>IndexNow</small></span></div><footer><span>${seoIndexNow.status==="accepted"?`✓ IndexNow przyjął ${Number(seoIndexNow.requestCount||seo.promotion?.count||0)} adresów`:`Ostatni przebieg ${seo.lastRunAt?esc(agentAIRuntimeCzas(seo.lastRunAt)):"jeszcze nie wykonany"}`}</span><a class="btn ghost" href="#/admin/seo/ustawienia">Ustawienia SEO</a></footer></article>
+  </div></section>`;
+}
+async function agentAIVonHalskySteruj(command="pause"){
+  const op=String(command||"");if(!["pause","resume","cancel"].includes(op))return;
+  if(op==="cancel"&&!confirm("Anulować niewykonaną część kolejki Von Halsky? Bieżąca partia zostanie bezpiecznie dokończona."))return;
+  try{const data=await chmura("von-halsky-publication-queue-control",{method:"POST",body:{command:op},timeout:30000});agentAIRuntime={...agentAIRuntime,vonHalsky:{...(agentAIRuntime.vonHalsky||{}),sync:{...(agentAIRuntime.vonHalsky?.sync||{}),publicationQueue:data.queue||{}}}};toast(op==="pause"?"⏸ Kolejka Von Halsky wstrzyma się po bieżącej partii":op==="resume"?"▶ Publikacja Von Halsky działa ponownie w tle":"⛔ Pozostała część kolejki została anulowana");const live=$("agentAILivePanel");if(live)live.innerHTML=agentAIPracaNaZywoHTML();}catch(error){toast("Nie zmieniono kolejki Von Halsky: "+(error?.message||error));}
+}
+function agentAIProduktoweDecyzjeHTML(){
+  const preparation=agentAIRuntime.preparationQueue||{},publication=agentAIRuntime.publicationQueue||{},prep=(Array.isArray(preparation.current)?preparation.current:[]).filter(task=>["decision_required","failed"].includes(String(task.status))),pub=(Array.isArray(publication.current)?publication.current:[]).filter(task=>["decision_required","failed"].includes(String(task.status))),all=[...pub.map(task=>({kind:"publication",task})),...prep.map(task=>({kind:"preparation",task}))],total=all.length,limit=Math.max(25,Number(agentAIProduktoweDecyzjeLimit)||25),shown=all.slice(0,limit);
+  const rows=shown.map(({kind,task})=>{
+    if(kind==="publication"){
+      const resolution=task.resolution||{},fallback=[
+        {id:"repair_then_review",title:"Agent naprawia i przygotowuje kontrolę",description:"Usuń przyczynę i zatrzymaj się przed publikacją.",effect:"Bez publikacji",recommended:true},
+        {id:"verify_remote_state",title:"Agent sprawdza stan i powiązanie",description:"Porównaj kartotekę, ID oferty i dane kanału.",effect:"Bez publikacji"},
+        {id:"manual_editor",title:"Otwórz właściwe miejsce w edytorze",description:"Popraw dane ręcznie z widocznym komunikatem błędu.",effect:"Bez automatycznej naprawy"},
+        {id:"retry_publication",title:"Ponów operację po potwierdzeniu",description:"Utwórz nowe zadanie dopiero po osobnym potwierdzeniu.",effect:"Operacja zewnętrzna"},
+      ],options=Array.isArray(resolution.options)&&resolution.options.length?resolution.options:fallback,rememberId="agentPublicationDecisionRemember-"+String(task.id).replace(/[^a-zA-Z0-9_-]/g,"");
+      return `<article class="agent-product-decision repair publication"><div class="agent-product-decision-problem"><span>🟠</span><div><b>${esc(task.productName||`Produkt ${task.productId}`)}</b><small>BŁĄD PUBLIKACJI ALLEGRO • ID ${esc(task.productId)} • próba ${esc(task.attempts||1)} • problem ${esc(resolution.signature||task.errorCode||"do rozstrzygnięcia")}</small><p>${esc(task.error||"Allegro nie potwierdziło publikacji. Wybierz bezpieczny sposób rozwiązania.")}</p>${task.automaticPolicy?.description?`<p><b>Reguła Agenta wykonywana automatycznie:</b> ${esc(task.automaticPolicy.description)}</p>`:""}</div></div><div class="agent-resolution-options publication-options">${options.map(option=>`<button class="${option.recommended?"agent-suggestion":""}" onclick="agentAIWybierzRozwiazaniePublikacji(${jsArg(task.id)},${jsArg(task.productId)},${jsArg(option.id)},${jsArg(task.operation)},${Number(task.stock)||0})"><span>${option.id==="manual_editor"?"✏️":option.id==="retry_publication"?"🟠":option.id==="verify_remote_state"?"🔎":"🤖"}</span><b>${esc(option.title)}</b><small>${esc(option.description)}</small><em>${option.recommended?(resolution.learnedChoice?`PROPOZYCJA Z PAMIĘCI • ${esc(resolution.learnedCount||option.learnedCount||1)}×`:"PROPOZYCJA AGENTA"):esc(option.effect||"")}</em></button>`).join("")}</div><label class="agent-decision-remember"><input id="${esc(rememberId)}" type="checkbox" checked><span><b>Zapamiętaj mój wybór</b><small>Agent zapisze ten wybór i automatycznie wykona bezpieczną część reguły przy takim samym błędzie. Każda publikacja nadal wymaga osobnego zatwierdzenia.</small></span></label></article>`;
+    }
+    const missing=[...(task.missing||[]),...(task.errors||[]).map(item=>item?.message||item?.code)].filter(Boolean),resolution=task.resolution||{},fallback=[{id:"official_source",title:"Agent: pełna naprawa ze źródeł",description:"Producent, katalog Allegro, kategoria, parametry i GPSR.",effect:"Najwyższy priorytet • bez publikacji",recommended:true},{id:"verified_data",title:"Tylko dane pewne",description:"Deterministyczne dane bez tworzenia niepewnej treści.",effect:"Pozostałe braki wrócą jako decyzja"},{id:"manual_editor",title:"Decyzja ręczna w edytorze",description:"Otwórz kartotekę dokładnie w miejscu wymagającym uzupełnienia.",effect:"Bez automatycznej naprawy"}],options=Array.isArray(resolution.options)&&resolution.options.length?resolution.options:fallback,rememberId="agentDecisionRemember-"+String(task.id).replace(/[^a-zA-Z0-9_-]/g,""),solutionFormId="agentSolutionForm-"+String(task.id).replace(/[^a-zA-Z0-9_-]/g,"");
+    return `<article class="agent-product-decision repair"><div class="agent-product-decision-problem"><span>!</span><div><b>${esc(task.name||task.productName||`Produkt ${task.productId}`)}</b><small>NAPRAWA OFERTY ALLEGRO • ID ${esc(task.productId)} • problem ${esc(resolution.signature||"do rozstrzygnięcia")}</small><p>${esc(missing.slice(0,8).join(" • ")||task.error||"Kartoteka wymaga uzupełnienia pewnych danych.")}</p>${task.automaticPolicy?.description?`<p><b>Reguła Agenta wykonywana automatycznie:</b> ${esc(task.automaticPolicy.description)}</p>`:""}</div></div><div class="agent-resolution-options">${options.map(option=>`<button class="${option.recommended?"agent-suggestion":""}" onclick="agentAIWybierzRozwiazanie(${jsArg(task.id)},${jsArg(task.productId)},${jsArg(option.id)})"><span>${option.custom?"🧠":option.id==="manual_editor"?"✏️":option.id==="verified_data"?"✓":"🤖"}</span><b>${esc(option.title)}</b><small>${esc(option.description)}</small><em>${option.custom?`TRWAŁE ROZWIĄZANIE • użyto ${esc(option.learnedCount||0)}×`:option.recommended?(resolution.learnedChoice?`PROPOZYCJA Z PAMIĘCI • ${esc(resolution.learnedCount||option.learnedCount||1)}×`:"PROPOZYCJA AGENTA"):esc(option.effect||"")}</em></button>`).join("")}</div><details id="${esc(solutionFormId)}" class="agent-custom-solution"><summary>＋ Dodaj własne rozwiązanie do pamięci Agenta</summary><div><label><span>Nazwa rozwiązania</span><input data-solution-title maxlength="120" placeholder="Np. popraw EAN według cyfry kontrolnej"></label><label><span>Dokładna procedura</span><textarea data-solution-description rows="3" maxlength="1000" placeholder="Opisz, z jakiego potwierdzonego źródła i według jakiej reguły Agent ma rozwiązywać taki problem."></textarea></label><label><span>Bezpieczny sposób wykonania</span><select data-solution-base><option value="official_source">Pełna naprawa ze źródeł</option><option value="verified_data">Tylko dane pewne, bez redakcji AI</option><option value="manual_editor">Otwórz edytor do decyzji ręcznej</option></select></label><button class="btn" type="button" onclick="agentAIDodajRozwiazanie(${jsArg(task.id)},${jsArg(task.productId)},${jsArg(solutionFormId)})">🧠 Zapisz rozwiązanie na serwerze</button><small>Rozwiązanie będzie proponowane przy tej samej klasie problemu. Nie omija walidacji i nie publikuje oferty.</small></div></details><label class="agent-decision-remember"><input id="${esc(rememberId)}" type="checkbox" checked><span><b>Zapamiętaj mój wybór</b><small>Agent zapisze wybór, wykona bezpieczną część tej reguły w podobnych zadaniach i pozostawi niepewne dane do decyzji. Nie opublikuje oferty bez zatwierdzenia.</small></span></label></article>`;
+  }).join("");
+  return `<section id="agent-product-decisions" class="panel agent-product-decisions"><header><div><span class="order-pro-label">NAPRAWA OFERT ALLEGRO • WYBÓR ADMINISTRATORA</span><h2>Problemy wymagające decyzji (${total})</h2><p>Agent przygotował kilka bezpiecznych wariantów. Wybierz jeden — system wykona go i nauczy się Twojej decyzji dla podobnych problemów.</p></div><span class="lvl ${total?"lvl-ostrzezenie":"lvl-ok"}">${total?`pokazano ${shown.length} z ${total}`:"brak oczekujących"}</span></header><div>${rows||`<div class="agent-decision-empty"><span>✓</span><div><b>Nie czeka żadna decyzja dotycząca naprawy oferty</b><small>Nowy rzeczywisty problem pojawi się tutaj z wariantami rozwiązania.</small></div></div>`}${shown.length<total?`<button class="btn ghost agent-decisions-more" onclick="agentAIProduktoweDecyzjeLimit+=25;const live=$('agentAILivePanel');if(live)live.innerHTML=agentAIPracaNaZywoHTML();">Pokaż kolejne (${total-shown.length})</button>`:""}</div></section>`;
+}
+function agentAIPracaNaZywoHTML(){
+  const runtime=agentAIRuntime.runtime||{},worker=runtime.worker||{},queue=runtime.queue||{},counts=queue.counts||{},current=runtime.currentRun,work=runtime.currentWork,publicationCounts=agentAIRuntime.publicationQueue?.counts||{},vonQueue=agentAIRuntime.vonHalsky?.sync?.publicationQueue||{},vonRunning=["running","queued"].includes(String(vonQueue.status||""))?Number(vonQueue.current??vonQueue.currentBatchIds?.length)||0:0,vonRemaining=Math.max(0,Number(vonQueue.remaining??((vonQueue.productIds||[]).length-(vonQueue.completedIds||[]).length))||0);
+  const working=!!(current||work||worker.currentTask||Number(counts.processing||0)+Number(counts.delivering||0)+Number(publicationCounts.running||0)+vonRunning);
+  const exact=work?`${work.productName||"Zadanie"}: ${work.action||"operacja"} — ${work.phase||"wykonywanie"} → ${work.target||work.channel||"system"}`:"";
+  return `<section class="agent-live-truth ${working?"is-working":"is-waiting"}"><div><span>${working?"⚙":"✓"}</span><div><small>STAN POTWIERDZONY PRZEZ SERWER</small><b>${working?"Agent wykonuje teraz konkretną czynność":"Wszystkie procesy tła są czujne"}</b><p>${esc(exact||current?.summary||worker.currentTask||(agentAIRuntime.loaded?"Nie ma zaległej czynności do wykonania. Worker Agenta, publikacje obu kanałów i automat SEO pozostają aktywne zgodnie z własnym harmonogramem.":"Łączenie z procesami wykonawczymi…"))}</p></div></div><div><span><small>W toku</small><b>${esc((counts.processing||0)+(counts.delivering||0)+(work?1:0)+Number(publicationCounts.running||0)+vonRunning)}</b></span><span><small>Publikacje oczekujące</small><b>${esc(Number(publicationCounts.queued||0)+vonRemaining)}</b></span><span><small>Decyzje produktowe</small><b>${esc(agentAIMetrykiScalone().productDecisions)}</b></span><a class="btn" href="#/admin/agent-ai">Wydaj polecenie</a></div></section>${agentAIPublikacjaKolejkaHTML()}${agentAIPriorytetPracyHTML()}${agentAIProduktoweDecyzjeHTML()}<div id="agentAIRuntimePanel">${agentAIRuntimePanelHTML()}</div>`;
+}
+function agentAIProductReportChannel(channel="all"){
+  return {all:"Wszystkie kanały",store:"Sklep",allegro:"Allegro",von_halsky:"Von Halsky"}[channel]||"Wszystkie kanały";
+}
+function agentAIProductReportStatus(status=""){
+  return {working:["W toku","lvl-info"],ready:["Gotowe","lvl-ok"],needs_data:["Do uzupełnienia","lvl-ostrzezenie"],decision:["Decyzja / błąd","lvl-blad"],not_started:["Nie rozpoczęto","lvl-info"]}[status]||["Sprawdzanie","lvl-info"];
+}
+function agentAIProductReportChannelCell(channel={},channelId="store"){
+  const state=channel.ready?"ready":channel.prepared?"attention":"empty",label=channel.ready?"gotowe":channel.prepared?"wymaga uzupełnienia":"nie rozpoczęto";
+  const saved=Array.isArray(channel.savedFields)?channel.savedFields.length:0,scope={store:"pól sklepu",allegro:"pól Allegro",von_halsky:"pól Von Halsky"}[channelId]||"pól";
+  return `<span class="agent-report-channel ${state}"><i>${channel.ready?"✓":channel.prepared?"!":"○"}</i><b>${label}</b><small>${channel.updatedAt?esc(agentAIRuntimeCzas(channel.updatedAt)):"brak zapisu"}</small>${saved?`<em>zapisano ${esc(saved)} ${scope}</em>`:""}</span>`;
+}
+function agentAIProductReportHTML(){
+  const state=agentAIProductReport,data=state.data||{},summary=data.summary||{},items=Array.isArray(data.items)?data.items:[],filters=agentAIProductReportFilters||{},pages=Math.max(1,Number(data.pages)||1),page=Math.min(pages,Number(data.page||filters.page)||1);
+  if(state.loading&&!state.loaded)return `<section class="panel agent-report-loading"><div class="agent-runtime-loading"><i></i><div><b>Pobieram raport centralnych kartotek…</b><small>Liczenie odbywa się na serwerze bez ładowania całego katalogu do przeglądarki.</small></div></div></section>`;
+  if(state.error&&!data.available)return `<section class="panel"><div class="backend-note warn"><b>Nie udało się pobrać raportu produktów.</b><p>${esc(state.error)}</p><button class="btn" onclick="agentAIProductReportPobierz(false)">Ponów</button></div></section>`;
+  const progress=(ready,total)=>total?Math.round(Number(ready||0)/Number(total)*100):0;
+  const cards=[
+    ["working","⚙",summary.working||0,"Kartoteki w trakcie"],
+    ["decision","!",summary.decision||0,"Kartoteki z błędem"],
+    ["ready","✓",summary.full_review_confirmed||0,"Pełna kontrola zakończona"],
+    ["ready_to_list","↗",summary.ready_to_list||0,"Gotowe do wystawienia"],
+    ["needs_update","↻",summary.needs_update||0,"Oferty do aktualizacji"],
+    ["publication_decisions","◉",agentAIMetrykiScalone().productDecisions||0,"Decyzje publikacji","link"]
+  ];
+  return `<section class="agent-product-report">
+    <section class="agent-report-overview">
+      <article><div><span>🛍</span><b>Sklep</b><small>${esc(summary.store_prepared||0)} opisów zapisanych</small></div><strong>${progress(summary.store_ready,summary.total)}%</strong><progress max="100" value="${progress(summary.store_ready,summary.total)}"></progress></article>
+      <article><div><span>🟠</span><b>Allegro</b><small>${esc(summary.allegro_prepared||0)} produktów przygotowanych</small></div><strong>${progress(summary.allegro_ready,summary.total)}%</strong><progress max="100" value="${progress(summary.allegro_ready,summary.total)}"></progress></article>
+      <article><div><span>📦</span><b>Von Halsky</b><small>${esc(summary.von_prepared||0)} produktów sprawdzonych</small></div><strong>${progress(summary.von_ready,summary.total)}%</strong><progress max="100" value="${progress(summary.von_ready,summary.total)}"></progress></article>
+    </section>
+    <section class="agent-report-counters">${cards.map(([id,icon,count,label,kind])=>kind==="link"?`<a href="#/admin/agent-ai/praca"><span>${icon}</span><b>${esc(count)}</b><small>${esc(label)}</small></a>`:`<button type="button" class="${filters.status===id||filters.listing===id?"active":""}" onclick="${["ready_to_list","needs_update"].includes(id)?`agentAIProductReportFiltr('listing','${id}')`:`agentAIProductReportFiltr('status','${id}')`}"><span>${icon}</span><b>${esc(count)}</b><small>${esc(label)}</small></button>`).join("")}</section>
+    <section class="panel agent-report-catalog">
+      <header><div><span class="order-pro-label">TRWAŁY ZAPIS • RAPORT NA ŻYWO</span><h2>Produkty obsłużone przez Agenta</h2><p>Wiersz pojawia się lub zmienia dopiero po rzeczywistym zdarzeniu i zapisie centralnej kartoteki.</p></div><span class="agent-report-live"><i></i> automatyczne odświeżanie co 10 s</span></header>
+      <div class="agent-report-filters">
+        <label class="search-wide">Szukaj<input id="agentAIProductReportSearch" value="${esc(filters.query||"")}" placeholder="Nazwa, EAN, SKU, EXTERNAL_ID lub producent…" oninput="agentAIProductReportSzukaj(this)" autocomplete="off"></label>
+        <label>Kanał<select onchange="agentAIProductReportFiltr('channel',this.value)">${[["all","Wszystkie"],["store","Sklep"],["allegro","Allegro"],["von_halsky","Von Halsky"]].map(([id,label])=>`<option value="${id}" ${filters.channel===id?"selected":""}>${label}</option>`).join("")}</select></label>
+        <label>Stan pracy<select onchange="agentAIProductReportFiltr('status',this.value)">${[["all","Wszystkie"],["working","W toku"],["ready","Gotowe"],["needs_data","Do uzupełnienia"],["decision","Decyzja / błąd"],["not_started","Nie rozpoczęto"]].map(([id,label])=>`<option value="${id}" ${filters.status===id?"selected":""}>${label}</option>`).join("")}</select></label>
+        <label>Publikacja<select onchange="agentAIProductReportFiltr('listing',this.value)">${[["all","Wszystkie"],["ready_to_list","Gotowe do wystawienia"],["needs_update","Do aktualizacji"],["already_listed","Już na Allegro"],["hidden","Ukryte w sprzedaży"]].map(([id,label])=>`<option value="${id}" ${filters.listing===id?"selected":""}>${label}</option>`).join("")}</select></label>
+        <label>Na stronie<select onchange="agentAIProductReportFiltr('limit',this.value)">${[25,50,100,250].map(limit=>`<option value="${limit}" ${Number(filters.limit)===limit?"selected":""}>${limit}</option>`).join("")}</select></label>
+        <button class="btn ghost" onclick="agentAIProductReportWyczysc()">Wyczyść filtry</button>
+      </div>
+      <div class="agent-report-result-meta"><div><b>${esc(data.total||0)} wyników</b><small>${esc(agentAIProductReportChannel(filters.channel))} • aktualizacja ${data.revision?esc(agentAIRuntimeCzas(data.revision)):"brak zmian"}</small></div><button class="btn ghost" onclick="agentAIProductReportPobierz(false)">↻ Odśwież teraz</button></div>
+      <div class="agent-report-table">
+        <div class="agent-report-table-head"><span>Produkt</span><span>Sklep</span><span>Allegro</span><span>Von Halsky</span><span>Wynik i działanie</span></div>
+        ${items.map(item=>{const missing=item.task?.missing||[],channelsReady=item.store?.ready&&item.allegro?.ready&&item.vonHalsky?.ready,status=channelsReady&&item.status==="needs_data"&&!missing.length?["Kartoteka gotowa","lvl-ok"]:agentAIProductReportStatus(item.status),review=item.fullReview||{},reviewDue=review.verificationDueAt?new Date(review.verificationDueAt).toLocaleDateString("pl-PL"):"";return `<article class="status-${esc(item.status)}">
+          <div class="agent-report-product">${item.image?`<img src="${esc(item.image)}" alt="" loading="lazy">`:`<span>📦</span>`}<div><b>${esc(item.name||`Produkt ${item.productId}`)}</b><small>ID ${esc(item.productId)} • EAN ${esc(item.ean||"—")}</small><em>${esc(item.producer||"producent nieustalony")}</em></div></div>
+          ${agentAIProductReportChannelCell(item.store,"store")}${agentAIProductReportChannelCell(item.allegro,"allegro")}${agentAIProductReportChannelCell(item.vonHalsky,"von_halsky")}
+          <div class="agent-report-result"><span class="lvl ${status[1]}">${esc(status[0])}</span>${review.current?`<b>✓ Pełna kontrola zapisana</b><small>Nie wymaga natychmiastowej weryfikacji${reviewDue?` • następna po ${esc(reviewDue)}`:""}</small>`:item.allegro?.readyToList?`<b>Gotowy do wystawienia na Allegro</b>`:item.allegro?.needsUpdate?`<b>Oferta wymaga aktualizacji</b>`:""}${missing.length&&!review.current?`<small>Braki: ${esc(missing.slice(0,4).join(", "))}</small>`:!review.current?`<small>Ostatni zapis ${esc(agentAIRuntimeCzas(item.updatedAt))}</small>`:""}<div><a class="btn ghost" href="#/admin/produkty/edytuj/${encodeURIComponent(item.productId)}">Edytuj</a>${item.allegro?.readyToList?`<a class="btn" href="#/admin/allegro/oferty">Wystaw w Allegro</a>`:item.allegro?.needsUpdate?`<a class="btn" href="#/admin/allegro/oferty">Aktualizuj ofertę</a>`:""}</div></div>
+        </article>`;}).join("")||`<div class="agent-ops-empty"><span>✓</span><b>Brak produktów dla wybranych filtrów</b><small>Widok odświeży się automatycznie, gdy wpłynie nowe zdarzenie.</small></div>`}
+      </div>
+      ${pages>1?`<nav class="agent-report-pagination"><button class="btn ghost" onclick="agentAIProductReportFiltr('page',${page-1})" ${page<=1?"disabled":""}>← Poprzednia</button><span>Strona <b>${page}</b> z <b>${pages}</b></span><button class="btn ghost" onclick="agentAIProductReportFiltr('page',${page+1})" ${page>=pages?"disabled":""}>Następna →</button></nav>`:""}
+    </section>
+  </section>`;
+}
+function agentAIProductReportPageHTML(){return `<div id="agentAIProductReportPanel">${agentAIProductReportHTML()}</div>`;}
+function agentAIObszarHTML(id,title,description,content,open=false,badge=""){
+  return `<details class="agent-workspace-fold" id="${esc(id)}" ${open?"open":""}><summary><span><b>${esc(title)}</b><small>${esc(description)}</small></span>${badge?`<em>${esc(badge)}</em>`:""}<i>⌄</i></summary><div>${content}</div></details>`;
+}
+function agentAIOtworzObszar(id){
+  const area=document.getElementById(String(id||""));if(!area)return;area.open=true;area.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function agentAIObslugaPrzewodnikHTML(){
+  const m=agentAIMetrykiScalone();
+  return `<section class="agent-action-guide" data-agent-action-guide aria-label="Sposób pracy ze sprawami"><article><span>1</span><div><b>Otwórz sprawę</b><small>Przycisk zawsze wykonuje kontrolę albo prowadzi do właściwego modułu.</small></div></article><article><span>2</span><div><b>Podejmij decyzję</b><small>${m.inlineDecisions} czynności czeka bezpośrednio w Agencie; pozostałe sprawy otwierają dokładne miejsce działania.</small></div></article><article><span>3</span><div><b>Sprawdź wynik</b><small>Sprawa znika dopiero po ponownym odczycie przyczyny z serwera.</small></div></article></section>`;
+}
+function agentAIObslugaScalonaHTML(){
+  const m=agentAIMetrykiScalone();
+  return `${agentAIObslugaPrzewodnikHTML()}<section class="panel agent-operations-board"><header><div><span class="order-pro-label">JEDNO ŹRÓDŁO • SERWER</span><h2>Sprawy całego sklepu</h2><p>Każda pozycja ma właściciela, sposób wykonania i warunek zakończenia. Znika automatycznie po usunięciu rzeczywistej przyczyny.</p></div><button class="btn ghost" onclick="agentAIOperationsPobierz(false)">↻ Odśwież stan</button></header><div data-agent-operations-view="full">${agentAIOperationsHTML("full")}</div></section>${agentAIObszarHTML("agent-work-decisions","Decyzje dostępne bezpośrednio w Agencie","Tylko decyzje mające komplet wariantów i działający przycisk wykonania. Pozostałe karty powyżej otwierają właściwy moduł.",agentAIDecyzjeScaloneHTML(),m.inlineDecisions>0,`${m.inlineDecisions} otwartych`)}`;
+}
+function agentAIDecyzjeScaloneHTML(){
+  const items=Array.isArray(agentAISpecjalisci.data?.decisions)?agentAISpecjalisci.data.decisions:[];
+  return `<section data-agent-decisions-view data-agent-decision-total="${esc(agentAIMetrykiScalone().inlineDecisions)}" class="agent-unified-decisions">${agentAIProduktoweDecyzjeHTML()}<div class="agent-decision-list">${items.map(agentAISpecjalistaDecyzjaHTML).join("")||`<div class="agent-decision-empty"><span>✓</span><div><b>Nie czeka żadna dodatkowa decyzja specjalisty</b><small>Nowa karta pojawi się dopiero po rzeczywistym zdarzeniu wymagającym administratora.</small></div></div>`}</div>${agentAIDecyzjeMagazynowePanelHTML()}</section>`;
+}
+function agentAIProduktyScaloneHTML(requested="produkty"){
+  const report=agentAIProductReportPageHTML(),sources=requested==="producenci"?`${agentAILinkiProducentowPanelHTML()}${producenciKartotekaPanelHTML()}`:"";
+  return `${report}<section class="agent-product-tools"><a href="#/admin/produkty/dodaj"><span>＋</span><div><b>Dodaj ręcznie</b><small>zawsze pusta kartoteka produktu</small></div></a><a href="#/admin/produkty/z-linku"><span>🔗</span><div><b>Dodaj z jednego linku</b><small>pełne dane, duplikat i szkic do kontroli</small></div></a><a href="#/admin/produkty/z-pliku"><span>⇧</span><div><b>Import wielu linków</b><small>trwała kolejka źródeł bez duplikatów</small></div></a><a href="#/admin/asortyment/jakosc"><span>✓</span><div><b>Jakość katalogu</b><small>duplikaty i brakujące fakty</small></div></a><button type="button" onclick="location.hash='#/admin/agent-ai/producenci'"><span>🏭</span><div><b>Źródła i producenci</b><small>kontakty oraz linki pomocnicze</small></div></button></section>${sources?`<section class="agent-product-sources">${sources}</section>`:""}`;
+}
+function agentAIZasadyScaloneHTML(requested="zasady"){
+  const decisions=(agentAISpecjalisci.data?.decisions||[]).length,memory=(agentAIPamiec||[]).length;
+  return `<section class="agent-section-directory"><button type="button" onclick="agentAIOtworzObszar('agent-auto-permissions')"><span>🛡️</span><div><b>Co Agent może zrobić</b><small>uprawnienia i potwierdzenia</small></div></button><button type="button" onclick="agentAIOtworzObszar('agent-auto-specialists')"><span>✦</span><div><b>Role i modele</b><small>${decisions} wyjątków do kontroli</small></div></button><button type="button" onclick="agentAIOtworzObszar('agent-auto-memory')"><span>🧠</span><div><b>Pamięć procedur</b><small>${memory} zapisanych reguł</small></div></button></section><section class="agent-automation-overview"><article><span>✦</span><div><b>GPT‑5.4 nano + GPT‑5.6 Luna</b><small>GPT‑5.4 nano obsługuje pracę podstawową, Luna tylko kontrolowaną eskalację jakości.</small></div><em>${decisions} wyjątków</em></article><article><span>🛡️</span><div><b>Granice autonomii</b><small>Wyraźny podział: wykonaj, przygotuj albo zapytaj administratora.</small></div><em>ochrona aktywna</em></article><article><span>🧠</span><div><b>Pamięć procedur</b><small>Reguły wspólne dla wszystkich urządzeń administratorów.</small></div><em>${memory} reguł</em></article></section>${agentAIObszarHTML("agent-auto-permissions","Uprawnienia i potwierdzenia","Najpierw jedno źródło zasad określających, co Agent może wykonać sam.",agentAIUprawnieniaPanelHTML(),requested==="uprawnienia"||requested==="zasady","chronione")}${agentAIObszarHTML("agent-auto-specialists","Role pomocnicze i modele","Codex wybiera właściwą rolę; model pomocniczy nie otrzymuje prawa bezpośredniego zapisu.",agentAISpecjalisciPanelHTML(),requested==="specjalisci",`${decisions} wyjątków`)}${agentAIObszarHTML("agent-auto-memory","Pamięć i procedury","Trwałe reguły pracy używane przy kolejnych zdarzeniach.",agentAIPamiecPanelHTML(),requested==="pamiec",`${memory} reguł`)}`;
+}
+function agentAIHistoriaStatusGrupa(status="info"){const value=String(status||"").toLowerCase();if(["success","completed","confirmed","done"].includes(value))return "success";if(["error","failed","cancelled","canceled"].includes(value))return "error";if(["running","working","processing","queued"].includes(value))return "working";return "info";}
+function agentAIHistoriaUstawFiltr(field,value){if(!["status","source"].includes(field))return;agentAIHistoriaFilters={...agentAIHistoriaFilters,[field]:String(value||"all")};const view=document.querySelector("[data-agent-history-view]");if(view)view.outerHTML=agentAIHistoriaScalonaHTML();}
+function agentAIHistoriaSzukaj(input){agentAIHistoriaFilters={...agentAIHistoriaFilters,query:String(input?.value||"")};const view=document.querySelector("[data-agent-history-view]");if(!view)return;const start=input?.selectionStart,end=input?.selectionEnd;view.outerHTML=agentAIHistoriaScalonaHTML();const next=$("agentAIHistorySearch");if(next){next.focus({preventScroll:true});if(Number.isInteger(start))next.setSelectionRange(start,end);}}
+function agentAIHistoriaWyczysc(){agentAIHistoriaFilters={query:"",status:"all",source:"all"};const view=document.querySelector("[data-agent-history-view]");if(view)view.outerHTML=agentAIHistoriaScalonaHTML();}
+function agentAIHistoriaScalonaHTML(){
+  const runtime=agentAIRuntime.runtime||{},events=runtime.eventQueue||{},activity=Array.isArray(runtime.activity)?runtime.activity:[],recentEvents=Array.isArray(events.recent)?events.recent:[],runs=Array.isArray(agentAIPlanStan.history)?agentAIPlanStan.history:[],decisions=Array.isArray(agentAISpecjalisci.data?.recentDecisions)?agentAISpecjalisci.data.recentDecisions:[],filters=agentAIHistoriaFilters||{};
+  const raw=[...activity.map(item=>({at:item.at,title:item.productName||item.title||"Działanie Agenta",detail:item.detail||item.error||item.message||item.source||"",status:item.status||"info",source:"Agent"})),...recentEvents.map(item=>({at:item.completedAt||item.startedAt||item.createdAt,title:item.payload?.action||item.type||"Zdarzenie",detail:`${item.area||"system"} • ${item.entityId||"bez identyfikatora"}${item.error?` • ${item.error}`:""}`,status:item.status||"info",source:"Kolejka zdarzeń"}))].sort((a,b)=>String(b.at||"").localeCompare(String(a.at||""))).slice(0,250);
+  const grouped=[...raw.reduce((map,item)=>{const key=[item.title,item.detail,item.status,item.source].map(value=>String(value||"").toLowerCase()).join("|");if(map.has(key))map.get(key).count+=1;else map.set(key,{...item,count:1});return map;},new Map()).values()];
+  const query=String(filters.query||"").trim().toLowerCase(),rows=grouped.filter(item=>(filters.status==="all"||!filters.status||agentAIHistoriaStatusGrupa(item.status)===filters.status)&&(filters.source==="all"||!filters.source||item.source===filters.source)&&(!query||`${item.title} ${item.detail} ${item.source}`.toLowerCase().includes(query))).slice(0,100),activeFilters=Number(!!query)+Number(filters.status&&filters.status!=="all")+Number(filters.source&&filters.source!=="all");
+  return `<section data-agent-history-view class="agent-history-unified"><section class="agent-history-metrics"><article><span>✓</span><div><b>${raw.filter(item=>agentAIHistoriaStatusGrupa(item.status)==="success").length}</b><small>potwierdzonych wykonań</small></div></article><article><span>◉</span><div><b>${recentEvents.length}</b><small>sygnałów serwera</small></div></article><article><span>🛡</span><div><b>${decisions.length}</b><small>rozstrzygniętych decyzji</small></div></article><article><span>⌘</span><div><b>${runs.length}</b><small>audytów wykonawczych</small></div></article></section><section class="panel agent-history-stream"><header><div><span class="order-pro-label">POSTGRESQL • DZIENNIK SERWERA</span><h2>Historia wykonanych działań</h2><p>Powtarzające się wpisy są zgrupowane. Filtry nie zmieniają danych źródłowych.</p></div><button class="btn ghost" onclick="Promise.all([agentAIRuntimePobierz(false),agentAISpecjalisciPobierz(true),agentAIPobierzHistorieWykonan(true)])">↻ Odśwież</button></header><section class="agent-history-filters"><label class="search-wide"><span>Szukaj w historii</span><input id="agentAIHistorySearch" value="${esc(filters.query||"")}" oninput="agentAIHistoriaSzukaj(this)" placeholder="Produkt, błąd, działanie lub identyfikator…"></label><label><span>Wynik</span><select onchange="agentAIHistoriaUstawFiltr('status',this.value)"><option value="all" ${filters.status==="all"?"selected":""}>Wszystkie wyniki</option><option value="success" ${filters.status==="success"?"selected":""}>Zakończone poprawnie</option><option value="error" ${filters.status==="error"?"selected":""}>Błędy i anulacje</option><option value="working" ${filters.status==="working"?"selected":""}>W toku i kolejka</option><option value="info" ${filters.status==="info"?"selected":""}>Informacje</option></select></label><label><span>Źródło</span><select onchange="agentAIHistoriaUstawFiltr('source',this.value)"><option value="all" ${filters.source==="all"?"selected":""}>Wszystkie źródła</option><option value="Agent" ${filters.source==="Agent"?"selected":""}>Agent</option><option value="Kolejka zdarzeń" ${filters.source==="Kolejka zdarzeń"?"selected":""}>Kolejka zdarzeń</option></select></label><button class="btn ghost" onclick="agentAIHistoriaWyczysc()" ${activeFilters?"":"disabled"}>Wyczyść (${activeFilters})</button></section><div class="agent-history-result"><b>${rows.length} grup wpisów</b><small>${raw.length} zdarzeń źródłowych • ${grouped.length} po zgrupowaniu</small></div><div>${rows.map(item=>{const statusGroup=agentAIHistoriaStatusGrupa(item.status);return `<article class="${esc(statusGroup)}"><span>${statusGroup==="success"?"✓":statusGroup==="error"?"×":statusGroup==="working"?"…":"•"}</span><div><b>${esc(item.title)}</b><small>${esc(item.detail)}</small>${item.count>1?`<strong>Powtórzono ${esc(item.count)}× — pokazano najnowszy wpis</strong>`:""}</div><em>${esc(item.source)}<time>${esc(agentAIRuntimeCzas(item.at))}</time></em></article>`;}).join("")||`<div class="agent-ops-empty">Brak wpisów pasujących do filtrów.</div>`}</div></section></section>`;
+}
+function agentAIScalonaTrescSekcji(active,analysis,requested,score){
+  if(active==="praca")return `<div id="agentAILivePanel">${agentAIPracaNaZywoHTML()}</div>`;
+  if(active==="obsluga")return agentAIObslugaScalonaHTML();
+  if(active==="produkty")return agentAIProduktyScaloneHTML(requested);
+  if(active==="zasady")return agentAIZasadyScaloneHTML(requested);
+  if(active==="historia")return agentAIHistoriaScalonaHTML();
+  return agentAIPulpitScalonyHTML(score);
+}
+widokAdminAgentAI=function(section="pulpit"){
+  const requested=String(section||"pulpit").toLowerCase(),active=agentAISekcjaKanoniczna(requested),allSections=["pulpit","praca","obsluga","produkty","zasady","historia"],score=Math.max(0,Math.min(100,Number(agentAIOperations.data?.score??0))),runtimeAge=Date.now()-Number(agentAIRuntime.updatedAt||0),operationsAge=Date.now()-Number(agentAIOperations.updatedAt||0);
+  if((!agentAIRuntime.loaded||runtimeAge>60_000)&&!agentAIRuntime.loading)setTimeout(()=>agentAIRuntimePobierz(true),0);
+  if(allSections.includes(active))setTimeout(()=>agentAIRuntimePolling(),0);
+  if(allSections.includes(active)&&(!agentAIOperations.loaded||operationsAge>30_000)&&!agentAIOperations.loading)setTimeout(()=>agentAIOperationsPobierz(true),0);
+  if(active==="produkty"&&(!agentAIProductReport.loaded||Date.now()-Number(agentAIProductReport.updatedAt||0)>30_000)&&!agentAIProductReport.loading)setTimeout(()=>agentAIProductReportPobierz(true),0);
+  if(allSections.includes(active)&&!agentAISpecjalisci.loaded&&!agentAISpecjalisci.loading)setTimeout(()=>agentAISpecjalisciPobierz(true),0);
+  if(allSections.includes(active))setTimeout(()=>agentAISpecjalisciPolling(),0);
+  const decisionAge=Date.now()-(Date.parse(agentAIDecyzjeMagazynowe.updatedAt)||0);if(["pulpit","obsluga"].includes(active)&&(!agentAIDecyzjeMagazynowe.loaded||decisionAge>60_000)&&!agentAIDecyzjeMagazynowe.loading)setTimeout(()=>agentAIDecyzjeMagazynowePobierz(true),0);
+  return adminSzkielet("/admin/agent-ai",`${agentAINawigacjaScalonaHTML(active)}${agentAIKontekstHTML()}${agentAIPodstronaScalonyNaglowekHTML(active)}<main class="agent-workspace agent-workspace-${active}">${agentAIScalonaTrescSekcji(active,null,requested,score)}</main>`);
+};

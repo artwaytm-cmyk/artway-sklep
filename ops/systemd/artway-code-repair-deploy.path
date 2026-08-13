@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for a tested Artway Agent code repair
+
+[Path]
+PathExists=/srv/artway/ops/code-repairs/pending.json
+Unit=artway-code-repair-deploy.service
+
+[Install]
+WantedBy=multi-user.target

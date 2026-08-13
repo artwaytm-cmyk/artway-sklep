@@ -1,0 +1,43 @@
+[Unit]
+Description=Artway-TM daily free SEO and catalog quality cycle
+Wants=network-online.target postgresql.service artway-backend.service
+After=network-online.target postgresql.service artway-backend.service
+
+[Service]
+Type=oneshot
+User=artway
+Group=artway
+WorkingDirectory=/srv/artway/shop
+EnvironmentFile=/srv/artway/shop/.env.server
+EnvironmentFile=-/srv/artway/ops/secrets/ai.env
+Environment=NODE_ENV=production
+Environment=ARTWAY_STORE_DRIVER=postgres
+Environment=DATABASE_URL=postgresql://artway_app@localhost/artway?host=/var/run/postgresql
+Environment=ARTWAY_INTERNAL_ORIGIN=http://127.0.0.1:3000
+ExecStart=/usr/bin/node /srv/artway/shop/scripts/run-seo-daily.mjs
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=true
+PrivateTmp=true
+PrivateMounts=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UMask=0077

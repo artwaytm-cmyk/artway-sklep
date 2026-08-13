@@ -1,0 +1,13 @@
+[Unit]
+Description=Artway-TM przyrostowa kopia PITR PostgreSQL
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+ExecStart=/usr/bin/pgbackrest --stanza=artway --type=incr backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=90min

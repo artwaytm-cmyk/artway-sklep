@@ -1,0 +1,120 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { linkedProductSourceMaterial, normalizeEditorialTitle, prepareLinkedProductEditorial } from '../src/backend/lib/domain/product-editorial-pipeline.mjs';
+import { automaticEditorialAssessment, normalizeChannelEditorialResult, productPatch } from '../src/backend/lib/domain/agent-specialists.mjs';
+
+const result = (id, specialist, fields) => ({
+  id, specialist, model: 'gpt-5-nano',
+  result: {
+    confidence: 0.97, complianceStatus: 'ready', readyForApproval: true, warnings: [], missingFacts: [],
+    fields: Object.entries(fields).map(([key, value]) => ({ key, value })),
+  },
+});
+function specialistResult(input) {
+  if (input.specialist === 'product_content') return result('store-1', input.specialist, {
+    title: 'Origami 3D – Kwiaty kreatywny zestaw',
+    short_description: 'Stwórz efektowne kompozycje z papierowych modułów i rozwijaj cierpliwość.',
+    long_description: '<h2>Kreatywna zabawa</h2><p>Zestaw pozwala przygotować przestrzenne kwiaty zgodnie z instrukcją.</p><ul><li>Ćwiczy precyzję</li><li>Daje satysfakcję z własnej pracy</li></ul>',
+    seo_title: 'Origami 3D Kwiaty – zestaw kreatywny', seo_description: 'Zestaw Origami 3D Kwiaty do tworzenia przestrzennych dekoracji.', seo_keywords: 'origami 3D, kwiaty',
+  });
+  if (input.specialist === 'allegro_offer') return result('allegro-1', input.specialist, {
+    allegro_title: 'Origami 3D Kwiaty Alexander zestaw kreatywny',
+    allegro_description: '<h2>Przestrzenne kwiaty</h2><p>Zestaw pozwala tworzyć dekoracyjne kwiaty z papierowych modułów i ćwiczyć dokładność.</p><ul><li>Czytelna instrukcja</li><li>Kreatywna praca</li></ul>',
+  });
+  return result('vh-1', input.specialist, {
+    von_halsky_title: 'Origami 3D Kwiaty Alexander',
+    von_halsky_short_description: 'Kreatywny zestaw do tworzenia przestrzennych kwiatów z papierowych modułów.',
+    von_halsky_description: '<h2>Kreatywne origami</h2><p>Zestaw pozwala przygotować przestrzenne kwiaty z papierowych modułów i rozwijać dokładność.</p><ul><li>Czytelna instrukcja</li><li>Efektowna dekoracja</li></ul>',
+  });
+}
+
+test('źródło pozostaje materiałem faktów, a trzy kanały dostają niezależne wersje i statusy', async () => {
+  const calls = [];
+  const raw = { nazwa: 'ORIGAMI 3D KWIATY | Sklep producenta', opisKrotki: 'Opis skopiowany ze źródła.', opis: 'Surowy opis producenta.', producent: 'Alexander', ean: '5906018022889', sourceUrl: 'https://example.test/product' };
+  const prepared = await prepareLinkedProductEditorial(raw, { runSpecialist: async (input) => { calls.push(input); return specialistResult(input); }, now: () => new Date('2026-07-18T12:00:00.000Z') });
+
+  assert.deepEqual(calls.map((call) => call.specialist), ['product_content', 'allegro_offer', 'von_halsky_offer']);
+  assert.equal(calls[0].context.rule, 'raw_source_is_facts_only');
+  assert.equal(calls[0].target.productId, '');
+  assert.equal(prepared.product.sourceMaterial.title, raw.nazwa);
+  assert.equal(prepared.product.sourceMaterial.longDescription, raw.opis);
+  assert.notEqual(prepared.product.nazwa, raw.nazwa);
+  assert.notEqual(prepared.product.opis, prepared.product.allegroDescription);
+  assert.notEqual(prepared.product.opis, prepared.product.vonHalskyDescription);
+  assert.equal(prepared.product.vonHalskyContentMode, 'custom');
+  assert.ok(Array.isArray(prepared.product.allegroDescriptionSections));
+  assert.equal(prepared.product.contentEditorial.status, 'ready');
+  assert.equal(prepared.product.contentEditorial.channels, 'independent_store_allegro_von_halsky');
+  assert.deepEqual(Object.fromEntries(Object.entries(prepared.product.contentEditorial.channelStates).map(([key, value]) => [key, value.status])), { store: 'ready', allegro: 'ready', vonHalsky: 'ready' });
+  assert.equal(prepared.product.ean, raw.ean);
+});
+
+test('historia każdego specjalisty zawiera ID centralnego produktu', async () => {
+  const calls = [];
+  await prepareLinkedProductEditorial({ id: 123, nazwa: 'Gra rodzinna', opis: 'Faktyczny opis produktu wystarczający do redakcji.', opisKrotki: 'Gra rodzinna.', producent: 'Alexander' }, {
+    runSpecialist: async (input) => { calls.push(input); return specialistResult(input); },
+  });
+  assert.deepEqual(calls.map((call) => call.target.productId), ['123', '123', '123']);
+});
+
+test('awaria jednego kanału nie cofa zapisanych wyników pozostałych kanałów', async () => {
+  const prepared = await prepareLinkedProductEditorial({ nazwa: 'GRA RODZINNA | Sklep producenta', opis: 'Faktyczny opis produktu.', opisKrotki: 'Gra rodzinna.', producent: 'Alexander' }, {
+    runSpecialist: async (input) => {
+      if (input.specialist === 'allegro_offer') throw new Error('Allegro chwilowo niedostępne');
+      return specialistResult(input);
+    },
+  });
+  assert.equal(prepared.status, 'partial_ready');
+  assert.equal(prepared.product.contentEditorial.channelStates.store.status, 'ready');
+  assert.equal(prepared.product.contentEditorial.channelStates.vonHalsky.status, 'ready');
+  assert.equal(prepared.product.contentEditorial.channelStates.allegro.status, 'needs_review');
+  assert.ok(prepared.product.opis);
+  assert.ok(prepared.product.vonHalskyDescription);
+  assert.equal(prepared.product.allegroDescription, undefined);
+  assert.match(prepared.warnings.join(' '), /Allegro chwilowo niedostępne/);
+});
+
+test('chwilowy brak AI zachowuje kompletne istniejące treści zamiast oznaczać wszystkie kanały jako błędne', async () => {
+  let calls = 0;
+  const product = {
+    nazwa: 'Puzzle drewniane Galaxies – Jednorożec',
+    opisKrotki: 'Drewniane puzzle przedstawiające jednorożca, przeznaczone do spokojnej, kreatywnej zabawy.',
+    opis: 'Zestaw składa się ze 150 drewnianych elementów. Układanie rozwija koncentrację, spostrzegawczość i cierpliwość. Produkt marki Alexander.',
+    allegroTitle: 'Puzzle drewniane Galaxies Jednorożec 150 elementów',
+    allegroDescription: 'Drewniane puzzle ze 150 elementów przedstawiają jednorożca. Układanie rozwija koncentrację, spostrzegawczość i cierpliwość. Produkt marki Alexander.',
+    vonHalskyTitle: 'Puzzle drewniane Galaxies Jednorożec',
+    vonHalskyShortDescription: 'Drewniane puzzle przedstawiające jednorożca, 150 elementów.',
+    vonHalskyDescription: 'Drewniane puzzle ze 150 elementów przedstawiają jednorożca. Układanie rozwija koncentrację, spostrzegawczość i cierpliwość. Produkt marki Alexander.',
+  };
+  const prepared = await prepareLinkedProductEditorial(product, {
+    runSpecialist: async () => {
+      calls += 1;
+      throw new Error('You exceeded your current quota, please check your plan and billing details.');
+    },
+  });
+  assert.equal(prepared.status, 'ready');
+  assert.deepEqual(Object.fromEntries(Object.entries(prepared.product.contentEditorial.channelStates).map(([key, value]) => [key, value.status])), { store: 'ready', allegro: 'ready', vonHalsky: 'ready' });
+  assert.equal(prepared.product.allegroDescription, product.allegroDescription);
+  assert.equal(prepared.product.vonHalskyDescription, product.vonHalskyDescription);
+  assert.equal(calls, 1);
+  assert.match(prepared.warnings.join(' '), /exceeded your current quota/);
+});
+
+test('normalizacja awaryjna usuwa dopisek strony i porządkuje wielkie litery', () => {
+  assert.equal(normalizeEditorialTitle('ORIGAMI 3D KWIATY | Sklep producenta'), 'Origami 3D Kwiaty');
+  assert.equal(linkedProductSourceMaterial({ nazwa: 'Gra', opis: '<p>Opis</p>', ean: '123' }, 'https://example.test').title, 'Gra');
+});
+
+test('kompletny wynik kanału bez tablicy fields trafia do właściwych pól i nadal przechodzi kontrolę zgodności', () => {
+  const raw = {
+    title: 'Origami 3D Kwiaty Alexander',
+    summary: 'Kreatywny zestaw do wykonania przestrzennych kwiatów.',
+    content: '<h2>Przestrzenne kwiaty</h2><p>Zestaw zawiera papierowe moduły i instrukcję potrzebne do wykonania efektownej kompozycji. Zabawa rozwija dokładność, cierpliwość i wyobraźnię.</p>',
+    fields: [], confidence: 0.97, warnings: [], missingFacts: [], complianceStatus: 'ready',
+  };
+  const normalized = normalizeChannelEditorialResult(raw, 'allegro_offer');
+  const patch = productPatch(normalized);
+  assert.equal(patch.allegroTitle, raw.title);
+  assert.equal(patch.allegroDescription, raw.content);
+  assert.equal(automaticEditorialAssessment({ specialist: 'allegro_offer', result: raw }).eligible, true);
+});

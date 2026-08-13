@@ -1,0 +1,135 @@
+import pg from 'pg';
+import { createNormalizedDomainRepository } from './normalized-domain-repository.mjs';
+import { assertPostgresRelations } from './postgres-schema-contract.mjs';
+
+const { Pool } = pg;
+const pools = new Map();
+const listenerPools = new Map();
+
+export function postgresPoolFor(connectionString) {
+  if (!pools.has(connectionString)) {
+    const pool = new Pool({
+      connectionString,
+      max: Math.max(2, Math.min(30, Number(process.env.ARTWAY_DB_POOL_MAX || 10) || 10)),
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 10_000,
+    });
+    const reportConnectionError = (scope, error) => console.error(JSON.stringify({
+      at: new Date().toISOString(),
+      component: 'artway-postgres-pool',
+      event: 'connection_error',
+      scope,
+      code: String(error?.code || '').slice(0, 40),
+      message: String(error?.message || error || 'Błąd PostgreSQL').slice(0, 500),
+    }));
+    // pg usuwa uszkodzone bezczynne połączenia z puli, ale bez odbiornika
+    // zdarzenie error kończyłoby cały proces Node. Stały odbiornik na kliencie
+    // chroni także połączenie aktualnie wypożyczone przez dłuższą operację.
+    pool.on('error', (error) => reportConnectionError('idle-pool-client', error));
+    pool.on('connect', (client) => {
+      client.on('error', (error) => reportConnectionError('connected-client', error));
+    });
+    pools.set(connectionString, pool);
+  }
+  return pools.get(connectionString);
+}
+
+// LISTEN utrzymuje połączenie przez cały czas życia procesu. Osobna mała pula
+// zapobiega zajmowaniu miejsc przeznaczonych dla zapytań HTTP i synchronizacji.
+export function postgresListenerPoolFor(connectionString) {
+  if (!listenerPools.has(connectionString)) {
+    const pool = new Pool({
+      connectionString,
+      application_name: 'artway-listeners',
+      max: Math.max(4, Math.min(10, Number(process.env.ARTWAY_DB_LISTENER_POOL_MAX || 5) || 5)),
+      idleTimeoutMillis: 0,
+      connectionTimeoutMillis: 15_000,
+    });
+    pool.on('error', (error) => console.error(JSON.stringify({
+      at: new Date().toISOString(), component: 'artway-postgres-listeners',
+      event: 'connection_error', code: String(error?.code || '').slice(0, 40),
+      message: String(error?.message || error || 'Błąd PostgreSQL').slice(0, 500),
+    })));
+    listenerPools.set(connectionString, pool);
+  }
+  return listenerPools.get(connectionString);
+}
+
+export function postgresVersionFromEtag(etag = '') {
+  const normalized = String(etag || '').replace(/^W\//, '').replace(/^"|"$/g, '').trim();
+  return /^\d+$/.test(normalized) ? Number(normalized) : null;
+}
+
+export function createPostgresStoreRepository({ name, connectionString = process.env.DATABASE_URL } = {}) {
+  if (!name) throw new Error('Nazwa magazynu danych jest wymagana.');
+  if (!connectionString) throw new Error('Dla magazynu PostgreSQL wymagane jest DATABASE_URL.');
+
+  const pool = postgresPoolFor(connectionString);
+  let initialization = null;
+  const ensureSchema = () => {
+    if (!initialization) {
+      initialization = assertPostgresRelations(
+        pool,
+        ['artway_kv_store'],
+        'magazynu ustawień',
+      ).then(() => undefined);
+    }
+    return initialization;
+  };
+
+  const legacy = Object.freeze({
+    async read(key, fallback) {
+      await ensureSchema();
+      const result = await pool.query('SELECT value FROM artway_kv_store WHERE namespace = $1 AND key = $2', [name, key]);
+      return result.rowCount ? result.rows[0].value : fallback;
+    },
+    async readVersioned(key, fallback) {
+      await ensureSchema();
+      const result = await pool.query('SELECT value, version FROM artway_kv_store WHERE namespace = $1 AND key = $2', [name, key]);
+      if (!result.rowCount) return { value: fallback, etag: '', exists: false };
+      return { value: result.rows[0].value, etag: `"${result.rows[0].version}"`, exists: true };
+    },
+    async write(key, value) {
+      await ensureSchema();
+      await pool.query(`
+        INSERT INTO artway_kv_store (namespace, key, value, version, updated_at)
+        VALUES ($1, $2, $3::jsonb, 1, NOW())
+        ON CONFLICT (namespace, key) DO UPDATE
+        SET value = EXCLUDED.value, version = artway_kv_store.version + 1, updated_at = NOW()
+      `, [name, key, JSON.stringify(value)]);
+      return { modified: true };
+    },
+    async writeIfVersion(key, value, version = {}) {
+      await ensureSchema();
+      if (version.exists === false) {
+        const created = await pool.query(`
+          INSERT INTO artway_kv_store (namespace, key, value, version, updated_at)
+          VALUES ($1, $2, $3::jsonb, 1, NOW())
+          ON CONFLICT (namespace, key) DO NOTHING
+          RETURNING version
+        `, [name, key, JSON.stringify(value)]);
+        return { modified: created.rowCount === 1 };
+      }
+      const expectedVersion = postgresVersionFromEtag(version.etag);
+      if (!Number.isSafeInteger(expectedVersion)) return { modified: false };
+      const updated = await pool.query(`
+        UPDATE artway_kv_store
+        SET value = $3::jsonb, version = version + 1, updated_at = NOW()
+        WHERE namespace = $1 AND key = $2 AND version = $4
+        RETURNING version
+      `, [name, key, JSON.stringify(value), expectedVersion]);
+      return { modified: updated.rowCount === 1 };
+    },
+    async delete(key) {
+      await ensureSchema();
+      const result = await pool.query('DELETE FROM artway_kv_store WHERE namespace = $1 AND key = $2', [name, key]);
+      return { deleted: result.rowCount === 1 };
+    },
+    async listKeys() {
+      await ensureSchema();
+      const result = await pool.query('SELECT key, version FROM artway_kv_store WHERE namespace = $1 ORDER BY key ASC', [name]);
+      return result.rows.map((row) => ({ key: row.key, etag: `"${row.version}"` }));
+    },
+  });
+  return name === 'artway-sklep' ? createNormalizedDomainRepository({ pool, namespace: name, legacy }) : legacy;
+}

@@ -1,0 +1,39 @@
+[Unit]
+Description=Artway-TM migawka obserwowalności PostgreSQL
+After=postgresql.service artway-backend.service
+
+[Service]
+Type=oneshot
+User=artway
+Group=artway
+WorkingDirectory=/srv/artway/shop
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /srv/artway/shop/scripts/postgres-observability-snapshot.mjs
+ExecStart=/usr/bin/node /srv/artway/shop/scripts/verify-postgres-projections.mjs --strict
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=true
+PrivateTmp=true
+PrivateMounts=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ReadWritePaths=/srv/artway/ops/status
+TimeoutStartSec=90s

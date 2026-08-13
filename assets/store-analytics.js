@@ -1,0 +1,73 @@
+/* GENERATED STORE ANALYTICS — loaded after the first storefront render */
+/* Publiczne metadane SEO ładowane na każdej stronie sklepu. */
+function seoTekstBezHTML(value=""){const el=document.createElement("div");el.innerHTML=String(value||"");return String(el.textContent||"").replace(/\s+/g," ").trim();}
+function seoPropozycjaProduktu(p={}){
+  const brand=String(p.producent||p.marka||"").trim(),category=String(p.kategoria||"").trim();
+  let title=[p.nazwa,brand&&!String(p.nazwa||"").toLowerCase().includes(brand.toLowerCase())?brand:""].filter(Boolean).join(" – ");if(title.length<30&&category&&!title.toLowerCase().includes(category.toLowerCase()))title+=` – ${category}`;if(title.length<30)title+=` | Artway-TM`;title=skrocTekst(title,60);
+  const source=seoTekstBezHTML(p.opisKrotki||p.krotkiOpis||p.opis||"");
+  let description=source||`${p.nazwa||"Produkt"}${category?` z kategorii ${category}`:""}. Sprawdź szczegóły, dostępność i bezpieczne zakupy w Artway-TM.`;
+  if(description.length<80)description=`${description} Poznaj opis, aktualną cenę i warunki dostawy w sklepie Artway-TM.`;
+  description=skrocTekst(description,158);
+  const keywords=[p.nazwa,category,brand,p.gtin||p.ean,p.sku].filter(Boolean).flatMap(v=>String(v).split(/[|,;/]+/)).map(v=>v.trim()).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).slice(0,8).join(", ");
+  return {seoTitle:title,seoDescription:description,seoKeywords:keywords};
+}
+function seoEfektywneDaneProduktu(p={}){
+  const proposal=seoPropozycjaProduktu(p);
+  return {...p,seoTitle:String(p.seoTitle||proposal.seoTitle||""),seoDescription:String(p.seoDescription||proposal.seoDescription||""),seoKeywords:String(p.seoKeywords||proposal.seoKeywords||""),seoMode:p.seoMode==="manual"?"manual":"auto"};
+}
+function seoAktualizujMetaDlaTrasy(route=trasa()){
+  const ensure=(selector,create)=>{let el=document.head.querySelector(selector);if(!el){el=document.createElement(create.tag||"meta");for(const [k,v] of Object.entries(create.attrs||{}))el.setAttribute(k,v);document.head.appendChild(el);}return el;},setMeta=(name,value,property=false)=>{const attr=property?"property":"name",el=ensure(`meta[${attr}="${name}"]`,{tag:"meta",attrs:{[attr]:name}});el.setAttribute("content",String(value||""));};
+  const baseTitle=ustawienia.nazwaSklepu||"Artway-TM",baseDesc=ustawienia.seo?.opis||ustawienia.opisSklepu||"Gry, zabawki kreatywne, balony i artykuły imprezowe od sprawdzonych producentów.";let title=ustawienia.seo?.tytul||`Gry, zabawki i artykuły imprezowe | ${baseTitle}`,desc=baseDesc,canonical=location.origin+"/",image="",price="",schema={"@context":"https://schema.org","@graph":[{"@type":"WebSite",name:baseTitle,url:canonical,inLanguage:"pl-PL"},{"@type":"OnlineStore",name:baseTitle,url:canonical,email:ustawienia.email||"artwaytm@gmail.com",telephone:ustawienia.telefon||"+48530038914"}]};
+  if(route.startsWith("/produkt/")){const p=produktSklepuPoId(route.split("/")[2]);if(p){const effective=seoEfektywneDaneProduktu(p);title=effective.seoTitle||`${p.nazwa} | ${baseTitle}`;desc=effective.seoDescription;canonical=`${location.origin}/produkt/${p.id}`;image=p.zdjecie||p.zdjecia?.[0]||"";price=Number(p.cena||0)>0?Number(p.cena).toFixed(2):"";const gtin=String(p.gtin||p.ean||"").replace(/\D/g,"");schema={"@context":"https://schema.org","@graph":[{"@type":"Product",name:p.nazwa,description:seoTekstBezHTML(p.opis||desc),image:[p.zdjecie,...(p.zdjecia||[])].filter(Boolean),sku:p.sku||p.externalId||String(p.id),...(gtin?{[`gtin${gtin.length}`]:gtin}:{}),brand:(p.producent||p.marka)?{"@type":"Brand",name:p.producent||p.marka}:undefined,offers:{"@type":"Offer",url:canonical,priceCurrency:"PLN",price,availability:produktOznaczonyNiedostepny(p)?"https://schema.org/OutOfStock":"https://schema.org/InStock",itemCondition:"https://schema.org/NewCondition"}},{"@type":"BreadcrumbList",itemListElement:[{"@type":"ListItem",position:1,name:"Strona główna",item:location.origin+"/"},{"@type":"ListItem",position:2,name:p.nazwa,item:canonical}]}]};}}
+  else if(route.startsWith("/kategoria/")){const raw=decodeURIComponent(route.split("/")[2]||""),category=wszystkieKategorie().find(k=>k===raw||seoSlugKategorii(k)===seoSlugKategorii(raw))||raw,list=produkty.filter(p=>p.kategoria===category);title=`${category} | ${baseTitle}`;desc=`Produkty z kategorii ${category}. Sprawdź aktualną ofertę, ceny i wygodną dostawę InPost.`;canonical=`${location.origin}/kategoria/${seoSlugKategorii(category)}`;image=list.find(p=>p.zdjecie)?.zdjecie||"";schema={"@context":"https://schema.org","@type":"CollectionPage",name:category,description:desc,url:canonical};}
+  else if(route==="/promocje"||route==="/nowosci"){const name=route==="/promocje"?"Promocje":"Nowości";title=`${name} | ${baseTitle}`;desc=route==="/promocje"?"Aktualne promocje na gry, zabawki kreatywne, balony i artykuły imprezowe.":"Nowe gry, zabawki kreatywne, balony i artykuły imprezowe w Artway-TM.";canonical=`${location.origin}${route}`;schema={"@context":"https://schema.org","@type":"CollectionPage",name,description:desc,url:canonical};}
+  else if(route==="/konkursy"||route.startsWith("/konkurs/")){const slug=decodeURIComponent(route.split("/")[2]||""),contest=slug&&globalThis.konkursySklepStan?.details?.[slug],name=contest?.title||"Konkursy Artway-TM";title=`${name} | ${baseTitle}`;desc=contest?.description||"Konkursy Artway-TM: wykonaj zadanie, poznaj jasne zasady i sprawdź wyniki po zakończeniu oceny.";canonical=`${location.origin}${route}`;schema={"@context":"https://schema.org","@type":"CollectionPage",name,description:desc,url:canonical};}
+  document.title=title;setMeta("description",desc);setMeta("robots",route.startsWith("/admin")||["/diagnostyka","/logowanie","/rejestracja","/konto","/zamowienia"].includes(route)?"noindex,nofollow":"index,follow,max-image-preview:large");setMeta("og:locale","pl_PL",true);setMeta("og:site_name",baseTitle,true);setMeta("og:title",title,true);setMeta("og:description",desc,true);setMeta("og:url",canonical,true);setMeta("og:type",route.startsWith("/produkt/")?"product":"website",true);setMeta("og:image",image,true);setMeta("twitter:card",image?"summary_large_image":"summary");setMeta("twitter:title",title);setMeta("twitter:description",desc);setMeta("twitter:image",image);setMeta("product:price:amount",price,true);setMeta("product:price:currency",price?"PLN":"",true);
+  let link=document.head.querySelector('link[rel="canonical"]');if(!link){link=document.createElement("link");link.rel="canonical";document.head.appendChild(link);}link.href=canonical;let script=document.getElementById("artway-seo-schema");if(!script){script=document.createElement("script");script.id="artway-seo-schema";script.type="application/ld+json";document.head.appendChild(script);}script.textContent=JSON.stringify(schema);
+}
+
+/* Anonimowy pomiar efektów SEO. Zapisuje wyłącznie dzienne sumy kanałów, domen wejścia i konwersji. */
+const SEO_DOMENY=new Set(["artwaytm.pl","allsklep.pl"]);
+function seoNormalizujDomene(value=""){const host=String(value||"").toLowerCase().replace(/^www\./,"").split(":")[0];return SEO_DOMENY.has(host)?host:"";}
+function seoBezpiecznaSciezka(value="/"){const path=String(value||"/").split(/[?#]/)[0].replace(/[\u0000-\u001f\u007f]/g,"").slice(0,180);return path.startsWith("/")?path:"/";}
+function seoUsunZnacznikDomeny(){try{const url=new URL(location.href);if(!url.searchParams.has("entry_domain"))return;url.searchParams.delete("entry_domain");history.replaceState(history.state,"",`${url.pathname}${url.search}${url.hash}`);}catch(e){}}
+function seoKanalZHosta(host=""){
+  const value=String(host||"").toLowerCase();
+  if(/(^|\.)google\./.test(value))return "google";
+  if(/(^|\.)bing\.com$/.test(value))return "bing";
+  if(/(^|\.)duckduckgo\.com$/.test(value))return "duckduckgo";
+  if(/(^|\.)yahoo\./.test(value))return "yahoo";
+  if(/(^|\.)ecosia\.org$/.test(value))return "ecosia";
+  if(/(^|\.)(?:search\.brave\.com|qwant\.com|startpage\.com|yandex\.[a-z.]+|seznam\.cz)$/.test(value))return "other_search";
+  return "";
+}
+function seoAtrybucjaSesji(route="/"){
+  try{
+    const stored=JSON.parse(sessionStorage.getItem("artway_seo_attribution_v2")||"null");if(stored?.entryDomain&&stored?.channel)return stored;
+    const url=new URL(location.href),own=seoNormalizujDomene(location.hostname)||"artwaytm.pl",via=seoNormalizujDomene(url.searchParams.get("entry_domain")),referrer=document.referrer?new URL(document.referrer):null,referrerHost=String(referrer?.hostname||"").toLowerCase().replace(/^www\./,""),searchChannel=seoKanalZHosta(referrerHost),campaignName=String(url.searchParams.get("utm_campaign")||url.searchParams.get("utm_source")||"").toLowerCase().replace(/[^a-z0-9_.-]/g,"").slice(0,80);
+    const externalReferrer=referrerHost&&!SEO_DOMENY.has(referrerHost)?referrerHost.replace(/[^a-z0-9.-]/g,"").slice(0,120):"";
+    const attribution={entryDomain:via||own,landingPath:seoBezpiecznaSciezka(route||location.pathname),channel:searchChannel||(campaignName?"campaign":externalReferrer?"referral":"direct"),campaign:campaignName,referrerDomain:externalReferrer};
+    sessionStorage.setItem("artway_seo_attribution_v2",JSON.stringify(attribution));seoUsunZnacznikDomeny();return attribution;
+  }catch(e){return {entryDomain:"artwaytm.pl",landingPath:seoBezpiecznaSciezka(route),channel:"direct",campaign:"",referrerDomain:""};}
+}
+function seoWyslijZdarzenie(event,data={}){
+  const attribution=seoAtrybucjaSesji(data.route||trasa());if(!attribution.channel||jestAdmin())return;
+  const body={event,channel:attribution.channel,entryDomain:attribution.entryDomain,landingPath:attribution.landingPath,campaign:attribution.campaign,referrerDomain:attribution.referrerDomain,productId:data.productId||"",value:Math.max(0,Number(data.value)||0),items:Array.isArray(data.items)?data.items.slice(0,100):[]};
+  fetch("/api/seo/event",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body),keepalive:true,credentials:"omit"}).catch(()=>{});
+}
+function seoSledzTrase(route="/"){
+  if(String(route).startsWith("/admin"))return;seoAtrybucjaSesji(route);
+  try{
+    if(!sessionStorage.getItem("artway_seo_landing")){sessionStorage.setItem("artway_seo_landing","1");seoWyslijZdarzenie("landing",{route});}
+    if(String(route).startsWith("/produkt/")){
+      const id=String(route).split("/")[2]||"",key=`artway_seo_view_${id}`;
+      if(id&&!sessionStorage.getItem(key)){sessionStorage.setItem(key,"1");seoWyslijZdarzenie("product_view",{productId:id});}
+    }
+  }catch(e){}
+}
+function seoSledzKoszyk(productId){seoWyslijZdarzenie("add_to_cart",{productId});}
+function seoSledzZamowienie(value,orderId="",items=[]){
+  const safeId=String(orderId||"").replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80),key=`artway_seo_order_sent_${safeId||"current"}`;
+  try{if(sessionStorage.getItem(key))return;sessionStorage.setItem(key,"1");}catch(e){}
+  seoWyslijZdarzenie("order",{value,items:(Array.isArray(items)?items:[]).map(item=>({productId:item?.id||"",units:Number(item?.ilosc)||1,revenue:Number(item?.wartosc)||0}))});
+}

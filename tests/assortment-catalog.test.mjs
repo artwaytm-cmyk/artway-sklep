@@ -1,0 +1,157 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {readFile} from "node:fs/promises";
+
+const root=new URL("../",import.meta.url);
+const read=path=>readFile(new URL(path,root),"utf8");
+
+test("katalog produktów ma wielokryterialne filtry dla dużego asortymentu",async()=>{
+  const source=await read("assets/admin.js");
+  assert.match(source,/filtrProducentaProduktow/);
+  assert.match(source,/filtrDanychProduktow/);
+  assert.match(source,/filtrSprzedazyProduktow/);
+  assert.match(source,/filtrPromocjiProduktow/);
+  assert.match(source,/cenaOdAdminProduktow/);
+  assert.match(source,/cenaDoAdminProduktow/);
+  for(const label of ["Brak EAN","Brak zdjęcia","Brak opisu krótkiego lub pełnego","Brak linku źródłowego","Brak ceny zakupu (admin)"]){
+    assert.match(source,new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")));
+  }
+  assert.match(source,/Dostępność sprzedażowa/);
+  assert.match(source,/Status Allegro/);
+  assert.match(source,/Oferta i promocja/);
+});
+
+test("katalog udostępnia szybkie widoki, aktywne znaczniki i zapis gęstości",async()=>{
+  const source=await read("assets/admin.js");
+  assert.match(source,/function asortymentUstawWidok/);
+  assert.match(source,/Gotowe do sprzedaży/);
+  assert.match(source,/Bez Allegro/);
+  assert.match(source,/Ukryte sprzedażowo/);
+  assert.match(source,/data-assortment-active-filters/);
+  assert.match(source,/function asortymentWyczyscFiltr/);
+  assert.match(source,/artway_produkty_gestosc_admin/);
+  assert.match(source,/density-\$\{gestoscAdminProduktow\}/);
+});
+
+test("karty katalogu zachowują pełne dane i operacje hurtowe",async()=>{
+  const source=await read("assets/admin.js");
+  assert.match(source,/allegro-publication-card catalog-product-card/);
+  assert.match(source,/data-assortment-product-card/);
+  assert.match(source,/catalog-product-classification/);
+  assert.match(source,/catalog-product-operational-data/);
+  assert.match(source,/catalog-product-actions/);
+  assert.match(source,/EXTERNAL_ID/);
+  assert.match(source,/Zakup — tylko administrator/);
+  assert.match(source,/Cena Allegro/);
+  assert.match(source,/Stan magazynowy/);
+  assert.match(source,/adminOperacjeWynikowHTML/);
+  assert.match(source,/asortymentEksportuj\('zaznaczone'\)/);
+  assert.match(source,/asortymentEksportuj\('filtr'\)/);
+  assert.match(source,/Wspólna baza/);
+  assert.doesNotMatch(source,/const gotowosc=Math\.max/);
+  assert.doesNotMatch(source,/assortment-card-readiness/);
+  assert.doesNotMatch(source,/Po zakończeniu pobierz nowy <b>products\.json<\/b> i podmień go na hostingu/);
+});
+
+test("ceny w katalogu zapisują się w wierszu bez pełnego renderowania strony",async()=>{
+  const view=await read("assets/admin.js"),prices=await read("src/frontend/13-product-admin.js"),css=await read("src/styles/29-commerce-catalog-actions.css");
+  assert.match(view,/ustawCene\([^\n]+this\.value,this\)/);
+  assert.match(view,/ustawCeneZakupu\([^\n]+this\.value,this\)/);
+  assert.match(view,/data-inline-price-status/);
+  assert.match(prices,/function asortymentPodmienCeneBezRenderu/);
+  assert.match(prices,/function ustawCeneZakupu/);
+  const inlineBlock=prices.slice(prices.indexOf("function ustawCene(id"),prices.indexOf("\/\* ── Akcje masowe"));
+  assert.doesNotMatch(inlineBlock,/renderuj\s*\(/);
+  assert.match(inlineBlock,/asortymentZapiszCeneSerwer\(id,"purchase"/);
+  assert.match(prices,/Zapisano i opublikowano/);
+  const memoryPatch=prices.slice(prices.indexOf("function asortymentPodmienCeneBezRenderu"),prices.indexOf("async function asortymentZapiszCeneSerwer"));
+  assert.doesNotMatch(memoryPatch,/zapiszLS|uniewaznijProduktyAdminCache|asortymentCentralnyWyczyscCache/);
+  assert.match(memoryPatch,/podmienProduktAdminBezRenderu/);
+  const inventory=await read("src/frontend/05-catalog-inventory.js");
+  assert.match(inventory,/function podmienProduktAdminBezRenderu/);
+  assert.match(inventory,/asortymentCentralnyPodmienProdukt/);
+  assert.match(view,/Cena Von Halsky/);
+  assert.match(view,/pusta = Allegro/);
+  assert.match(prices,/function ustawCeneKanalu/);
+  assert.match(prices,/catalog-product-price-update/);
+  assert.doesNotMatch(prices,/asortymentPotwierdzZapisCeny/);
+  assert.match(prices,/cenaVonHalsky/);
+  assert.match(css,/\.catalog-product-edit-value\.is-saving/);
+  assert.match(css,/\.catalog-product-edit-value\.is-saved/);
+  assert.match(css,/\.catalog-product-edit-value\.has-error/);
+});
+
+test("filtry i paginacja asortymentu aktualizują tylko podstronę bez pełnego renderu",async()=>{
+  const controls=await read("src/frontend/12-customers-and-inventory.js");
+  const refresh=controls.slice(controls.indexOf("async function asortymentOdswiezWyniki"),controls.indexOf("function asortymentSzukajProdukty"));
+  assert.match(refresh,/await asortymentCentralnyPobierz\(force,\{render:false\}\)/);
+  assert.match(controls,/function asortymentPodmienSekcjeStabilnie[\s\S]+aktualizujWezelStabilnie/);
+  assert.match(refresh,/data-assortment-results/);
+  assert.doesNotMatch(refresh,/current\.innerHTML=next\.innerHTML/);
+  for(const name of ["ustawStroneAdminProduktow","ustawProduktyNaStronieAdmin","ustawSortowanieAdminProduktow"]){
+    const start=controls.indexOf(`function ${name}`),end=controls.indexOf("\nfunction ",start+10);
+    assert.match(controls.slice(start,end<0?undefined:end),/asortymentOdswiezWyniki/);
+    assert.doesNotMatch(controls.slice(start,end<0?undefined:end),/renderuj\s*\(/);
+  }
+  assert.match(controls,/window\.__assortmentSearch=setTimeout\(\(\)=>void asortymentOdswiezWyniki\(\),240\)/);
+});
+
+test("układ katalogu przejmuje strukturę wzorca i zachowuje treść asortymentu",async()=>{
+  const css=(await read("src/styles/07-admin-domains.css"))+(await read("src/styles/07a-admin-domains.css"))+(await read("src/styles/07b-admin-domains.css"))+(await read("src/styles/29-commerce-catalog-actions.css"))+(await read("src/styles/31-admin-page-pattern.css"));
+  for(const selector of [".assortment-saved-views",".assortment-advanced-grid",".assortment-filter-state",".assortment-results-toolbar",".assortment-bulk-editor",".catalog-product-list",".catalog-product-card",".catalog-product-classification",".catalog-product-operational-data",".catalog-product-actions",".catalog-product-list.density-zwarta"]){
+    assert.match(css,new RegExp(selector.replace(".","\\.")));
+  }
+  assert.match(css,/@container\(max-width:1180px\)/);
+  assert.match(css,/@container\(max-width:820px\)/);
+  assert.match(css,/content-visibility:auto/);
+  assert.match(css,/@media\(max-width:620px\).*assortment-advanced-grid/);
+});
+
+test("katalog rozdziela zarządzanie produktami od tworzenia nowych ofert Allegro",async()=>{
+  const catalog=await read("assets/admin.js"),actions=await read("src/frontend/12a-product-actions.js"),commerce=await read("src/frontend/12c-commerce-catalog-actions.js"),prices=await read("src/frontend/13-product-admin.js"),css=(await read("src/styles/15-product-actions.css"))+(await read("src/styles/29-commerce-catalog-actions.css"));
+  assert.match(catalog,/data-product-agent-center/);
+  assert.match(catalog,/asortymentMenuDzialanProduktuHTML\(p\)/);
+  for(const marker of ["Centrum zarządzania produktami","Nowe oferty powstają wyłącznie w sekcji Allegro","Synchronizuj dane i ceny","Wycofaj oferty","Otwórz ofertę"]){assert.match(commerce,new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")));}
+  assert.doesNotMatch(commerce,/Wystaw gotowe na Allegro/);
+  assert.match(catalog,/id="kanalCenProduktow"/);
+  assert.match(catalog,/Tylko sklep/);
+  assert.match(catalog,/Tylko Allegro/);
+  assert.match(catalog,/Sklep i Allegro/);
+  assert.match(commerce,/catalog-allegro-offer-link/);
+  assert.match(prices,/kanalCenProduktow/);
+  assert.match(prices,/patch\.cenaAllegro/);
+  assert.match(prices,/patch\.cena=/);
+  assert.match(actions,/Ostateczna publikacja nastąpi dopiero po tym potwierdzeniu/);
+  assert.match(actions,/data-external-product-confirm/);
+  assert.match(actions,/await worker\(\)/);
+  assert.doesNotMatch(actions,/Promise\.all\(Array\.from\(\{length:Math\.min\(2,products\.length\)\},worker\)\)/);
+  assert.match(actions,/async function asortymentPrzygotujProduktDoAllegro/);
+  assert.match(actions,/allegro-preparation-queue-enqueue/);
+  assert.match(actions,/allegro-preparation-queue-status/);
+  assert.match(actions,/product-catalog-item/);
+  assert.doesNotMatch(actions,/allegro-description-improve/);
+  assert.doesNotMatch(actions,/product-source-inspect/);
+  assert.match(actions,/allegroAgentPreparationStatus/);
+  assert.match(actions,/allegroAgentSavedFields/);
+  assert.match(actions,/allegro-publication-queue-enqueue/);
+  assert.match(actions,/Serwer przejął pełną kolejkę/);
+  assert.match(actions,/Konkretny zapis Agenta/);
+  assert.doesNotMatch(catalog,/Przygotuj i zapisz dane do Allegro/);
+  assert.match(catalog,/automatyczne przygotowanie trafi do serwerowej kolejki/i);
+  assert.match(catalog,/Pełna kartoteka produktu/);
+  assert.match(css,/\.product-action-center/);
+  assert.match(css,/\.product-agent-results/);
+  assert.match(css,/\.product-allegro-preparation/);
+  assert.match(css,/\.product-external-confirm/);
+  assert.match(css,/\.catalog-allegro-offer-link/);
+  assert.match(css,/@media\(max-width:620px\)/);
+});
+
+test("opis zapisywany po przygotowaniu korzysta z końcowych bezpiecznych sekcji Allegro",async()=>{
+  const source=await read("assets/admin.js");
+  assert.match(source,/function allegroTekstZBezpiecznychSekcji/);
+  assert.match(source,/d\.draft\?\.description\?\.sections/);
+  assert.match(source,/force\.allegroDescriptionSections=safeSections/);
+  assert.match(source,/asortymentPrzygotujProduktDoAllegro/);
+  assert.match(source,/Oferta nie została wysłana — uzupełnij wskazane braki/);
+});

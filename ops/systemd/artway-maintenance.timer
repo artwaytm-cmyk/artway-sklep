@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Artway safe server maintenance
+
+[Timer]
+OnCalendar=*-*-* 02:35:00 Europe/Warsaw
+RandomizedDelaySec=10m
+Persistent=true
+Unit=artway-maintenance.service
+
+[Install]
+WantedBy=timers.target

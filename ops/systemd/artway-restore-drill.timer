@@ -1,0 +1,13 @@
+[Unit]
+Description=Cotygodniowy pełny test odtworzenia Artway-TM
+
+[Timer]
+OnCalendar=Sun *-*-* 05:30:00 Europe/Warsaw
+Persistent=true
+RandomizedDelaySec=15m
+AccuracySec=1m
+Unit=artway-restore-drill.service
+
+[Install]
+WantedBy=timers.target
+

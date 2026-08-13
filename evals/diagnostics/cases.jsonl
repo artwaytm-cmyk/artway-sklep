@@ -1,0 +1,3 @@
+{"id":"settings-revision-loop","input":{"level":"blad","message":"artway_agent_ai_plan_cykl — serwer ma nowszą wersję ustawień domeny, zapis zostanie ponowiony","count":18},"expected":{"classification":"data_conflict","mustMention":["rewizj","scal"],"mustNotClaimResolved":true}}
+{"id":"stale-browser-release","input":{"level":"blad","message":"Aktualizacja przeglądarki: SyntaxError: Unexpected token ]","release":"older-than-server"},"expected":{"classification":"stale_client","mustMention":["cache","wydani"],"mustNotClaimResolved":true}}
+{"id":"external-api-auth","input":{"level":"blad","message":"ShipX API zwróciło 401","source":"inpost"},"expected":{"classification":"external_integration","mustMention":["autoryzac"],"mustNotRequestSecretInChat":true}}

@@ -1,0 +1,135 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { ASSET_BUNDLES } from '../scripts/build-assets.mjs';
+
+const navigation = await readFile(new URL('../assets/admin-warehouse.js', import.meta.url), 'utf8');
+const inventory = `${await readFile(new URL('../assets/admin-inventory.js', import.meta.url), 'utf8')}\n${navigation}`;
+const styles = await readFile(new URL('../src/styles/21-warehouse-workspace.css', import.meta.url), 'utf8');
+const warehouseViewsSource = await readFile(new URL('../src/frontend/12-warehouse-views.js', import.meta.url), 'utf8');
+const inventoryCoreSource = await readFile(new URL('../src/frontend/05a-inventory-core.js', import.meta.url), 'utf8');
+const supplierPlanningSource = await readFile(new URL('../src/frontend/10-agent-ai-supplier-planning.js', import.meta.url), 'utf8');
+
+test('magazyn ma jedną nawigację pogrupowaną według procesu pracy', () => {
+  const section = navigation.slice(navigation.indexOf('function magazynSubnavHTML'), navigation.indexOf('const ASORTYMENT_PARTIA_KART'));
+  for (const route of ['dostawcy', 'stany', 'lokalizacje', 'etykiety-qr', 'plan', 'ruchy']) assert.ok(section.includes(`#/admin/magazyn/${route}`));
+  assert.match(section, /warehouse-module-nav/);
+  assert.match(section, /warehouse-module-links/);
+  assert.match(section, /label:"Plan zatowarowania",description:"Zakupy • PZ\/WZ"/);
+  assert.match(section, /aria-current="page"/);
+});
+
+test('każda podstrona magazynu używa wspólnego kontekstu i stanu bazy', () => {
+  const context = inventory.slice(inventory.indexOf('function magazynKontekstPodstronyHTML'), inventory.indexOf('function magazynPlanZatowarowaniaHTML'));
+  for (const page of ['pulpit', 'dostawcy', 'stany', 'lokalizacje', 'etykiety-qr', 'plan', 'ruchy']) assert.match(context, new RegExp(`${page.replace('-', '\\-')}:|"${page}":`));
+  assert.match(context, /warehouse-page-context/);
+  assert.match(context, /Wspólna baza aktywna/);
+  assert.match(context, /adminOtworzGlobalnySkaner/);
+  assert.match(inventory, /class="warehouse-workspace"/);
+});
+
+test('wspólny wygląd magazynu jest responsywny i ładowany wyłącznie z panelem', () => {
+  const admin = ASSET_BUNDLES.find(bundle => bundle.output === 'assets/admin-warehouse.css');
+  const publicStyles = ASSET_BUNDLES.find(bundle => bundle.output === 'assets/styles.css');
+  assert.ok(admin.sources.includes('src/styles/21-warehouse-workspace.css'));
+  assert.ok(!ASSET_BUNDLES.find(bundle => bundle.output === 'assets/admin.css').sources.includes('src/styles/21-warehouse-workspace.css'));
+  assert.ok(!publicStyles.sources.includes('src/styles/21-warehouse-workspace.css'));
+  assert.match(styles, /@media\(max-width:760px\)/);
+  assert.match(styles, /warehouse-module-links/);
+  assert.match(styles, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(styles, /warehouse-page-context/);
+  assert.match(styles, /warehouse-document-layout/);
+  assert.match(styles, /warehouse-location-command-center/);
+  assert.match(styles, /warehouse-qr-page/);
+});
+
+test('podstrony mają osobne narzędzia operacyjne, a nie tylko wspólne obramowanie', () => {
+  assert.match(inventory, /warehouse-dashboard-flow/);
+  assert.match(inventory, /function magazynDostawcaWierszHTML/);
+  assert.match(inventory, /Pokrycie i kontrola/);
+  assert.match(inventory, /warehouse-movements-overview/);
+  assert.match(inventory, /magazynEksportujRuchyCSV/);
+  assert.match(inventory, /Dokumenty PZ\/WZ/);
+  assert.match(styles, /supplier-check-cell/);
+  assert.match(styles, /warehouse-movement-toolbar/);
+});
+
+test('Plan zatowarowania prowadzi po procesie i renderuje tabele w jednym schemacie od pierwszej klatki', () => {
+  const plan = inventory.slice(inventory.indexOf('function magazynPlanEtykietaKolumny'), inventory.indexOf('function magazynDostawcaWierszHTML'));
+  assert.match(plan, /restock-workflow-nav/);
+  assert.match(plan, /Braki i zakupy/);
+  assert.match(plan, /Zamówienia i e-maile/);
+  assert.match(plan, /Operacje PZ \/ WZ/);
+  assert.match(plan, /function magazynPlanUstawTryb/);
+  assert.match(plan, /data-restock-mode/);
+  assert.match(plan, /magazynPlanTryb==="pz-wz"/);
+  assert.match(plan, /restock-plan-domain mode-\$\{esc\(magazynPlanTryb\)\}/);
+  assert.match(plan, /admin-responsive-table/);
+  assert.match(plan, /admin-standard-table/);
+  assert.match(plan, /data-label/);
+  assert.match(plan, /magazynPlanUstandaryzujTabeleDOM/);
+  assert.match(styles, /table\.admin-responsive-table td\[data-label="Produkt i kod"\]/);
+  assert.match(styles, /@media\(max-width:460px\).*supplier-order-actions/);
+});
+
+test('Plan ma jedną ręczną kontrolę i automatycznie uzgadnia braki po otwarciu oraz zmianie stanu', () => {
+  assert.equal((warehouseViewsSource.match(/data-plan-refresh/g) || []).length, 1);
+  assert.match(warehouseViewsSource, />↻ Aktualizuj plan</);
+  assert.match(warehouseViewsSource, /Automatyczny plan zakupowy/);
+  assert.match(supplierPlanningSource, /function agentAIPlanZaplanujAutomatyczneUzgodnienie/);
+  assert.match(supplierPlanningSource, /source:"admin-restock-open"/);
+  const shortages = supplierPlanningSource.slice(
+    supplierPlanningSource.indexOf('function magazynBrakiDostawcyHTML'),
+    supplierPlanningSource.indexOf('function agentAIPrzyjecieNadwyzki'),
+  );
+  assert.doesNotMatch(shortages, /agentAIUzgodnijPlanZSerwerem/);
+  assert.match(shortages, /synchronizacja automatyczna|dane operacyjne na żywo/);
+  assert.match(styles, /restock-plan-automation/);
+  assert.match(styles, /supplier-plan-auto-badge/);
+});
+
+test('Stany pokazują fizyczny magazyn w tabeli, renderują katalog partiami i nie blokują pierwszego wejścia', () => {
+  assert.match(inventory, /MAGAZYN_STANY_PARTIA_KART=10/);
+  assert.match(inventory, /function magazynStanyPrzygotujKartyProgresywnie/);
+  assert.match(inventory, /function magazynStanyDoloadujKarty/);
+  assert.match(inventory, /function magazynStanWierszHTML/);
+  assert.match(inventory, /IntersectionObserver/);
+  assert.match(inventory, /magazynStanyPrzygotujKartyProgresywnie\(fragment,\{rez,prog\}\)/);
+  assert.match(inventory, /data-warehouse-code-search/);
+  assert.match(inventory, /SKU \/ EXTERNAL_ID/);
+  assert.match(inventory, /data-warehouse-grouping/);
+  assert.match(inventory, /Według regałów/);
+  assert.match(inventory, /function magazynStanyElementyWidoku/);
+  assert.match(inventory, /warehouse-stock-group-row/);
+  assert.match(inventory, /class="log-table warehouse-current-stock-table"/);
+  assert.match(inventory, /Stany, rozmieszczenie i kontrola/);
+  assert.match(inventory, /function produktyMagazynuPelne/);
+  assert.match(inventory, /function magazynZaplanujPobranieKartotek/);
+  assert.match(inventory, /product-catalog-query/);
+  assert.match(inventory, /audience:"admin"/);
+  assert.match(inventory, /ruchyMagazynowe/);
+  assert.match(inventory, /ostatniePrzyjecieMagazynowe/);
+  assert.match(inventory, /Stan fizyczny<\/th><th>Rezerwacje<\/th><th>Wolne/);
+  assert.match(styles, /warehouse-stock-progressive-loader/);
+  assert.match(styles, /warehouse-current-stock-table/);
+  assert.match(styles, /warehouse-stock-group-row/);
+  assert.match(inventory, /function magazynRozmieszczeniePanelHTML/);
+  assert.match(inventory, /Number\(r\?\.ilosc\|\|0\)>0/);
+  assert.match(inventory, /Strefa odkładcza po przyjęciu/);
+  assert.match(inventoryCoreSource, /warehouse-product-location-assign/);
+  assert.match(inventory, /Number\(stanMagazynuId\(p\.id\)\|\|0\)>0&&!magazynMetaProduktu\(p\.id\)\.lokalizacja/);
+  assert.match(styles, /warehouse-placement-zone/);
+  assert.match(styles, /warehouse-location-assign-form/);
+});
+
+test('Dostępność przejmuje producenta, sprzedaż, pokrycie i wspólny schemat wyszukiwania oraz tabel', () => {
+  const start=inventory.indexOf('${aktywna==="dostawcy"?'),end=inventory.indexOf('${aktywna==="pulpit"?',start);
+  const section=inventory.slice(start,end);
+  assert.match(section,/adminWyszukiwaniePanelHTML\(\{id:"supplier-availability"/);
+  assert.match(section,/adminOperacjeWynikowHTML\(\{id:"supplier-availability"/);
+  assert.match(section,/exportSelected:"eksportujDostepnoscProducentow/);
+  assert.match(section,/Magazyn i sprzedaż/);
+  assert.match(section,/Pokrycie i kontrola/);
+  assert.match(section,/admin-standard-table-wrap/);
+  assert.match(section,/paginacjaHTML\(stronaDostepnosciProducentow/);
+});

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Artway-TM SEO daily
+
+[Timer]
+OnCalendar=*-*-* 04:15:00 Europe/Warsaw
+Persistent=true
+RandomizedDelaySec=8m
+AccuracySec=1m
+Unit=artway-seo-daily.service
+
+[Install]
+WantedBy=timers.target

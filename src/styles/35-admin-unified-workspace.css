@@ -1,0 +1,302 @@
+body.admin-mode .admin-unified-view{
+  --admin-ui-border:color-mix(in srgb,var(--line) 88%,var(--brand) 12%);
+  --admin-ui-soft:color-mix(in srgb,var(--brand) 4%,var(--panel));
+  --admin-ui-hover:color-mix(in srgb,var(--brand) 6%,var(--panel));
+  --admin-ui-shadow:0 9px 28px rgba(15,23,42,.055);
+  display:grid;gap:14px;align-content:start;min-width:0;
+}
+body.admin-mode .admin-unified-view>*{min-width:0}
+body.admin-mode .admin-unified-module{display:grid;gap:14px;min-width:0}
+
+body.admin-mode .admin-unified-tabs{
+  width:100%;min-width:0;margin:0!important;padding:6px!important;
+  overflow:visible!important;border:1px solid var(--admin-ui-border)!important;
+  border-radius:16px!important;background:color-mix(in srgb,var(--panel) 96%,transparent)!important;
+  box-shadow:var(--admin-ui-shadow)!important;backdrop-filter:blur(10px);
+}
+body.admin-mode .admin-unified-tabs>.admin-main-tabs{
+  display:grid!important;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));
+  gap:5px!important;width:100%;padding:0!important;border:0!important;background:transparent!important;
+}
+body.admin-mode .admin-unified-tabs>.admin-main-tabs>:is(a,button){
+  width:100%;min-width:0;min-height:40px;padding:8px 9px!important;border:1px solid transparent;
+  border-radius:10px!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap!important;
+  text-align:center;font-size:.72rem;line-height:1.15;
+}
+body.admin-mode .admin-unified-tabs>.admin-main-tabs>:is(a,button):not(.active):hover{
+  border-color:var(--admin-ui-border);background:var(--admin-ui-soft);
+}
+@media(min-width:981px){body.admin-mode .admin-unified-tabs{position:sticky;z-index:24;top:8px}}
+
+body.admin-mode .admin-unified-modulebar{
+  min-width:0;margin:0!important;padding:9px 11px!important;border:1px solid var(--admin-ui-border)!important;
+  border-radius:16px!important;background:var(--panel)!important;box-shadow:var(--admin-ui-shadow)!important;
+}
+body.admin-mode .warehouse-module-nav.admin-unified-modulebar,
+body.admin-mode .agent-module-nav.admin-unified-modulebar{grid-template-columns:minmax(145px,180px) minmax(0,1fr);gap:10px}
+body.admin-mode .admin-unified-modulebar :is(.warehouse-module-brand,.agent-module-brand){padding:4px 10px;border-color:var(--line)}
+body.admin-mode .admin-unified-modulebar .warehouse-module-links{grid-template-columns:repeat(7,minmax(82px,1fr));gap:5px}
+body.admin-mode .admin-unified-modulebar .warehouse-module-links a{min-height:46px;padding:7px 8px;border-radius:10px}
+body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups{display:grid;grid-template-columns:repeat(6,minmax(88px,1fr));gap:5px}
+body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups>section{display:contents}
+body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups>section>span{display:none}
+body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups>section>div{display:contents}
+body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups a{min-height:42px;padding:8px;border:1px solid transparent;border-radius:10px;justify-content:center;text-align:center}
+body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups a:hover{border-color:var(--admin-ui-border);background:var(--admin-ui-soft)}
+body.admin-mode .personalization-commandbar.admin-unified-modulebar{display:flex;align-items:center;justify-content:space-between;gap:12px}
+
+body.admin-mode .admin-unified-hero{
+  display:flex!important;align-items:center!important;justify-content:space-between!important;gap:20px!important;
+  min-width:0;margin:0 0 14px!important;padding:20px 22px!important;
+  border:1px solid var(--admin-ui-border)!important;border-radius:16px!important;
+  background:linear-gradient(135deg,var(--panel),var(--admin-ui-soft))!important;
+  box-shadow:0 7px 22px rgba(15,23,42,.04)!important;
+}
+body.admin-mode .orders-command-hero.admin-unified-hero{
+  display:grid!important;grid-template-columns:minmax(0,1fr)!important;align-items:stretch!important;gap:15px!important;
+  padding:18px 20px!important;border:0!important;border-radius:19px!important;
+  background:linear-gradient(125deg,var(--ink) 0%,color-mix(in srgb,var(--ink) 72%,var(--brand2)) 52%,var(--brand) 100%)!important;
+  box-shadow:0 18px 42px rgba(30,64,175,.2)!important;
+}
+body.admin-mode .von-halsky-workspace-head.admin-unified-hero{
+  display:grid!important;grid-template-columns:minmax(0,1fr) minmax(340px,.75fr);
+}
+body.admin-mode .orders-command-hero .orders-command-head{padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
+body.admin-mode .admin-unified-hero>:first-child{min-width:0;flex:1 1 auto}
+body.admin-mode .admin-unified-hero :is(h1,h2){margin:.16rem 0 .35rem;font-size:clamp(1.35rem,2.25vw,1.78rem);line-height:1.12;letter-spacing:-.025em}
+body.admin-mode .admin-unified-hero p{max-width:800px;margin:0;color:var(--muted2);font-size:.85rem;line-height:1.52}
+body.admin-mode .admin-unified-hero>:is(.diag-actions,.warehouse-page-tools,.allegro-listing-hero-actions){
+  flex:0 1 520px;justify-content:flex-end;padding:10px!important;border-color:var(--admin-ui-border)!important;background:color-mix(in srgb,var(--bg) 82%,var(--panel))!important;
+}
+body.admin-mode .admin-unified-hero .btn{min-height:40px}
+body.admin-mode .infakt-hero>.admin-unified-hero{margin-bottom:12px!important}
+body.admin-mode .warehouse-page-context.admin-unified-hero{--warehouse-accent:var(--brand);align-items:center!important;border:1px solid var(--admin-ui-border)!important;border-left:5px solid var(--warehouse-accent)!important;background:linear-gradient(135deg,var(--panel),color-mix(in srgb,var(--warehouse-accent) 8%,var(--panel)))!important}
+body.admin-mode .warehouse-page-context:is(.section-dostawcy,.section-plan){--warehouse-accent:var(--accent)}
+body.admin-mode .warehouse-page-context.section-stany{--warehouse-accent:var(--ok)}
+body.admin-mode .warehouse-page-context:is(.section-lokalizacje,.section-etykiety-qr){--warehouse-accent:var(--brand2)}
+body.admin-mode .warehouse-page-context .warehouse-page-kicker>span{border-color:color-mix(in srgb,var(--warehouse-accent) 35%,var(--line));background:color-mix(in srgb,var(--warehouse-accent) 10%,var(--panel))}
+body.admin-mode .shipping-page-context.admin-unified-hero h1{font-size:clamp(1.25rem,2vw,1.6rem)}
+body.admin-mode .ai-agent-hero.admin-unified-hero>div:last-child{display:grid;grid-template-columns:72px minmax(210px,1fr);gap:7px;min-width:min(100%,390px)}
+body.admin-mode .ai-agent-hero.admin-unified-hero>div:last-child>*{width:100%;margin:0}
+body.admin-mode .ai-agent-hero.admin-unified-hero .health-score{grid-row:1/3;display:grid;place-items:center;min-height:86px}
+
+body.admin-mode .admin-unified-panel{
+  min-width:0;margin:0!important;border:1px solid var(--admin-ui-border)!important;
+  border-radius:16px!important;box-shadow:var(--admin-ui-shadow)!important;
+}
+body.admin-mode .admin-unified-panel:not(.allegro-listing-catalog):not(.admin-pattern-surface):not(.module-tabs-panel){padding:clamp(14px,1.6vw,20px)}
+body.admin-mode .admin-unified-panel>.admin-unified-section-head{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:14px;
+  margin:0 0 14px;padding:0 0 13px;border-bottom:1px solid var(--line);
+}
+body.admin-mode .admin-unified-section-head :is(h2,h3){margin:.12rem 0 .25rem;line-height:1.18}
+body.admin-mode .admin-unified-section-head p{margin:0;color:var(--muted2);line-height:1.45}
+
+body.admin-mode .admin-unified-metrics{
+  display:grid!important;grid-template-columns:repeat(auto-fit,minmax(135px,1fr))!important;
+  gap:9px!important;min-width:0;margin:0 0 14px!important;
+}
+body.admin-mode .admin-unified-metrics>:is(article,div,button,a){
+  min-width:0;min-height:88px;margin:0!important;padding:13px 14px!important;
+  border:1px solid var(--admin-ui-border)!important;border-radius:14px!important;
+  background:var(--panel)!important;box-shadow:0 4px 14px rgba(15,23,42,.035)!important;
+}
+body.admin-mode .admin-unified-metrics>:is(button,a){cursor:pointer}
+body.admin-mode .admin-unified-metrics>:is(button,a):hover{border-color:var(--brand)!important;background:var(--admin-ui-soft)!important;transform:translateY(-1px)}
+body.admin-mode .admin-unified-metrics :is(b,strong){line-height:1.05}
+body.admin-mode .admin-unified-metrics small{color:var(--muted2);line-height:1.3}
+
+body.admin-mode .admin-unified-search{margin:0 0 12px!important;border-color:var(--admin-ui-border)!important;box-shadow:none!important}
+body.admin-mode .admin-unified-search>summary{min-height:48px;background:color-mix(in srgb,var(--bg) 72%,var(--panel))}
+body.admin-mode .admin-unified-search>summary span:first-child{display:grid;gap:2px;min-width:0}
+body.admin-mode .admin-unified-search>summary small{color:var(--muted2);font-size:.68rem}
+body.admin-mode .admin-unified-search .admin-search-standard-body{padding-top:14px}
+body.admin-mode .admin-unified-toolbar{
+  min-width:0;max-width:100%;gap:7px!important;margin:0!important;padding:9px 10px!important;
+  border:1px solid var(--admin-ui-border)!important;border-radius:12px!important;
+  background:color-mix(in srgb,var(--bg) 80%,var(--panel))!important;
+}
+body.admin-mode .admin-unified-toolbar>.btn{min-height:40px}
+
+body.admin-mode .admin-unified-view table.admin-standard-table{border:1px solid var(--admin-ui-border);border-radius:14px;overflow:hidden}
+body.admin-mode .admin-unified-view table.admin-standard-table th{height:44px;background:color-mix(in srgb,var(--bg) 84%,var(--panel));letter-spacing:.035em}
+body.admin-mode .admin-unified-view table.admin-standard-table td{min-height:48px}
+body.admin-mode .admin-unified-view table.admin-standard-table tbody tr:nth-child(even)>td{background:color-mix(in srgb,var(--bg) 38%,var(--panel))}
+body.admin-mode .admin-unified-view table.admin-standard-table tbody tr:hover>td{background:var(--admin-ui-hover)!important}
+body.admin-mode .admin-unified-empty{min-height:118px;padding:24px;border:1px dashed var(--admin-ui-border);border-radius:14px;background:var(--bg);color:var(--muted2);text-align:center}
+
+body.admin-mode .admin-channel-truth,
+body.admin-mode .admin-channel-stage{--channel-accent:var(--brand);--channel-accent-soft:color-mix(in srgb,var(--brand) 7%,var(--panel));--channel-accent-ink:color-mix(in srgb,var(--brand) 72%,var(--text));min-width:0}
+body.admin-mode :is(.admin-channel-truth,.admin-channel-stage).is-allegro{--channel-accent:var(--accent);--channel-accent-soft:color-mix(in srgb,var(--accent) 9%,var(--panel));--channel-accent-ink:color-mix(in srgb,var(--accent) 66%,var(--text))}
+body.admin-mode :is(.admin-channel-truth,.admin-channel-stage).is-von-halsky{--channel-accent:var(--accent);--channel-accent-soft:color-mix(in srgb,var(--accent) 9%,var(--panel));--channel-accent-ink:color-mix(in srgb,var(--accent) 66%,var(--text))}
+body.admin-mode .admin-channel-truth{display:grid;gap:12px;padding:16px;border:1px solid color-mix(in srgb,var(--ok) 38%,var(--line));border-radius:17px;background:linear-gradient(110deg,color-mix(in srgb,var(--ok) 7%,var(--panel)),var(--panel) 68%)}
+body.admin-mode .admin-channel-truth.is-warning{border-color:color-mix(in srgb,var(--accent) 38%,var(--line));background:linear-gradient(110deg,color-mix(in srgb,var(--accent) 7%,var(--panel)),var(--panel) 68%)}
+body.admin-mode .admin-channel-truth-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+body.admin-mode .admin-channel-truth-head>div:first-child span{display:block;color:color-mix(in srgb,var(--ok) 72%,var(--text));text-transform:uppercase;letter-spacing:.07em;font-size:.65rem;font-weight:950}
+body.admin-mode .admin-channel-truth.is-warning .admin-channel-truth-head>div:first-child span{color:color-mix(in srgb,var(--accent) 72%,var(--text))}
+body.admin-mode .admin-channel-truth-head h3{margin:3px 0 0;font-size:1.05rem}
+body.admin-mode .admin-channel-truth-head>div:last-child{display:grid;justify-items:end;gap:5px}
+body.admin-mode .admin-channel-truth-head small{color:var(--muted2);font-size:.7rem}
+body.admin-mode .admin-channel-truth-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+body.admin-mode .admin-channel-truth-grid article{min-width:0;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+body.admin-mode .admin-channel-truth-grid :is(small,b,span){display:block}
+body.admin-mode .admin-channel-truth-grid small{color:var(--muted2);font-size:.65rem}
+body.admin-mode .admin-channel-truth-grid b{margin:3px 0;font-size:1.35rem}
+body.admin-mode .admin-channel-truth-grid span{color:var(--muted2);font-size:.66rem}
+body.admin-mode .admin-channel-truth-grid article.success{border-color:color-mix(in srgb,var(--ok) 34%,var(--line))}
+body.admin-mode .admin-channel-truth-grid article.success b{color:color-mix(in srgb,var(--ok) 78%,var(--text))}
+body.admin-mode .admin-channel-truth-grid article.pending{border-color:color-mix(in srgb,var(--brand) 30%,var(--line))}
+body.admin-mode .admin-channel-truth-grid article.pending b{color:color-mix(in srgb,var(--brand) 78%,var(--text))}
+body.admin-mode .admin-channel-truth-grid article.danger{border-color:color-mix(in srgb,var(--danger) 28%,var(--line))}
+body.admin-mode .admin-channel-truth-grid article.danger b{color:color-mix(in srgb,var(--danger) 78%,var(--text))}
+body.admin-mode .admin-channel-stage{display:grid;gap:11px;padding:14px;border:1px solid var(--line);border-radius:17px;background:color-mix(in srgb,var(--bg) 84%,var(--panel))}
+body.admin-mode .admin-channel-stage>header{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+body.admin-mode .admin-channel-stage>header>div>small{display:block;color:var(--channel-accent-ink);font-size:.72rem;font-weight:900;letter-spacing:.06em;text-transform:uppercase}
+body.admin-mode .admin-channel-stage>header h3{margin:3px 0 0;font-size:1rem}
+body.admin-mode .admin-channel-stage>header>span{max-width:520px;color:var(--muted2);font-size:.78rem;text-align:right}
+body.admin-mode .admin-channel-stage-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}
+body.admin-mode .admin-channel-stage-filters button{display:grid;grid-template-columns:38px minmax(0,1fr);grid-template-rows:auto auto;align-items:center;gap:2px 10px;min-width:0;min-height:78px;padding:11px 13px;border:1px solid var(--line);border-radius:14px;background:var(--panel);color:var(--text);text-align:left;cursor:pointer;transition:border-color .15s ease,background .15s ease,box-shadow .15s ease}
+body.admin-mode .admin-channel-stage-filters button>span{grid-row:1/3;display:grid;place-items:center;width:38px;height:38px;border-radius:11px;background:var(--channel-accent-soft);color:var(--channel-accent-ink);font-size:1rem;font-weight:950}
+body.admin-mode .admin-channel-stage-filters button>b{align-self:end;font-size:1.28rem;line-height:1.05}
+body.admin-mode .admin-channel-stage-filters button>small{align-self:start;overflow:visible;color:var(--muted2);font-size:.78rem;font-weight:780;line-height:1.2;white-space:normal}
+body.admin-mode .admin-tresc .admin-channel-stage-filters button>small{overflow:visible!important;text-overflow:clip!important;white-space:normal!important}
+body.admin-mode .admin-channel-stage-filters button:hover{border-color:var(--channel-accent);background:var(--channel-accent-soft)}
+body.admin-mode .admin-channel-stage-filters button:focus-visible{outline:3px solid color-mix(in srgb,var(--channel-accent) 28%,transparent);outline-offset:2px}
+body.admin-mode .admin-channel-stage-filters button.active{border-color:var(--channel-accent);background:var(--channel-accent-soft);box-shadow:0 0 0 2px color-mix(in srgb,var(--channel-accent) 12%,transparent)}
+body.admin-mode .admin-channel-stage-filters button.active>span{background:var(--channel-accent);color:var(--panel)}
+body.admin-mode .admin-channel-stage.is-von-halsky .admin-channel-stage-filters button.active>span{color:var(--text)}
+/* Etapy kanału są wspólnym, jedynym paskiem filtrów nad treścią. Starsze
+   kafelki publikacji Allegro pozostają kompatybilne w kodzie, ale nie dublują
+   tych samych operacji w interfejsie. */
+body.admin-mode .allegro-unified-offers .allegro-offer-unified-content>.allegro-listing-workspace>.allegro-listing-metrics{display:none!important}
+body.admin-mode .channel-sales-state{display:grid;align-content:start;justify-items:start;gap:5px;min-width:0}
+body.admin-mode .channel-sales-state>b{font-size:.78rem;line-height:1.25}
+body.admin-mode .channel-sales-state>.lvl{white-space:normal;text-align:left}
+body.admin-mode .channel-sales-state>small{display:block;color:var(--muted2);font-size:.68rem;line-height:1.3;overflow-wrap:anywhere}
+
+body.admin-mode .admin-unified-view form label{color:var(--muted2);font-size:.72rem;font-weight:850;line-height:1.25}
+body.admin-mode .admin-unified-view form :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea){min-height:42px;border-color:var(--admin-ui-border);border-radius:10px;background:var(--panel)}
+body.admin-mode .admin-unified-view form :is(input,select,textarea):focus{border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 13%,transparent);outline:0}
+
+@media(max-width:1180px){
+  body.admin-mode .warehouse-module-nav.admin-unified-modulebar,
+  body.admin-mode .agent-module-nav.admin-unified-modulebar{grid-template-columns:1fr}
+  body.admin-mode .admin-unified-modulebar :is(.warehouse-module-brand,.agent-module-brand){display:none}
+}
+@media(max-width:900px){
+  body.admin-mode .admin-channel-truth-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  body.admin-mode .admin-unified-hero{align-items:flex-start!important;flex-direction:column!important;padding:17px!important}
+  body.admin-mode .admin-unified-hero>:is(.diag-actions,.warehouse-page-tools,.allegro-listing-hero-actions){width:100%;flex-basis:auto;justify-content:flex-start}
+  body.admin-mode .admin-unified-panel>.admin-unified-section-head{align-items:stretch;flex-direction:column}
+  body.admin-mode .personalization-commandbar.admin-unified-modulebar{align-items:stretch;flex-direction:column}
+}
+@media(max-width:720px){
+  body.admin-mode .admin-channel-truth{padding:12px}
+  body.admin-mode .admin-channel-truth-head,
+  body.admin-mode .admin-channel-stage>header{align-items:stretch;flex-direction:column}
+  body.admin-mode .admin-channel-truth-head>div:last-child{justify-items:start}
+  body.admin-mode .admin-channel-stage>header>span{text-align:left}
+  body.admin-mode .admin-channel-truth-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  body.admin-mode .admin-channel-stage-filters{grid-template-columns:repeat(2,minmax(0,1fr))}
+  body.admin-mode .admin-unified-view{gap:10px}
+  body.admin-mode .admin-unified-tabs>.admin-main-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}
+  body.admin-mode .admin-unified-modulebar .warehouse-module-links,
+  body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups{grid-template-columns:repeat(2,minmax(0,1fr))}
+  body.admin-mode .admin-unified-metrics{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  body.admin-mode .admin-unified-hero>:is(.diag-actions,.warehouse-page-tools,.allegro-listing-hero-actions){display:grid!important;grid-template-columns:1fr 1fr}
+  body.admin-mode .admin-unified-hero>:is(.diag-actions,.warehouse-page-tools,.allegro-listing-hero-actions)>*{width:100%}
+  body.admin-mode .ai-agent-hero.admin-unified-hero>div:last-child{grid-template-columns:64px minmax(0,1fr);width:100%;min-width:0}
+  body.admin-mode .admin-workspace-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px!important}
+  body.admin-mode .admin-workspace-actions>*{width:100%!important;min-width:0!important;max-width:none!important;flex:none!important}
+  body.admin-mode .admin-workspace-actions .admin-workspace-health{grid-column:1/-1;order:10}
+}
+@media(max-width:440px){
+  body.admin-mode .admin-channel-stage-filters{grid-template-columns:minmax(0,1fr)}
+  body.admin-mode .admin-unified-tabs>.admin-main-tabs,
+  body.admin-mode .admin-unified-modulebar .warehouse-module-links,
+  body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups{grid-template-columns:repeat(2,minmax(0,1fr))}
+  body.admin-mode .admin-unified-metrics{grid-template-columns:minmax(0,1fr)!important}
+  body.admin-mode .admin-unified-hero>:is(.diag-actions,.warehouse-page-tools,.allegro-listing-hero-actions){grid-template-columns:1fr}
+}
+@media(max-width:340px){
+  body.admin-mode .admin-unified-tabs>.admin-main-tabs,
+  body.admin-mode .admin-unified-modulebar .warehouse-module-links,
+  body.admin-mode .agent-module-nav.admin-unified-modulebar .agent-module-groups,
+  body.admin-mode .admin-workspace-actions{grid-template-columns:minmax(0,1fr)}
+  body.admin-mode .admin-workspace-actions .admin-workspace-health{grid-column:auto}
+}
+
+/* Panel ma stałe menu boczne, więc szerokość treści bywa znacznie mniejsza niż
+   szerokość okna. Poniższe reguły reagują na faktyczną szerokość .admin-tresc,
+   a nie na viewport. Dzięki temu całe kontrolki przechodzą do kolejnego wiersza
+   zamiast ściskać nagłówki i ucinać napisy. */
+body.admin-mode .admin-page-pattern details:is(.admin-results-export,.restock-plan-tools,.von-halsky-order-more){
+  overflow:visible!important;border:0!important;background:transparent!important;
+}
+body.admin-mode .admin-page-pattern details:is(.admin-results-export,.restock-plan-tools)>div{
+  width:max-content;min-width:min(245px,calc(100cqw - 24px));
+  max-width:min(360px,calc(100cqw - 24px));margin:0!important;
+}
+body.admin-mode .admin-page-pattern details.admin-results-export>div .btn{
+  width:100%;max-width:none;justify-content:flex-start;
+}
+body.admin-mode .admin-page-pattern details.von-halsky-order-more{
+  width:min(190px,100%);max-width:100%;
+}
+body.admin-mode .admin-page-pattern details.von-halsky-order-more>.btn{width:100%;max-width:none}
+body.admin-mode .banner-admin-preview,
+body.admin-mode .banner-admin-preview :is(div,span,b,strong,small,p,em){
+  white-space:normal!important;overflow:visible;text-overflow:clip;
+}
+
+@container admin-content (max-width:900px){
+  body.admin-mode .admin-unified-hero{
+    align-items:flex-start!important;flex-direction:column!important;padding:17px!important;
+  }
+  body.admin-mode .admin-unified-hero>:is(.diag-actions,.warehouse-page-tools,.allegro-listing-hero-actions){
+    width:100%;flex-basis:auto;justify-content:flex-start;
+  }
+  body.admin-mode .orders-command-hero .orders-command-head{
+    align-items:stretch!important;flex-direction:column!important;
+  }
+  body.admin-mode .von-halsky-workspace-head.admin-unified-hero{grid-template-columns:minmax(0,1fr)}
+  body.admin-mode .orders-command-heading{width:100%}
+  body.admin-mode .orders-command-heading :is(h2,p){overflow-wrap:normal;word-break:normal}
+  body.admin-mode .orders-command-actions{width:100%;justify-content:flex-start}
+  body.admin-mode .orders-command-actions .btn{flex:1 1 280px}
+  body.admin-mode .admin-unified-panel>.admin-unified-section-head{
+    align-items:stretch;flex-direction:column;
+  }
+  body.admin-mode .personalization-commandbar.admin-unified-modulebar{
+    align-items:stretch;flex-direction:column;
+  }
+  body.admin-mode .agent-permission-columns{grid-template-columns:minmax(0,1fr)}
+  body.admin-mode .agent-permission-blocked{grid-template-columns:minmax(0,1fr)}
+  body.admin-mode .admin-unified-hero>.btn{width:min(100%,280px);min-width:min(100%,220px)}
+  body.admin-mode .banner-template-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  body.admin-mode .home-editor-grid{grid-template-columns:minmax(0,1fr)}
+  body.admin-mode .emoji-input-row{align-items:stretch;flex-direction:column}
+  body.admin-mode .emoji-input-row .btn{width:100%;flex:1 1 auto}
+  body.admin-mode .admin-page-pattern :is(.admin-pattern-toolbar,.diag-actions,.admin-workspace-actions,.admin-results-operations,.admin-results-selection,.results-bar,.assortment-results-toolbar,.assortment-bulk-editor,.allegro-listing-selection,.warehouse-worktable-actions,.allegro-toolbar,.toolbar,.form-actions,.f-row)>:is(.btn,button,a[role="button"],details){
+    flex:1 1 280px;
+  }
+  body.admin-mode .admin-page-pattern .diagnostic-code-repair{grid-template-columns:34px minmax(0,1fr)}
+  body.admin-mode .admin-page-pattern .diagnostic-code-repair .btn{grid-column:1/-1;width:100%}
+  body.admin-mode .von-halsky-order-ticket>footer{align-items:flex-start;flex-direction:column}
+  body.admin-mode .von-halsky-ticket-actions{justify-content:flex-start;width:100%}
+  body.admin-mode table.admin-responsive-table :is(tbody,tfoot)>tr{
+    grid-template-columns:minmax(0,1fr);
+  }
+  body.admin-mode .warehouse-stock-page .warehouse-stock-summary{
+    grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr))!important;
+  }
+}
+
+@container admin-content (max-width:680px){
+  body.admin-mode .banner-template-grid{grid-template-columns:minmax(0,1fr)}
+  body.admin-mode .admin-channel-truth-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  body.admin-mode .admin-channel-truth-head,
+  body.admin-mode .admin-channel-stage>header{align-items:stretch;flex-direction:column}
+  body.admin-mode .admin-channel-truth-head>div:last-child{justify-items:start}
+  body.admin-mode .admin-channel-stage>header>span{text-align:left}
+}

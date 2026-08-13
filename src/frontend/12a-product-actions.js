@@ -1,0 +1,357 @@
+/* ═══════════ KATALOG PRODUKTÓW — AGENT I DECYZJE MASOWE ALLEGRO ═══════════ */
+let asortymentAgentKolejka={busy:false,operation:"product-full-review",ids:[],done:0,total:0,ok:0,warnings:0,failed:0,cancel:false,current:"",results:[],startedAt:"",finishedAt:""};
+let asortymentAllegroDecyzja={step:"idle",busy:false,operation:"update",ids:[],skipped:0,done:0,total:0,ok:0,failed:0,error:"",results:[]};
+let asortymentPelneProduktyCache=new Map();
+let asortymentSerwerowaKolejka={batchId:"",checking:false,enqueuing:false,timer:null,lastCheck:0,state:null};
+const ASORTYMENT_PELNY_PRODUKT_CACHE_MS=15*60*1000;
+const ASORTYMENT_MAX_PRODUKTOW_KOLEJKI=2000;
+
+function asortymentIdKolejki(ids=[]){return [...new Set((Array.isArray(ids)?ids:[ids]).map(id=>String(id??"").trim()).filter(Boolean))];}
+function asortymentSprawdzLimitKolejki(ids=[]){
+  if(ids.length<=ASORTYMENT_MAX_PRODUKTOW_KOLEJKI)return true;
+  toast(`Zaznaczono ${ids.length} produktów. Jedna trwała kolejka przyjmuje maksymalnie ${ASORTYMENT_MAX_PRODUKTOW_KOLEJKI} — niczego nie ucięto ani nie uruchomiono.`);
+  return false;
+}
+
+function asortymentProduktPoId(rawId){return pobierzProduktAdmin(rawId)||produktyDoAdministracji().find(p=>String(p.id)===String(rawId))||null;}
+function asortymentPelnyProduktPoId(rawId){
+  const cached=asortymentPelneProduktyCache.get(String(rawId??""));
+  return cached?.product||null;
+}
+async function asortymentPobierzPelnyProdukt(rawId,{force=false}={}){
+  const id=String(rawId??"").trim(),cached=asortymentPelneProduktyCache.get(id);
+  if(!force&&cached&&Date.now()-cached.at<ASORTYMENT_PELNY_PRODUKT_CACHE_MS)return cached.product;
+  const result=await chmura("product-catalog-item",{params:{id},timeout:30000}),product=result?.product;
+  if(!product||String(product.id)!==id)throw new Error(`Nie udało się pobrać pełnej kartoteki produktu ${id}.`);
+  const fullProduct={...product,_catalog:{...(product._catalog||{}),detailLevel:"full"}};
+  asortymentPelneProduktyCache.delete(id);asortymentPelneProduktyCache.set(id,{at:Date.now(),product:fullProduct});
+  if(typeof podmienProduktAdminBezRenderu==="function")podmienProduktAdminBezRenderu(id,fullProduct);
+  while(asortymentPelneProduktyCache.size>250)asortymentPelneProduktyCache.delete(asortymentPelneProduktyCache.keys().next().value);
+  return fullProduct;
+}
+function asortymentOfertaProduktu(p={}){return allegroOfertaDlaProduktuSklepu(p)||(p.allegroOfferId?allegroOfertaPoId(String(p.allegroOfferId)):null);}
+function asortymentProduktyZId(ids=[]){return [...new Set(ids.map(String))].map(asortymentProduktPoId).filter(p=>p&&!czyProduktAdminWKoszu(p));}
+function asortymentOdswiezCentrumDzialan(){
+  const listing=document.querySelector("[data-allegro-publication-center]");
+  if(listing&&typeof allegroPublikacjaCentrumOperacjiHTML==="function")listing.innerHTML=allegroPublikacjaCentrumOperacjiHTML();
+  const serverProgress=document.querySelector("[data-allegro-server-preparation]");
+  if(serverProgress&&typeof allegroPublikacjaPostepSerweraHTML==="function")serverProgress.outerHTML=allegroPublikacjaPostepSerweraHTML();
+  const queue=document.querySelector("[data-allegro-agent-queue]");
+  if(queue&&typeof allegroZadaniaAgentaOfertHTML==="function")queue.outerHTML=allegroZadaniaAgentaOfertHTML();
+  const el=document.querySelector("[data-product-agent-center]");if(el)el.innerHTML=asortymentCentrumDzialanHTML();
+}
+function asortymentOdswiezStanZaznaczenia(){
+  document.querySelectorAll("[data-assortment-product-id]").forEach(input=>{const checked=zaznaczoneProdukty.has(Number(input.dataset.assortmentProductId))||zaznaczoneProdukty.has(input.dataset.assortmentProductId);input.checked=checked;const card=input.closest("[data-assortment-product-card]")||input.closest("tr");card?.classList.toggle("is-selected",checked);card?.classList.toggle("selected",checked);});
+  document.querySelectorAll("[data-product-selection-count]").forEach(el=>{el.textContent=String(zaznaczoneProdukty.size);});
+  document.querySelectorAll("[data-product-selection-required]").forEach(el=>{el.disabled=!zaznaczoneProdukty.size;});
+  const operations=document.querySelector('[data-admin-results-operations="assortment-products"]');
+  operations?.querySelectorAll("[data-admin-selected-count]").forEach(el=>{el.textContent=String(zaznaczoneProdukty.size);});
+  operations?.querySelectorAll("[data-admin-selected-required]").forEach(el=>{el.disabled=!zaznaczoneProdukty.size;});
+  asortymentOdswiezCentrumDzialan();
+}
+function asortymentUstawOperacjeAgenta(){asortymentAgentKolejka.operation="product-full-review";}
+function asortymentUstawOperacjeZewnetrzna(value){asortymentAllegroDecyzja.operation=String(value||"update");}
+
+function asortymentZastosujStanKolejkiSerwera(queue={},preferredBatchId=""){
+  asortymentSerwerowaKolejka.state=queue&&typeof queue==="object"?queue:null;
+  const batches=Array.isArray(queue.batches)?queue.batches:[],preferred=batches.find(item=>String(item.id)===String(preferredBatchId||asortymentSerwerowaKolejka.batchId)),working=batches.find(item=>Number(item.pending||0)+Number(item.running||0)>0),newest=batches[0]||null;
+  const batch=preferred||working||newest||null;
+  if(!batch)return false;
+  asortymentSerwerowaKolejka.batchId=String(batch.id||"");
+  const trackedTaskIds=new Set((Array.isArray(batch.trackedTaskIds)?batch.trackedTaskIds:[]).map(String));
+  const recent=(Array.isArray(queue.recent)?queue.recent:[]).filter(item=>trackedTaskIds.size?trackedTaskIds.has(String(item.id)):String(item.batchId)===asortymentSerwerowaKolejka.batchId);
+  const results=recent.map(item=>({id:String(item.productId||""),name:item.name||`Produkt ${item.productId}`,ok:item.status!=="failed",ready:item.ready===true,missing:item.missing||[],savedFields:item.savedFields||[],error:item.error||""}));
+  const queuedIds=[...(Array.isArray(batch.pendingProductIds)?batch.pendingProductIds:[]),...(batch.activeProductId?[batch.activeProductId]:[])].map(String);
+  queuedIds.forEach(id=>podmienProduktAdminBezRenderu(id,{allegroAgentPreparationStatus:"queued",allegroAgentPreparationError:"",allegroAgentPreparationMissing:[]}));
+  recent.forEach(item=>podmienProduktAdminBezRenderu(item.productId,{
+    allegroAgentPreparationStatus:item.status==="completed"?"ready":item.status==="attention"?"retrying":item.status==="waiting_provider"?"waiting_provider":item.status==="decision_required"?"decision_required":item.status==="failed"?"failed":"queued",
+    allegroAgentPreparationError:item.error||"",
+    allegroAgentPreparationMissing:item.missing||[],
+    allegroAgentPreparedAt:item.completedAt||"",
+  }));
+  const unresolved=Number(batch.attention||0)+Number(batch.waitingProvider||0)+Number(batch.decisionRequired||0),done=Number(batch.completed||0)+unresolved+Number(batch.failed||0),total=Math.max(Number(batch.total||0),done+Number(batch.pending||0)+Number(batch.running||0)),busy=Number(batch.pending||0)+Number(batch.running||0)>0;
+  asortymentAgentKolejka={...asortymentAgentKolejka,busy,operation:"product-full-review",ids:[],done,total,ok:Number(batch.completed||0),warnings:unresolved,failed:Number(batch.failed||0),current:queue.active&&String(queue.active.batchId)===asortymentSerwerowaKolejka.batchId?`Produkt ${queue.active.productId}`:"",results,startedAt:batch.requestedAt||"",finishedAt:busy?"":queue.updatedAt||new Date().toISOString(),cloudSaved:!busy&&unresolved===0&&Number(batch.failed||0)===0};
+  return true;
+}
+async function asortymentSprawdzKolejkeSerwera({render=true}={}){
+  if(asortymentSerwerowaKolejka.checking)return;
+  asortymentSerwerowaKolejka.timer=null;
+  asortymentSerwerowaKolejka.checking=true;
+  try{
+    const response=await chmura("allegro-preparation-queue-status",{timeout:30000}),queue=response?.queue||{};
+    const found=asortymentZastosujStanKolejkiSerwera(queue);
+    if(render)asortymentOdswiezCentrumDzialan();
+    if(asortymentAgentKolejka.busy){
+      clearTimeout(asortymentSerwerowaKolejka.timer);asortymentSerwerowaKolejka.timer=setTimeout(()=>void asortymentSprawdzKolejkeSerwera(),2500);
+    }else if(found){
+      asortymentPelneProduktyCache.clear();
+      if(typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
+      if(typeof allegroPublikacjaCentralnaUniewaznij==="function")allegroPublikacjaCentralnaUniewaznij();
+      if(typeof allegroPublikacjaCentralnaPobierz==="function"&&trasa()==="/admin/allegro/oferty")await allegroPublikacjaCentralnaPobierz(true).catch(()=>null);
+      else await asortymentCentralnyPobierz(true,{render:false}).catch(()=>null);
+      if(render&&(asortymentCentralnyTrasaAktywna()||trasa()==="/admin/allegro/oferty"))renderuj();
+    }
+  }catch(error){if(asortymentAgentKolejka.busy){clearTimeout(asortymentSerwerowaKolejka.timer);asortymentSerwerowaKolejka.timer=setTimeout(()=>void asortymentSprawdzKolejkeSerwera(),5000);}}
+  finally{asortymentSerwerowaKolejka.checking=false;asortymentSerwerowaKolejka.lastCheck=Date.now();}
+}
+async function asortymentSterujKolejkaSerwera(action="pause",batchId="",{skipConfirm=false}={}){
+  const operation=String(action||"").toLowerCase();
+  if(!["pause","resume","cancel","cancel_previous"].includes(operation))return null;
+  if(operation.startsWith("cancel")&&!skipConfirm&&!confirm(operation==="cancel_previous"?"Anulować wcześniejsze oczekujące zadania i zachować bieżącą partię? Aktualnie zapisywany produkt zostanie bezpiecznie dokończony.":"Anulować oczekujące zadania tej kolejki? Aktualnie zapisywany produkt zostanie bezpiecznie dokończony, ale Agent nie rozpocznie kolejnych anulowanych pozycji."))return null;
+  try{
+    const response=await chmura("allegro-preparation-queue-control",{method:"POST",body:{action:operation,batchId:String(batchId||"")},timeout:30000}),queue=response?.queue||{};
+    asortymentZastosujStanKolejkiSerwera(queue,batchId);
+    if(typeof agentAIRuntime!=="undefined")agentAIRuntime={...agentAIRuntime,preparationQueue:queue};
+    if(typeof vonHalskyPobierzStanProcesow==="function")await vonHalskyPobierzStanProcesow().catch(()=>null);
+    asortymentOdswiezCentrumDzialan();
+    if(typeof agentAIRuntimePobierz==="function"&&String(location.hash||"").includes("/admin/agent-ai"))await agentAIRuntimePobierz(true).catch(()=>null);
+    const cancelled=Number(queue?.control?.cancelled)||0;
+    toast(operation==="pause"?"⏸ Kolejka została wstrzymana na serwerze":operation==="resume"?"▶ Kolejka została wznowiona na serwerze":operation==="cancel_previous"?`⛔ Anulowano ${cancelled} wcześniejszych zadań; bieżąca partia została zachowana`:`⛔ Anulowano ${cancelled} oczekujących zadań`);
+    return queue;
+  }catch(error){toast(`Nie zmieniono kolejki: ${error?.message||error}`);return null;}
+}
+function asortymentZapewnijMonitorKolejkiSerwera(){
+  if(asortymentSerwerowaKolejka.checking||asortymentSerwerowaKolejka.timer||Date.now()-asortymentSerwerowaKolejka.lastCheck<10000)return;
+  setTimeout(()=>void asortymentSprawdzKolejkeSerwera({render:false}),0);
+}
+async function asortymentUruchomAgentaNaSerwerze(productIds=[],operation="product-full-review"){
+  const ids=asortymentIdKolejki(productIds);if(!ids.length||!asortymentSprawdzLimitKolejki(ids))return;
+  operation="product-full-review";
+  if(asortymentSerwerowaKolejka.enqueuing){toast("Poprzednie zaznaczenie jest jeszcze przekazywane na serwer");return;}
+  const products=ids.map(asortymentProduktPoId).filter(Boolean),productsById=new Map(products.map(p=>[String(p.id),p]));
+  asortymentSerwerowaKolejka.enqueuing=true;
+  asortymentAgentKolejka={busy:true,operation,ids,done:0,total:ids.length,ok:0,warnings:0,failed:0,cancel:false,current:`przekazywanie ${ids.length} produktów na serwer`,results:[],startedAt:new Date().toISOString(),finishedAt:""};asortymentOdswiezCentrumDzialan();
+  try{
+    const response=await chmura("allegro-preparation-queue-enqueue",{method:"POST",body:{productIds:ids,operation},timeout:30000}),queue=response?.queue||{};
+    const batch=(Array.isArray(queue.batches)?queue.batches:[]).find(item=>String(item.id)===String(queue.batchId||response?.batchId||""));
+    if(batch&&Number(batch.total)!==ids.length)throw new Error(`Serwer potwierdził ${Number(batch.total)||0} z ${ids.length} produktów — kolejka została zatrzymana bez cichego pomijania.`);
+    products.forEach(p=>podmienProduktAdminBezRenderu(p.id,{allegroAgentPreparationStatus:"queued",allegroAgentPreparationError:"",allegroAgentPreparationMissing:[]}));
+    asortymentSerwerowaKolejka.batchId=String(queue.batchId||"");asortymentZastosujStanKolejkiSerwera(queue,queue.batchId);
+    toast(`🤖 Agent zaczyna Twoje ${ids.length} produktów zaraz po aktualnie wykonywanej kartotece — możesz zamknąć kartę`);
+    clearTimeout(asortymentSerwerowaKolejka.timer);asortymentSerwerowaKolejka.timer=setTimeout(()=>void asortymentSprawdzKolejkeSerwera(),1000);asortymentOdswiezCentrumDzialan();
+  }catch(error){asortymentAgentKolejka={...asortymentAgentKolejka,busy:false,failed:ids.length,current:"",finishedAt:new Date().toISOString(),cloudSaved:false,results:ids.map(id=>({id,name:productsById.get(id)?.nazwa||`Produkt ${id}`,ok:false,error:error.message||String(error)}))};asortymentOdswiezCentrumDzialan();toast(`⛔ Serwer nie przejął pełnej kolejki: ${error.message||error}`);}
+  finally{asortymentSerwerowaKolejka.enqueuing=false;asortymentOdswiezCentrumDzialan();}
+}
+
+async function asortymentSeoAgenta(p={}){
+  if(typeof seoAutomatyzujDaneProduktu!=="function")return false;
+  const next=seoAutomatyzujDaneProduktu({...p},"agent-katalogu",{force:false}),patch={};
+  for(const key of ["seoTitle","seoDescription","seoKeywords","seoScore","seoReviewedAt","seoSource","seoMode"])if(next[key]!==undefined&&String(next[key])!==String(p[key]??""))patch[key]=next[key];
+  return Object.keys(patch).length?zapiszPolaProduktuTrwale(p.id,patch,false,"catalog-agent-seo"):false;
+}
+const ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO=["nazwa","allegroTitle","opisKrotki","opis","allegroDescription","producent","marka","gtin","ean","kodProducenta","mpn","zdjecie","zdjecia","sourceEvidence","allegroCategoryId","allegroProductId","allegroParameters","allegroDescriptionSections","allegroSafetyInformation","allegroResponsibleProducer","allegroShippingSubsidy"];
+const ASORTYMENT_POLA_TRWALEGO_ZAPISU_ALLEGRO=[...ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO,"allegroShortDescription","contentEditorial","sourceMaterial","sourceUrl","producentUrl","externalId","sku","numerReferencyjny","parametryProducenta","parametryZrodla","dostepnoscProducenta","stanProducenta","stanProducentaDokladny","stanProducentaZrodlo","producentStatus","producentSprawdzonoAt","contentEditorialPreparedAt","contentEditorialSource","allegroDescriptionSource","allegroEditorialSyncPending","allegroEditorialSyncRequestedAt","allegroEditorialSyncError","allegroAgentPreparationStatus","allegroAgentPreparationMissing","allegroAgentSavedFields","allegroAgentPreparedAt","allegroAgentPreparationStartedAt","allegroAgentPreparationSource","allegroAgentDraftOperation","allegroAgentCompliancePolicy","allegroAgentComplianceCheckedAt","allegroAgentPreparationError","allegroAgentPreparationCheckedAt","allegroAgentPreparationFingerprint","allegroAgentPreparationVersion","allegroAgentPreparationRunId","allegroAgentPreparationConfirmedAt","allegroAgentPreparationConfirmedRevision","seoTitle","seoDescription","seoKeywords","seoScore","seoReviewedAt","seoSource","seoMode"];
+const ASORTYMENT_ETYKIETY_POL_ALLEGRO={nazwa:"nazwa",allegroTitle:"tytuł Allegro",opisKrotki:"opis krótki sklepu",opis:"opis długi sklepu",allegroDescription:"opis Allegro",producent:"producent",marka:"marka",gtin:"GTIN",ean:"EAN",kodProducenta:"kod producenta",mpn:"MPN",zdjecie:"zdjęcie główne ze źródła",zdjecia:"galeria ze źródła",sourceEvidence:"potwierdzenie źródła zdjęć",allegroCategoryId:"kategoria Allegro",allegroProductId:"produkt katalogowy Allegro",allegroParameters:"parametry Allegro",allegroDescriptionSections:"układ opisu Allegro",allegroSafetyInformation:"informacja bezpieczeństwa GPSR",allegroResponsibleProducer:"odpowiedzialny producent GPSR",allegroShippingSubsidy:"dopłata do wysyłki"};
+function asortymentMigawkaPrzygotowania(p={}){return Object.fromEntries(ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.map(key=>[key,p[key]]));}
+function asortymentPolaZmienione(before={},after={}){return ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.filter(key=>JSON.stringify(before[key]??null)!==JSON.stringify(after[key]??null));}
+function asortymentEtykietyPol(keys=[]){return keys.map(key=>ASORTYMENT_ETYKIETY_POL_ALLEGRO[key]||key);}
+function asortymentPolaDoTrwalegoZapisu(p={}){
+  return Object.fromEntries(ASORTYMENT_POLA_TRWALEGO_ZAPISU_ALLEGRO.filter(key=>p[key]!==undefined).map(key=>[key,p[key]]));
+}
+function asortymentStabilnyJson(value){
+  if(Array.isArray(value))return `[${value.map(asortymentStabilnyJson).join(",")}]`;
+  if(value&&typeof value==="object")return `{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${asortymentStabilnyJson(value[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+function asortymentSygnaturaPrzygotowania(p={}){
+  const raw=asortymentStabilnyJson(ASORTYMENT_POLA_PRZYGOTOWANIA_ALLEGRO.map(key=>[key,p[key]??null])),bytes=new TextEncoder().encode(raw);let hash=2166136261;
+  for(const byte of bytes){hash^=byte;hash=Math.imul(hash,16777619);}
+  return `allegro-preparation-v4-${(hash>>>0).toString(16).padStart(8,"0")}`;
+}
+async function asortymentZapiszProduktCentralnie(p={},startedAt=""){
+  const productId=String(p.id??"").trim(),mutationId=`allegro-preparation:${productId}:${String(startedAt||Date.now()).replace(/[^0-9A-Za-z:._-]/g,"").slice(0,80)}`;
+  if(!productId)throw new Error("Brakuje ID produktu — Agent nie może potwierdzić zapisu.");
+  const result=await chmura("catalog-product-fields-update",{method:"POST",body:{productId,fields:asortymentPolaDoTrwalegoZapisu(p),mutationId,area:"allegro-preparation"},timeout:60000});
+  if(result?.confirmed!==true||String(result.productId)!==productId||result.publication?.published!==true)throw new Error("Serwer nie potwierdził zapisu i publikacji pełnej kartoteki.");
+  const confirmed=result.product&&String(result.product.id)===productId?result.product:{...p,...(result.fields||{})};
+  asortymentPelneProduktyCache.set(productId,{at:Date.now(),product:confirmed});
+  podmienProduktAdminBezRenderu(productId,result.fields||{});
+  return {...result,product:confirmed};
+}
+function asortymentStatusPrzygotowania(p={}){
+  const status=String(p.allegroAgentPreparationStatus||"");
+  const missing=Array.isArray(p.allegroAgentPreparationMissing)?p.allegroAgentPreparationMissing:[];
+  const channels=p.contentEditorial?.channelStates||{},allegroReady=["ready","published"].includes(status)||channels.allegro?.status==="ready",vonHalskyReady=p.vonHalskyAgentStatus==="ready"||channels.vonHalsky?.status==="ready",fullReady=allegroReady&&vonHalskyReady&&p.vonHalskyAgentReadbackConfirmed===true&&p.agentQualityReviewStatus==="confirmed"&&p.agentQualityReadbackConfirmed===true;
+  if(status==="queued")return {code:"queued",label:"W kolejce Agenta",note:"oczekuje na przygotowanie i trwały zapis na serwerze"};
+  if(fullReady)return {code:"ready",label:"Gotowy: sklep + Allegro + Von Halsky",note:p.agentQualityConfirmedAt?`odczyt kontrolny ${new Date(p.agentQualityConfirmedAt).toLocaleString("pl-PL")}`:"wszystkie kanały potwierdzone"};
+  if(status==="ready"||status==="published")return {code:"attention",label:"Końcowa kontrola kanałów",note:!vonHalskyReady?"Von Halsky wymaga przygotowania":p.vonHalskyAgentReadbackConfirmed!==true?"oczekuje na odczyt Von Halsky":"oczekuje na wspólne potwierdzenie jakości"};
+  if(status==="needs_attention"||status==="retrying"){return {code:"attention",label:"Automatyczna korekta",note:`${missing.join(", ")||"sprawdzanie danych"} • następna próba jest częścią tej samej pracy`};}
+  if(status==="waiting_provider"){const retry=Date.parse(p.allegroAgentPreparationNextRetryAt||"");return {code:"attention",label:"Oczekuje na dostępność AI",note:`${missing.join(", ")||"redakcja treści"}${Number.isFinite(retry)?` • automatyczne wznowienie ${new Date(retry).toLocaleString("pl-PL")}`:""}`};}
+  if(status==="decision_required")return {code:"failed",label:"Wymaga konkretnej decyzji",note:missing.join(", ")||"automatyczne metody zostały wyczerpane"};
+  if(status==="failed")return {code:"failed",label:"Błąd przygotowania",note:p.allegroAgentPreparationError||"uruchom ponownie"};
+  return {code:"new",label:"Nieprzygotowany",note:"Agent nie zapisał jeszcze kontroli"};
+}
+function asortymentStatusPrzygotowaniaHTML(p={}){const s=asortymentStatusPrzygotowania(p);return `<span class="product-allegro-preparation ${s.code}"><b>${s.code==="ready"?"✅":s.code==="attention"?"⚠️":s.code==="failed"?"⛔":s.code==="queued"?"⏳":"○"} ${esc(s.label)}</b><small>${esc(s.note)}</small></span>`;}
+function asortymentPatchZPrzygotowania(p={},draft={}){
+  const auto=draft.autoFilled||{},catalog=draft.catalogMatch?.selected||{},category=draft.categorySuggestion?.selected||{},patch={};
+  const assign=(key,value)=>{if(value!==undefined&&value!==null&&value!=="")patch[key]=value;};
+  assign("allegroTitle",auto.allegroTitle||p.allegroTitle);
+  assign("producent",allegroProducentKanoniczny({...p,producent:auto.producent||p.producent,marka:auto.marka||p.marka})||auto.producent||p.producent||p.marka);
+  assign("marka",auto.marka||p.marka||patch.producent);
+  assign("gtin",auto.gtin||auto.ean||(catalog.eans||[])[0]||p.gtin||p.ean);
+  assign("ean",auto.ean||auto.gtin||(catalog.eans||[])[0]||p.ean||p.gtin);
+  assign("kodProducenta",auto.kodProducenta||auto.mpn||p.kodProducenta||p.mpn);
+  assign("mpn",auto.mpn||auto.kodProducenta||p.mpn||p.kodProducenta);
+  assign("allegroCategoryId",auto.allegroCategoryId||catalog.categoryId||category.id||p.allegroCategoryId);
+  assign("allegroProductId",auto.allegroProductId||catalog.id||p.allegroProductId);
+  if(auto.sourceEvidence?.imageSourceType==="product_source_page"){
+    assign("zdjecie",auto.zdjecie);
+    patch.zdjecia=Array.isArray(auto.zdjecia)?auto.zdjecia.slice(0,15):[];
+    patch.sourceEvidence=auto.sourceEvidence;
+  }
+  if(Array.isArray(auto.allegroParameters)&&auto.allegroParameters.length)patch.allegroParameters=auto.allegroParameters;
+  if(auto.allegroSafetyInformation?.type)patch.allegroSafetyInformation=auto.allegroSafetyInformation;
+  if(auto.allegroResponsibleProducer?.id)patch.allegroResponsibleProducer=auto.allegroResponsibleProducer;
+  const improved=draft.improvedDescriptions||{},safeSections=draft.draft?.description?.sections||improved.sections||[];
+  if(Array.isArray(safeSections)&&safeSections.length)patch.allegroDescriptionSections=safeSections;
+  const full=String(improved.storeFullDescription||improved.fullDescription||p.opis||"").trim(),short=String(improved.storeShortDescription||improved.shortDescription||p.opisKrotki||(full?agentAITnijDoZdania(full,500):"")).trim(),allegroFull=String(improved.allegroDescription||full||allegroTekstZBezpiecznychSekcji(safeSections)||"").trim();
+  if(full)patch.opis=full;if(short)patch.opisKrotki=short;if(allegroFull)patch.allegroDescription=allegroFull;
+  patch.allegroShippingSubsidy=p.allegroShippingSubsidy??ALLEGRO_DOMYSLNA_DOPLATA_WYSYLKI;
+  return patch;
+}
+async function asortymentPrzygotujProduktDoAllegro(base={},options={}){
+  const productId=String(base.id??"").trim();
+  if(!productId)throw new Error("Brakuje ID produktu.");
+  const enqueue=await chmura("allegro-preparation-queue-enqueue",{method:"POST",body:{
+    productIds:[productId],operation:"product-full-review"
+  },timeout:30000});
+  const batchId=String(enqueue?.queue?.batchId||""),started=Date.now();
+  if(!batchId)throw new Error("Serwer nie zwrócił numeru kolejki przygotowania.");
+  let result=null;
+  while(Date.now()-started<5*60*1000){
+    const status=await chmura("allegro-preparation-queue-status",{timeout:30000});
+    const queue=status?.queue||{},batch=(queue.batches||[]).find(item=>String(item.id)===batchId);
+    if(!batch)throw new Error("Serwer nie odnalazł utworzonej partii przygotowania.");
+    const taskIds=new Set((batch.trackedTaskIds||[]).map(String));
+    result=(queue.recent||[]).find(item=>taskIds.has(String(item.id)))||null;
+    const terminal=Number(batch.completed||0)+Number(batch.attention||0)+Number(batch.waitingProvider||0)+Number(batch.decisionRequired||0)+Number(batch.failed||0);
+    if(result&&terminal>=Number(batch.total||1)&&!Number(batch.pending||0)&&!Number(batch.running||0))break;
+    await new Promise(resolve=>setTimeout(resolve,1000));
+  }
+  if(!result)throw new Error("Przygotowanie nadal pracuje na serwerze — sprawdź monitor kolejki.");
+  if(result.status==="failed")throw new Error(result.error||"Serwer nie potwierdził przygotowania produktu.");
+  const p=await asortymentPobierzPelnyProdukt(productId,{force:true});
+  if(!p)throw new Error("Po przygotowaniu nie udało się odczytać produktu z centralnej kartoteki.");
+  const draft=await chmura("allegro-offer-draft",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p)}},timeout:90000});
+  const missing=[...new Set([...(result.missing||[]),...(draft.missing||[])].map(String).filter(Boolean))];
+  const ready=result.ready===true&&missing.length===0&&draft.compliance?.ok!==false;
+  return {
+    id:productId,name:p.nazwa||"Produkt",product:p,draft,ready,missing,
+    savedFields:result.savedFields||[],warnings:result.reused?["wykorzystano aktualne, wcześniej potwierdzone przygotowanie serwerowe"]:[],
+    persistence:{confirmed:true,mutationId:result.mutationId||"",publication:{published:true,readbackConfirmed:true}},
+  };
+}
+async function asortymentSprawdzGotowyProduktDoAllegro(base={}){
+  const productId=String(base.id??"").trim();
+  if(!productId)throw new Error("Brakuje ID produktu.");
+  const p=await asortymentPobierzPelnyProdukt(productId,{force:true});
+  if(!p)throw new Error("Nie udało się odczytać aktualnej kartoteki produktu z serwera.");
+  const draft=await chmura("allegro-offer-draft",{method:"POST",body:{product:p,options:{stock:allegroStanOfertyProduktu(p)}},timeout:90000});
+  const missing=[...new Set((draft.missing||[]).map(String).filter(Boolean))];
+  return {id:productId,name:p.nazwa||"Produkt",product:p,draft,ready:missing.length===0&&draft.compliance?.ok!==false,missing,savedFields:[]};
+}
+async function asortymentAgentPrzetworzProdukt(base,operation){
+  let p=asortymentProduktPoId(base.id)||base;const warnings=[];let preparation=null;
+  if(["pelna","allegro","szkic","dane"].includes(operation)){
+    preparation=await asortymentPrzygotujProduktDoAllegro(p,{refreshSource:["pelna","allegro"].includes(operation),includeSeo:operation==="pelna"});p=preparation.product;warnings.push(...preparation.warnings);if(preparation.missing.length)warnings.push(`do uzupełnienia: ${preparation.missing.join(", ")}`);
+  }else if(operation==="zrodlo"){
+    if(p.sourceUrl||p.producentUrl)p=await automatyczniePobierzDaneZrodlaProduktu(p);else warnings.push("brak linku producenta");
+  }
+  if(operation==="seo")await asortymentSeoAgenta(p);
+  if(["pelna","prowizja"].includes(operation)){
+    const price=kwotaNum(p.cenaAllegro||p.cena),feeReady=price>0&&!!(p.allegroOfferId||(p.allegroCategoryId&&(p.allegroProductId||p.gtin||p.ean)));
+    if(feeReady){const fee=await allegroPobierzProwizjeProduktu(p.id,null,{silent:true});if(!fee)warnings.push("nie pobrano prowizji");}
+    else warnings.push("brak danych do wyliczenia prowizji");
+  }
+  p=asortymentProduktPoId(p.id)||p;
+  return {id:String(p.id),name:p.nazwa||"Produkt",warnings,ready:preparation?.ready??null,missing:preparation?.missing||[],savedFields:preparation?.savedFields||[],persistenceConfirmed:preparation?preparation.persistence?.confirmed===true&&preparation.persistence?.publication?.published===true:true};
+}
+async function asortymentUruchomAgenta(ids,operation){
+  const requested=asortymentIdKolejki(ids);if(!requested.length||!asortymentSprawdzLimitKolejki(requested)){if(!requested.length)toast("Zaznacz co najmniej jeden aktywny produkt");return;}
+  if(["pelna","allegro","szkic","dane","product-full-review"].includes(operation))return asortymentUruchomAgentaNaSerwerze(requested,"product-full-review");
+  if(asortymentAgentKolejka.busy){toast("Agent ma już aktywną kolejkę produktów");return;}
+  const products=asortymentProduktyZId(requested);if(!products.length){toast("Zaznacz co najmniej jeden aktywny produkt");return;}
+  if(products.length!==requested.length){toast(`Ta operacja wymaga otwartych kartotek: wykonam ${products.length} z ${requested.length}. Przygotowanie Allegro przyjmuje zawsze cały wybór na serwerze.`);}
+  asortymentAgentKolejka={busy:true,operation,ids:products.map(p=>String(p.id)),done:0,total:products.length,ok:0,warnings:0,failed:0,cancel:false,current:"",results:[],startedAt:new Date().toISOString(),finishedAt:""};asortymentOdswiezCentrumDzialan();
+  let cursor=0;const worker=async()=>{while(cursor<products.length&&!asortymentAgentKolejka.cancel){const p=products[cursor++];asortymentAgentKolejka.current=p.nazwa||`Produkt ${p.id}`;asortymentOdswiezCentrumDzialan();try{const result=await asortymentAgentPrzetworzProdukt(p,operation);if(!result.persistenceConfirmed)throw new Error("Brak potwierdzenia trwałego zapisu produktu.");asortymentAgentKolejka.ok++;if(result.warnings.length)asortymentAgentKolejka.warnings++;asortymentAgentKolejka.results.push({...result,ok:true});}catch(error){if(["pelna","allegro","szkic","dane"].includes(operation))podmienProduktAdminBezRenderu(p.id,{allegroAgentPreparationStatus:"failed",allegroAgentPreparationError:error.message||String(error),allegroAgentPreparationCheckedAt:new Date().toISOString()});asortymentAgentKolejka.failed++;asortymentAgentKolejka.results.push({id:String(p.id),name:p.nazwa||"Produkt",ok:false,error:error.message||String(error)});}finally{asortymentAgentKolejka.done++;asortymentOdswiezCentrumDzialan();}}};
+  // Jedna kolejka = jeden zapis naraz. Dzięki temu każdy produkt otrzymuje
+  // osobne potwierdzenie odczytu z serwera i nie ściga się o rewizję ustawień
+  // z drugim produktem z tej samej partii.
+  await worker();
+  asortymentAgentKolejka={...asortymentAgentKolejka,busy:false,current:"",finishedAt:new Date().toISOString()};
+  zapiszHistorieAgenta("katalog-allegro",`Agent zakończył kolejkę katalogu: ${asortymentAgentKolejka.ok} poprawnie, ${asortymentAgentKolejka.failed} błędów`,{operation,products:asortymentAgentKolejka.ids,warningCount:asortymentAgentKolejka.warnings});
+  const preparationOperation=["pelna","allegro","szkic","dane"].includes(operation);
+  const cloudSaved=preparationOperation?asortymentAgentKolejka.failed===0&&asortymentAgentKolejka.results.every(result=>result.ok&&result.persistenceConfirmed!==false):await chmuraZapiszUstawienia({flush:true}).catch(()=>false);
+  asortymentAgentKolejka={...asortymentAgentKolejka,cloudSaved};asortymentOdswiezCentrumDzialan();toast(cloudSaved?`🤖 Kolejka zakończona: serwer potwierdził zapis i publikację ${asortymentAgentKolejka.ok} produktów`:"⚠️ Nie wszystkie produkty uzyskały potwierdzenie zapisu i publikacji — sprawdź raport kolejki");
+}
+function asortymentUruchomAgentaDlaZaznaczonych(){return asortymentUruchomAgenta([...zaznaczoneProdukty],String(document.querySelector("[data-agent-product-operation]")?.value||asortymentAgentKolejka.operation||"pelna"));}
+function asortymentUruchomAgentaDlaProduktu(id,operation="pelna"){return asortymentUruchomAgenta([id],operation);}
+function asortymentPrzygotujZaznaczoneDoAllegro(){return asortymentUruchomAgenta([...zaznaczoneProdukty],"allegro");}
+function asortymentPrzygotujProduktDoAllegroZMenu(id){return asortymentUruchomAgenta([id],"allegro");}
+function asortymentWystawZaznaczoneNaAllegro(){return asortymentPrzygotujOperacjeZewnetrzna("activate");}
+function asortymentAnulujAgenta(){if(asortymentAgentKolejka.busy){asortymentAgentKolejka.cancel=true;asortymentOdswiezCentrumDzialan();}}
+
+function asortymentPrzygotujOperacjeZewnetrzna(operation=null,singleId=null,executeNow=false){
+  const op=String(operation||document.querySelector("[data-external-product-operation]")?.value||asortymentAllegroDecyzja.operation||"update"),source=singleId===null?[...zaznaczoneProdukty]:[singleId],all=asortymentProduktyZId(source);
+  const unresolved=all.filter(p=>["activate","draft"].includes(op)&&String(p.allegroOfferId||p.allegro?.offerId||"").trim()&&!asortymentOfertaProduktu(p));
+  const eligibleAll=all.filter(p=>{
+    if(op==="update"||op==="withdraw")return !!asortymentOfertaProduktu(p);
+    return !unresolved.some(item=>String(item.id)===String(p.id));
+  }),eligible=eligibleAll,remaining=0,blocked=Math.max(0,all.length-eligibleAll.length);
+  if(!eligible.length){toast(unresolved.length?"Zapisane ID oferty wymaga weryfikacji — tworzenie możliwego duplikatu zostało zablokowane":op==="update"||op==="withdraw"?"Zaznaczone produkty nie mają powiązanych ofert Allegro":"Zaznacz produkty");return;}
+  if(unresolved.length)toast(`Pominięto ${unresolved.length} produktów wymagających weryfikacji ID oferty`);
+  asortymentAllegroDecyzja={step:"confirm",busy:false,direct:executeNow&&op!=="withdraw",operation:op,operationId:`allegro_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,10)}`,ids:eligible.map(p=>String(p.id)),skipped:remaining+blocked,remaining,blocked,done:0,total:eligible.length,ok:0,failed:0,error:"",results:[]};
+  if(executeNow&&op!=="withdraw"){void asortymentPotwierdzOperacjeZewnetrzna(true);return;}
+  asortymentOdswiezCentrumDzialan();setTimeout(()=>document.querySelector(".product-external-confirm")?.scrollIntoView({behavior:"smooth",block:"center"}),0);
+}
+function asortymentAnulujOperacjeZewnetrzna(){asortymentAllegroDecyzja={step:"idle",busy:false,operation:"update",ids:[],skipped:0,done:0,total:0,ok:0,failed:0,error:"",results:[]};asortymentOdswiezCentrumDzialan();}
+async function asortymentPotwierdzOperacjeZewnetrzna(direct=false){
+  const state=asortymentAllegroDecyzja;if(state.busy||state.step!=="confirm")return;
+  if(!direct&&!document.querySelector("[data-external-product-confirm]")?.checked){toast("Zaznacz potwierdzenie świadomej operacji przez API Allegro");return;}
+  asortymentAllegroDecyzja={...state,busy:true,error:""};asortymentOdswiezCentrumDzialan();
+  try{
+    const health=await chmura("allegro-connection-check",{timeout:30000});
+    allegroStan={...allegroStan,...(health.allegro||{}),sprawdzono:true,error:""};
+    if(!health.ready)throw Object.assign(new Error("Połączenie Allegro wymaga ponownej autoryzacji przed wykonaniem zatwierdzonej operacji."),{code:"allegro_reauth_required"});
+  }catch(error){
+    allegroStan={...allegroStan,connected:false,requiresReauth:true,sprawdzono:true,error:error.message||String(error)};
+    asortymentAllegroDecyzja={...state,busy:false,error:`Połączenie Allegro nie jest gotowe: ${error.message||error}`};asortymentOdswiezCentrumDzialan();toast("⚠️ Najpierw napraw połączenie Allegro — żadna oferta nie została zmieniona");return;
+  }
+  asortymentAllegroDecyzja={...asortymentAllegroDecyzja,busy:true,error:""};asortymentOdswiezCentrumDzialan();
+  try{
+    const products=asortymentProduktyZId(state.ids);
+    if(state.operation==="withdraw"){
+      const offerIds=[...new Set(products.map(p=>String(asortymentOfertaProduktu(p)?.id||p.allegroOfferId||"")).filter(Boolean))];
+      const d=await chmura("allegro-withdraw-offers",{method:"POST",body:{offerIds,reason:"admin_decision"},timeout:120000});allegroOferty=Array.isArray(d.offers)?d.offers:allegroOferty;allegroMapowania=d.mappings||allegroMapowania;
+      asortymentAllegroDecyzja={...asortymentAllegroDecyzja,busy:false,step:"done",done:offerIds.length,total:offerIds.length,ok:Number(d.ended)||0,failed:Number(d.failed)||0,results:d.results||[]};
+    }else{
+      const items=products.map(p=>({productId:String(p.id),stock:allegroStanOfertyProduktu(p)}));
+      const queued=await chmura("allegro-publication-queue-enqueue",{method:"POST",body:{operation:state.operation,items},timeout:30000}),publicationQueue=queued?.queue||{},batchId=String(publicationQueue.batchId||queued?.batchId||"");
+      asortymentAllegroDecyzja={...asortymentAllegroDecyzja,busy:false,step:"done",done:0,total:items.length,ok:0,failed:0,cloudSaved:true,queued:true,batchId,results:products.map(p=>({id:String(p.id),name:p.nazwa,ok:true,queued:true,readbackConfirmed:false}))};
+      products.forEach(p=>{const id=String(p.id);zaznaczoneProdukty.delete(id);zaznaczoneProdukty.delete(Number(id));zaznaczoneAllegroProduktyKatalogu?.delete?.(id);});
+      if(typeof agentAIRuntime!=="undefined")agentAIRuntime={...agentAIRuntime,publicationQueue};
+      asortymentOdswiezCentrumDzialan();toast(`🟠 Serwer przejął pełną kolejkę ${items.length} publikacji — możesz zamknąć kartę`);
+      setTimeout(()=>{location.hash="#/admin/agent-ai/praca";},250);
+      return;
+    }
+    asortymentAllegroDecyzja.results.filter(result=>result.ok&&result.id!==undefined).forEach(result=>{const id=String(result.id);zaznaczoneProdukty.delete(id);zaznaczoneProdukty.delete(Number(id));zaznaczoneAllegroProduktyKatalogu?.delete?.(id);});
+    const successful=asortymentAllegroDecyzja.results.filter(result=>result.ok),cloudSaved=state.operation==="withdraw"||successful.length===asortymentAllegroDecyzja.ok&&successful.every(result=>result.readbackConfirmed===true);
+    asortymentAllegroDecyzja={...asortymentAllegroDecyzja,cloudSaved};await allegroWczytajDane(true).catch(()=>{});allegroZapiszCache();asortymentCentralnyWyczyscCache();if(typeof allegroPublikacjaCentralnaUniewaznij==="function")allegroPublikacjaCentralnaUniewaznij();if(typeof allegroPublikacjaCentralnaPobierz==="function"&&trasa()==="/admin/allegro/oferty")await allegroPublikacjaCentralnaPobierz(true).catch(()=>null);asortymentOdswiezCentrumDzialan();toast(cloudSaved?`🟠 Operacja Allegro zakończona i trwale zapisana: ${asortymentAllegroDecyzja.ok} poprawnie${asortymentAllegroDecyzja.failed?` • ${asortymentAllegroDecyzja.failed} błędów`:""}${asortymentAllegroDecyzja.remaining?` • pozostało ${asortymentAllegroDecyzja.remaining}`:""}`:"⚠️ Allegro przyjęło operację, ale serwer nie potwierdził jeszcze całej kolejki kartotek");
+  }catch(error){asortymentAllegroDecyzja={...asortymentAllegroDecyzja,busy:false,error:error.message||String(error)};asortymentOdswiezCentrumDzialan();toast("⚠️ Operacja Allegro: "+(error.message||error));}
+}
+
+function asortymentOperacjaZewnetrznaOpis(op){return ({update:["Aktualizacja istniejących ofert","System sprawdzi zapisane przygotowanie i zmieni istniejące oferty bez ponownego uruchamiania Agenta ani tworzenia duplikatów."],draft:["Szkice / oferty nieaktywne","System sprawdzi aktualną kartotekę. Kompletne brakujące oferty utworzy jako nieaktywne."],activate:["Publikacja i aktywacja przygotowanych produktów","System wykona końcową kontrolę bez ponownego przygotowania. Sukces pokaże dopiero po odczycie statusu ACTIVE z Allegro."],withdraw:["Zakończenie ofert","Zakończy powiązane oferty i wyłączy ich odnawianie."]})[op]||["Operacja Allegro",""];}
+function asortymentDecyzjaZewnetrznaHTML(){
+  const s=asortymentAllegroDecyzja;if(s.step==="idle")return "";const [title,description]=asortymentOperacjaZewnetrznaOpis(s.operation),products=asortymentProduktyZId(s.ids);
+  if(s.step==="done")return `<section class="product-external-result ${s.failed||s.cloudSaved===false?"partial":"ok"}"><div><b>${s.queued?"🟠 Pełna kolejka zapisana na serwerze":s.failed?"⚠️ Operacja zakończona częściowo":s.cloudSaved===false?"⚠️ Allegro zapisane, kartoteki czekają na synchronizację":"✅ Operacja zakończona i zapisana"}</b><small>${s.queued?`${esc(title)} • ${s.total} produktów • dalszy stan jest widoczny w Agencie AI`: `${esc(title)} • poprawnie ${s.ok} • błędy ${s.failed}${s.remaining?` • kolejna partia ${s.remaining}`:""}${s.blocked?` • wymaga kontroli ${s.blocked}`:""} • serwer ${s.cloudSaved===false?"oczekuje na ponowną próbę":"potwierdził zapis"}`}</small>${s.results.length&&!s.queued?`<details><summary>Raport dla ${s.results.length} produktów</summary>${s.results.map(x=>`<p class="${x.ok?"ok":"error"}"><b>${x.ok?"✅":"⚠️"} ${esc(x.name||x.id)}</b> — ${x.ok?`oferta ${esc(x.offerId||"zapisana")}${x.catalogRecovery?.applied?` • automatycznie poprawiono dane katalogu Allegro`:""}${x.savedFields?.length?` • zapisano: ${esc(asortymentEtykietyPol(x.savedFields).join(", "))}`:""}`:esc(x.error||"błąd")}</p>`).join("")}</details>`:""}</div><div class="product-external-result-actions">${s.queued?`<a class="btn" href="#/admin/agent-ai/praca">Pokaż kolejkę Agenta</a>`:""}${s.remaining?`<button class="btn" onclick="asortymentPrzygotujOperacjeZewnetrzna('${esc(s.operation)}',null,true)">Następna partia (${s.remaining})</button>`:""}<button class="btn ghost" onclick="asortymentAnulujOperacjeZewnetrzna()">Zamknij</button></div></section>`;
+  if(s.direct)return `<section class="product-external-direct ${s.error?"error":""}" aria-live="polite"><span>${s.error?"⚠️":"🟠"}</span><div><b>${s.error?"Nie rozpoczęto publikacji":esc(title)}</b><small>${s.error?esc(s.error):"Kontrola połączenia, przygotowanie danych i publikacja trwają bez dodatkowego potwierdzenia."}</small>${s.error?`<button class="btn ghost" onclick="${allegroStan.requiresReauth?"allegroPolacz()":"asortymentPotwierdzOperacjeZewnetrzna(true)"}">${allegroStan.requiresReauth?"🔐 Połącz Allegro ponownie":"↻ Ponów operację"}</button>`:`<progress max="${Math.max(1,s.total)}" value="${s.done}"></progress><em>${s.done}/${s.total} • poprawnie ${s.ok} • błędy ${s.failed}</em>`}</div></section>`;
+  return `<section class="product-external-confirm"><header><span>⚠️</span><div><small>Świadoma decyzja administratora • API Allegro</small><h3>${esc(title)} — ${products.length} produktów</h3><p>${esc(description)} Ostateczna publikacja nastąpi dopiero po tym potwierdzeniu.</p></div></header><div class="product-external-preview">${products.slice(0,8).map(p=>`<span><b>${esc(p.nazwa||"Produkt")}</b><small>ID ${esc(p.id)} • oferta ${esc(asortymentOfertaProduktu(p)?.id||p.allegroOfferId||"nowa")}</small>${asortymentStatusPrzygotowaniaHTML(p)}</span>`).join("")}${products.length>8?`<em>+ ${products.length-8} kolejnych</em>`:""}</div><label class="product-external-check"><input type="checkbox" data-external-product-confirm> Potwierdzam przygotowanie i wykonanie tej operacji na Allegro${s.skipped?` • pominięto ${s.skipped} niepasujących produktów`:""}</label>${s.busy?`<div class="product-agent-progress"><progress max="${s.total}" value="${s.done}"></progress><span>${s.done}/${s.total} • Agent zapisuje dane przed publikacją</span></div>`:""}${s.error?`<div class="backend-note allegro-mapping-error"><b>${esc(s.error)}</b>${allegroStan.requiresReauth?`<button class="btn" onclick="allegroPolacz()">🔐 Połącz Allegro ponownie</button>`:""}</div>`:""}<footer><button class="btn ghost" onclick="asortymentAnulujOperacjeZewnetrzna()" ${s.busy?"disabled":""}>Anuluj</button><button class="btn danger" onclick="asortymentPotwierdzOperacjeZewnetrzna()" ${s.busy?"disabled":""}>${s.busy?"⏳ Przygotowuję i wystawiam…":"Potwierdzam przygotowanie i publikację"}</button></footer></section>`;
+}
+function asortymentCentrumDzialanHTML(){
+  asortymentZapewnijMonitorKolejkiSerwera();
+  const q=asortymentAgentKolejka,selected=zaznaczoneProdukty.size,enqueuing=asortymentSerwerowaKolejka.enqueuing,dirty=typeof chmuraBrudneKlucze!=="undefined"?chmuraBrudneKlucze.size:0;
+  return `<section class="product-action-center"><header><div><span class="order-pro-label">Automatyzacje katalogu i Allegro</span><h3>⚡ Centrum przygotowania i wystawiania</h3><p>Najpierw Agent zapisuje poprawione dane w kartotece. Dopiero osobna, potwierdzona operacja wysyła kompletną ofertę do Allegro.</p></div><span class="product-save-state ${dirty?"pending":"saved"}">${dirty?`☁️ ${dirty} zmian czeka na bezpieczny zapis`:"☁️ Dane zsynchronizowane"}</span></header><div class="product-action-columns"><article class="product-action-primary"><small>KROK 1 • PRZYGOTUJ I ZAPISZ</small><b>${selected} zaznaczonych produktów</b><button class="btn" onclick="asortymentPrzygotujZaznaczoneDoAllegro()" ${!selected||enqueuing?"disabled":""}>${enqueuing?"⏳ Przekazuję pełny wybór…":`🤖 Przygotuj wszystkie zaznaczone (${selected})`}</button><small>Całe zaznaczenie trafia do trwałej kolejki PostgreSQL. Działająca już kolejka nie blokuje dodania następnej partii.</small><details><summary>Inne działania Agenta</summary><div class="product-action-advanced"><select data-agent-product-operation onchange="asortymentUstawOperacjeAgenta(this.value)" ${enqueuing?"disabled":""}><option value="pelna" ${q.operation==="pelna"?"selected":""}>Pełna kontrola i uzupełnienie</option><option value="zrodlo" ${q.operation==="zrodlo"?"selected":""}>Odśwież dane producenta</option><option value="dane" ${q.operation==="dane"?"selected":""}>Kompletność i kategoria Allegro</option><option value="szkic" ${q.operation==="szkic"?"selected":""}>Przygotuj / sprawdź szkic</option><option value="prowizja" ${q.operation==="prowizja"?"selected":""}>Pobierz prowizje i opłaty</option><option value="seo" ${q.operation==="seo"?"selected":""}>Popraw SEO produktu</option></select><button class="btn ghost" onclick="asortymentUruchomAgentaDlaZaznaczonych()" ${!selected||enqueuing?"disabled":""}>Uruchom dla ${selected}</button></div></details></article><article class="product-action-primary external"><small>KROK 2 • WYSTAW GOTOWE</small><b>Publikacja po kontroli aktualności</b><button class="btn product-allegro-publish" onclick="asortymentWystawZaznaczoneNaAllegro()" ${!selected||q.busy?"disabled":""}>🟠 Wystaw gotowe na Allegro</button><small>Potwierdzone przygotowanie jest używane ponownie. Agent generuje opisy od nowa wyłącznie po zmianie danych produktu.</small><details><summary>Inna operacja Allegro</summary><div class="product-action-advanced"><select data-external-product-operation onchange="asortymentUstawOperacjeZewnetrzna(this.value)" ${q.busy?"disabled":""}><option value="update">Aktualizuj istniejące oferty</option><option value="draft">Utwórz brakujące jako nieaktywne</option><option value="activate">Opublikuj / aktywuj sprzedaż</option><option value="withdraw">Zakończ powiązane oferty</option></select><button class="btn ghost" onclick="asortymentPrzygotujOperacjeZewnetrzna()" ${!selected||q.busy?"disabled":""}>Przygotuj decyzję</button></div></details></article></div>${q.busy||q.finishedAt?`<div class="product-agent-progress" aria-live="polite"><progress max="${q.total||1}" value="${q.done}"></progress><div><b>${q.busy?`Agent zapisuje: ${esc(q.current||"uruchamianie kolejki")}`:q.cloudSaved===false?"Kolejka zakończona — sprawdź błędy zapisu":"Kolejka Agenta zakończona i zapisana"}</b><small>${q.done}/${q.total} • poprawnie ${q.ok} • uwagi ${q.warnings} • błędy ${q.failed}${q.cancel?" • zatrzymywanie":""}</small></div>${q.busy?`<a class="btn ghost" href="#/admin/agent-ai/praca">Pokaż pracę na serwerze</a>`:""}</div>`:""}${q.results.length?`<details class="product-agent-results" ${!q.busy?"open":""}><summary>Konkretny zapis Agenta (${q.results.length})</summary>${q.results.slice(-30).map(x=>`<p class="${x.ok?x.ready===false?"warning":"ok":"error"}"><b>${x.ok?x.ready===false?"⚠️":"✅":"⛔"} ${esc(x.name)}</b>${x.ok?`<span>${x.savedFields?.length?`Zapisano: ${esc(asortymentEtykietyPol(x.savedFields).join(", "))}`:"Dane sprawdzone — bez nowych zmian"}</span>${x.missing?.length?`<small>Do uzupełnienia: ${esc(x.missing.join(", "))}</small>`:`<small>Komplet danych do wystawienia</small>`}`:`<span>${esc(x.error)}</span>`}</p>`).join("")}</details>`:""}${asortymentDecyzjaZewnetrznaHTML()}</section>`;
+}
+function asortymentMenuDzialanProduktuHTML(p={}){
+  const offer=asortymentOfertaProduktu(p);return `<details class="product-row-action-menu"><summary class="btn ghost">⚡ Działania</summary><div>${asortymentStatusPrzygotowaniaHTML(p)}<button class="primary" onclick="asortymentPrzygotujProduktDoAllegroZMenu(${jsArg(p.id)})">🤖 Przygotuj i zapisz do Allegro</button><button class="allegro" onclick="asortymentPrzygotujOperacjeZewnetrzna('${offer?"update":"activate"}',${jsArg(p.id)})">🟠 ${offer?"Zapisz poprawki w ofercie":"Wystaw gotowy produkt"}</button><button onclick="asortymentUruchomAgentaDlaProduktu(${jsArg(p.id)},'prowizja')">📊 Pobierz prowizję</button>${offer?`<a href="https://allegro.pl/oferta/${encodeURIComponent(offer.id)}" target="_blank" rel="noopener">↗ Otwórz ofertę Allegro</a><button class="danger" onclick="asortymentPrzygotujOperacjeZewnetrzna('withdraw',${jsArg(p.id)})">⏹ Przygotuj zakończenie</button>`:""}</div></details>`;
+}

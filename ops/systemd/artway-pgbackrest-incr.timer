@@ -1,0 +1,10 @@
+[Unit]
+Description=Artway-TM przyrostowa kopia PITR co 6 godzin
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:35:00 Europe/Warsaw
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

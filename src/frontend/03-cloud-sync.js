@@ -1,0 +1,578 @@
+/* ═══════════ WSPÓLNA BAZA SERWEROWA (VPS + PostgreSQL) ═══════════
+   Ustawienia sklepu, zamówienia i klienci są zapisywane na serwerze, więc są
+   widoczne na KAŻDYM urządzeniu. Bez połączenia z serwerem sklep dalej działa
+   na pamięci przeglądarki (localStorage) jak dotychczas. */
+const CHMURA_URL = "/api/store";
+const CHMURA_AUTO_SYNC_MS = 15*60*1000;
+const CHMURA_FOCUS_SYNC_MIN_MS = 5*60*1000;
+const KLUCZE_WSPOLNE = ["artway_ustawienia","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_ustawienia","artway_magazyn_produkty","artway_magazyn_lokalizacje","artway_faktury_szkice","artway_agent_ai_historia","artway_agent_ai_pamiec","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_producenci","artway_agent_ai_linki_producentow","artway_opinie","artway_seo_ustawienia","artway_seo_historia"];
+const CHMURA_DOMENOWE_KLUCZE = new Set(["artway_ustawienia","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn_niedobory_wydan","artway_magazyn_produkty","artway_magazyn_ustawienia","artway_magazyn_lokalizacje","artway_magazyn_lokalizacje_usuniete","artway_dokumenty_magazynowe","artway_dokumenty_magazynowe_usuniete","artway_dokumenty_magazynowe_seq","artway_faktury_szkice","artway_producenci","artway_agent_ai_zlecenia","artway_agent_ai_plan_cykl","artway_agent_ai_pamiec","artway_agent_ai_historia","artway_agent_ai_linki_producentow","artway_seo_historia","artway_seo_ustawienia","artway_opinie"]);
+// Produkty mają jedno źródło prawdy: rekordy artway_products w PostgreSQL.
+// Stare karty mogą pozostawić wielomegabajtowe snapshoty w localStorage, ale
+// nie wolno ich już scalać ani odsyłać na serwer.
+for(const key of CENTRAL_PRODUCT_LS_KEYS){
+  try{localStorage.removeItem(key);if(typeof chmuraUsunChunksLS==="function")chmuraUsunChunksLS(key);}catch(error){}
+}
+produktyDodane=[];produktyEdytowane={};produktyUkryte=[];produktyDefinitywne=[];koszDodanych=[];koszMeta={};
+let chmuraToken = (function(){
+  try{
+    const token=sessionStorage.getItem("artway_chmura_token")||"";
+    localStorage.removeItem("artway_chmura_token");
+    return token;
+  }catch(e){ return ""; }
+})();
+let chmuraStan = {dostepna:false, sprawdzono:false, admin:false, rev:0, updated_at:null, error:"", ostatniZapis:0};
+let chmuraWczytywanie = false;   // blokada pętli podczas nakładania danych z serwera
+let chmuraTimerZapisu = null;
+let chmuraTimerAutoSync = null;
+let chmuraAutoSyncBusy = false;
+let chmuraAutoSyncOstatniStart = 0;
+let chmuraOstatniPullZmienilDane = false;
+let chmuraOstatniaSynchronizacjaCentralnaZmienilaDane = false;
+let chmuraKatalogImportowanyRev = "";
+let chmuraKatalogCentralnyPubliczny = false;
+let chmuraWersjeDomenPubliczne = wczytajLS("artway_chmura_domain_versions_public",{});
+let chmuraWersjeDomenAdmina = wczytajLS("artway_chmura_domain_versions_admin",{});
+// W starszych wydaniach panel zapamiętywał rewizje tych domen, mimo że nie
+// otrzymywał ich treści. Jednorazowo usuwamy błędne potwierdzenia, aby pierwszy
+// odczyt po aktualizacji rzeczywiście pobrał stany i decyzje dostępności.
+const CHMURA_WERSJA_WIDOCZNOSCI_DOMEN=2;
+if(Number(wczytajLS("artway_chmura_domain_visibility_schema",0))<CHMURA_WERSJA_WIDOCZNOSCI_DOMEN){
+  ["artway_stany","artway_dostepnosc","artway_magazyn_produkty"].forEach(key=>delete chmuraWersjeDomenAdmina[key]);
+  try{localStorage.setItem("artway_chmura_domain_versions_admin",JSON.stringify(chmuraWersjeDomenAdmina));localStorage.setItem("artway_chmura_domain_visibility_schema",String(CHMURA_WERSJA_WIDOCZNOSCI_DOMEN));}catch(e){}
+}
+const CHMURA_KATALOG_CACHE_DB = "artway-runtime-cache";
+const CHMURA_KATALOG_CACHE_STORE = "catalogs";
+const CHMURA_KATALOG_CACHE_KEY = "imported-products-v1";
+let chmuraKatalogCacheBazaPromise = null;
+let chmuraBrudneKlucze = new Set();
+const CHMURA_ODRZUCONA_DOMENA_RETRY_MS = 15*60*1000;
+let chmuraWstrzymaneDomeny = new Map();
+let chmuraZapisWToku = null;
+let chmuraZapisPonowPoZakonczeniu = false;
+let chmuraNumerMutacji = 0;
+let chmuraPobraniaWToku = new Map();
+const chmuraPominieteLokalnieZalogowane = new Set();
+function chmuraKatalogCacheBaza(){
+  if(chmuraKatalogCacheBazaPromise)return chmuraKatalogCacheBazaPromise;
+  if(typeof indexedDB==="undefined")return Promise.resolve(null);
+  chmuraKatalogCacheBazaPromise=new Promise(resolve=>{
+    let zakonczono=false,finish=value=>{if(zakonczono)return;zakonczono=true;resolve(value);};
+    try{
+      const request=indexedDB.open(CHMURA_KATALOG_CACHE_DB,1);
+      request.onupgradeneeded=()=>{const db=request.result;if(!db.objectStoreNames.contains(CHMURA_KATALOG_CACHE_STORE))db.createObjectStore(CHMURA_KATALOG_CACHE_STORE);};
+      request.onsuccess=()=>finish(request.result);
+      request.onerror=()=>finish(null);
+      request.onblocked=()=>finish(null);
+    }catch(e){finish(null);}
+  });
+  return chmuraKatalogCacheBazaPromise;
+}
+async function chmuraKatalogCacheOdczytaj(){
+  return chmuraRuntimeCacheOdczytaj(CHMURA_KATALOG_CACHE_KEY);
+}
+async function chmuraKatalogCacheZapisz(revision,products){
+  return chmuraRuntimeCacheZapisz(CHMURA_KATALOG_CACHE_KEY,{revision:String(revision||""),count:Array.isArray(products)?products.length:0,products:Array.isArray(products)?products:[],savedAt:Date.now()});
+}
+async function chmuraRuntimeCacheOdczytaj(key){
+  const db=await chmuraKatalogCacheBaza();if(!db)return false;
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readonly"),request=tx.objectStore(CHMURA_KATALOG_CACHE_STORE).get(String(key));request.onsuccess=()=>resolve(request.result||null);request.onerror=()=>resolve(null);}catch(e){resolve(null);}});
+}
+async function chmuraRuntimeCacheZapisz(key,value){
+  const db=await chmuraKatalogCacheBaza();if(!db)return false;
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readwrite");tx.objectStore(CHMURA_KATALOG_CACHE_STORE).put(value,String(key));tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false);}catch(e){resolve(false);}});
+}
+async function chmuraRuntimeCacheUsun(key){
+  const db=await chmuraKatalogCacheBaza();if(!db)return false;
+  return new Promise(resolve=>{try{const tx=db.transaction(CHMURA_KATALOG_CACHE_STORE,"readwrite");tx.objectStore(CHMURA_KATALOG_CACHE_STORE).delete(String(key));tx.oncomplete=()=>resolve(true);tx.onerror=()=>resolve(false);tx.onabort=()=>resolve(false);}catch(e){resolve(false);}});
+}
+async function chmuraPobierzKatalogImportowany(meta={},force=false){
+  const revision=String(meta.imported_catalog_rev||""),count=Math.max(0,Number(meta.imported_catalog_count)||0);
+  const poprzednioCentralny=chmuraKatalogCentralnyPubliczny;chmuraKatalogCentralnyPubliczny=meta.catalog_central===true;
+  if(chmuraKatalogCentralnyPubliczny){
+    produktyImportowane=[];chmuraKatalogImportowanyRev=revision;
+    await chmuraRuntimeCacheUsun(CHMURA_KATALOG_CACHE_KEY).catch(()=>false);
+    return false;
+  }
+  if(poprzednioCentralny){force=true;chmuraKatalogImportowanyRev="";}
+  if(!force&&revision===chmuraKatalogImportowanyRev)return false;
+  if(!force&&typeof productLinkImportStan!=="undefined"&&productLinkImportStan.loopActive)return false;
+  if(!count){produktyImportowane=[];chmuraKatalogImportowanyRev=revision;chmuraKatalogCacheZapisz(revision,[]).catch(()=>{});return true;}
+  if(!force){
+    const cache=await chmuraKatalogCacheOdczytaj();
+    if(cache&&String(cache.revision||"")===revision&&Number(cache.count)===count&&Array.isArray(cache.products)&&cache.products.length===count){
+      produktyImportowane=cache.products;
+      chmuraKatalogImportowanyRev=revision;
+      return true;
+    }
+  }
+  const pageSize=500,offsets=[];for(let offset=0;offset<count;offset+=pageSize)offsets.push(offset);
+  const pages=[];
+  for(let start=0;start<offsets.length;start+=4){
+    const batch=await Promise.all(offsets.slice(start,start+4).map(offset=>chmura("product-link-import-catalog",{params:{offset,limit:pageSize,catalogRev:revision},timeout:30000})));
+    pages.push(...batch);
+  }
+  if(pages.some(page=>String(page.imported_catalog_rev||"")!==revision))throw new Error("Katalog produktów zmienił się podczas pobierania — ponowię synchronizację.");
+  const imported=pages.flatMap(page=>Array.isArray(page.products)?page.products:[]).slice(0,count);
+  if(imported.length!==count)throw new Error("Katalog produktów nie jest jeszcze kompletny — ponowię synchronizację.");
+  produktyImportowane=imported;
+  chmuraKatalogImportowanyRev=revision;
+  chmuraKatalogCacheZapisz(revision,imported).catch(()=>{});
+  return true;
+}
+function maUprawnieniaZapisuChmury(){
+  return !!(chmuraToken||((sesja?.verified||sesja?.token)&&typeof jestAdmin==="function"&&jestAdmin()));
+}
+
+
+function chmuraNaglowki(json){
+  const h={"Accept":"application/json"};
+  if(json) h["Content-Type"]="application/json";
+  if(chmuraToken) h["x-admin-token"]=chmuraToken;
+  if(sesja?.token) h.Authorization=`Bearer ${sesja.token}`;
+  return h;
+}
+async function chmura(action, {method="GET", body=null, params={}, timeout=9000, headers={}, allowNotModified=false}={}){
+  const url = new URL(CHMURA_URL, location.href);
+  url.searchParams.set("action", action);
+  for(const [k,v] of Object.entries(params)) if(v!==undefined&&v!==null&&v!=="") url.searchParams.set(k,String(v));
+  if(method==="GET"&&typeof siteReleasePreviewToken==="function"&&siteReleasePreviewToken())url.searchParams.set("site_preview",siteReleasePreviewToken());
+  const requestHeaders={...chmuraNaglowki(body!==null),...(headers&&typeof headers==="object"?headers:{})};
+  const requestKey=method==="GET"&&body===null?`${url.toString()}|${JSON.stringify(requestHeaders)}`:"",istniejace=requestKey?chmuraPobraniaWToku.get(requestKey):null;
+  if(istniejace)return istniejace;
+  const request=(async()=>{
+    const opt = {method, headers: requestHeaders, credentials:"same-origin"};
+    if(body!==null) opt.body = JSON.stringify(body);
+    const ac = (typeof AbortController!=="undefined") ? new AbortController() : null;
+    let timer=null;
+    if(ac){ opt.signal=ac.signal; timer=setTimeout(()=>ac.abort(),timeout); }
+    let r;
+    try{ r = await fetch(url.toString(), opt); }
+    catch(e){ if(timer)clearTimeout(timer); throw new Error(e&&e.name==="AbortError"?"Serwer nie odpowiedział w wyznaczonym czasie":"Brak połączenia z serwerem"); }
+    if(timer)clearTimeout(timer);
+    if(r.status===304&&allowNotModified)return {ok:true,notModified:true,etag:r.headers.get("etag")||String(requestHeaders["If-None-Match"]||requestHeaders["if-none-match"]||"")};
+    const t = await r.text(); let d;
+    try{ d = JSON.parse(t); }catch(e){ throw new Error("Serwer nie zwrócił prawidłowych danych — sprawdź usługę backendu VPS."); }
+    if(!r.ok || d.ok===false){ const b=new Error(d.error||("Błąd bazy HTTP "+r.status)); Object.assign(b,d); b.code=d.code||""; b.status=r.status; throw b; }
+    const responseEtag=r.headers.get("etag");if(responseEtag&&d&&typeof d==="object")Object.defineProperty(d,"_etag",{value:responseEtag,enumerable:false,configurable:true});
+    return d;
+  })();
+  if(requestKey)chmuraPobraniaWToku.set(requestKey,request);
+  try{return await request;}finally{if(requestKey&&chmuraPobraniaWToku.get(requestKey)===request)chmuraPobraniaWToku.delete(requestKey);}
+}
+function nrZamowienia(v){ return String(v??"").trim().slice(0,80); }
+function normalizujUsunieteZamowienie(raw){
+  const nr = nrZamowienia(raw?.nr || raw?.number || raw);
+  if(!nr) return null;
+  return {
+    nr,
+    email:String(raw?.email||"").trim().toLowerCase().slice(0,200),
+    by:String(raw?.by||raw?.kto||"local").slice(0,40),
+    deleted_at:String(raw?.deleted_at||raw?.usunietoAt||new Date().toISOString()).slice(0,80)
+  };
+}
+function zapiszUsunieteZamowienia(lista){
+  const mapa=new Map();
+  (Array.isArray(lista)?lista:[]).forEach(raw=>{const r=normalizujUsunieteZamowienie(raw); if(r) mapa.set(r.nr,{...mapa.get(r.nr),...r});});
+  zamowieniaUsuniete=[...mapa.values()].sort((a,b)=>String(b.deleted_at||"").localeCompare(String(a.deleted_at||""))).slice(0,50000);
+  try{localStorage.setItem("artway_zamowienia_usuniete",JSON.stringify(zamowieniaUsuniete));}catch(e){}
+  return zamowieniaUsuniete;
+}
+function scalUsunieteZamowienia(lista){
+  return zapiszUsunieteZamowienia([...(zamowieniaUsuniete||[]),...(Array.isArray(lista)?lista:[])]);
+}
+function czyZamowienieUsuniete(nr){
+  const n=nrZamowienia(nr);
+  return !!n && (zamowieniaUsuniete||[]).some(x=>x&&x.nr===n);
+}
+function oznaczZamowienieUsuniete(nr, meta={}){
+  const rec=normalizujUsunieteZamowienie({nr,...meta,deleted_at:meta.deleted_at||new Date().toISOString()});
+  if(!rec) return false;
+  scalUsunieteZamowienia([rec]);
+  return true;
+}
+function filtrujAktywneZamowienia(lista){
+  if(!Array.isArray(lista)) return [];
+  const usuniete=new Set((zamowieniaUsuniete||[]).map(x=>x&&x.nr).filter(Boolean));
+  const widziane=new Set();
+  return lista.filter(z=>{
+    const nr=nrZamowienia(z?.nr);
+    if(!nr || usuniete.has(nr) || widziane.has(nr)) return false;
+    widziane.add(nr);
+    return true;
+  });
+}
+function zbierzWspolneUstawienia(){
+  return {
+    artway_ustawienia: ustawienia,
+    artway_stany: stanyProduktow,
+    artway_dostepnosc: dostepnoscProduktow,
+    artway_ruchy_magazynowe: ruchyMagazynowe,
+    artway_magazyn_ustawienia: ustawieniaMagazynu,
+    artway_magazyn_produkty: magazynProdukty,
+    artway_magazyn_lokalizacje: magazynLokalizacje,
+    artway_faktury_szkice: szkiceFaktur,
+    artway_agent_ai_historia: agentAIHistoria,
+    artway_agent_ai_pamiec: agentAIPamiec,
+    artway_agent_ai_zlecenia: agentAIZlecenia,
+    artway_agent_ai_plan_cykl: agentAIPlanCykl,
+    artway_producenci: producenciKartoteka,
+    artway_agent_ai_linki_producentow: agentAILinkiProducentow,
+    artway_opinie: opinie,
+    artway_seo_ustawienia: seoUstawienia,
+    artway_seo_historia: seoHistoria,
+  };
+}
+function nalozWspolneUstawienia(dane){
+  if(!dane || typeof dane!=="object") return false;
+  let zmieniono=false;
+  chmuraWczytywanie = true;
+  try{
+    if(dane.artway_ustawienia && typeof dane.artway_ustawienia==="object"){
+      ustawienia = {...USTAWIENIA_PUBLICZNE, ...dane.artway_ustawienia};
+      if(!(typeof siteReleasePreviewActive==="function"&&siteReleasePreviewActive()))zmieniono=zapiszLS("artway_ustawienia", ustawienia)||zmieniono;
+      sklepDocelowaMarza=Math.max(1,Math.min(60,Number(ustawienia.celMarzySklep)||sklepDocelowaMarza||20));
+      allegroDocelowaMarza=Math.max(1,Math.min(60,Number(ustawienia.celMarzyAllegro)||allegroDocelowaMarza||20));
+      allegroJednostkiOplatCyklicznych=Math.max(1,Math.min(1000,Number(ustawienia.allegroJednostkiOplatCyklicznych)||allegroJednostkiOplatCyklicznych||10));
+    }
+    const setter = {
+      artway_stany:(v)=>{stanyProduktow=v;}, artway_dostepnosc:(v)=>{dostepnoscProduktow=(v&&typeof v==="object")?v:{};},
+      artway_ruchy_magazynowe:(v)=>{ruchyMagazynowe=Array.isArray(v)?v:[];},
+      artway_magazyn_ustawienia:(v)=>{ustawieniaMagazynu=(v&&typeof v==="object")?v:{};}, artway_magazyn_produkty:(v)=>{magazynProdukty=(v&&typeof v==="object")?v:{};},
+      artway_magazyn_lokalizacje:(v)=>{magazynLokalizacje=Array.isArray(v)?v:[];},
+      artway_faktury_szkice:(v)=>{szkiceFaktur=Array.isArray(v)?v:[];}, artway_agent_ai_historia:(v)=>{agentAIHistoria=Array.isArray(v)?v:[];},
+      artway_agent_ai_pamiec:(v)=>{agentAIPamiec=Array.isArray(v)?v:[];},
+      artway_agent_ai_zlecenia:(v)=>{agentAIZlecenia=Array.isArray(v)?v:[];},
+      artway_agent_ai_plan_cykl:(v)=>{agentAIPlanCykl=(v&&typeof v==="object"&&!Array.isArray(v))?v:{};},
+      artway_producenci:(v)=>{producenciKartoteka=Array.isArray(v)?v:[];},
+      artway_agent_ai_linki_producentow:(v)=>{agentAILinkiProducentow=Array.isArray(v)?v:[];},
+      artway_opinie:(v)=>{opinie=v;},
+      artway_seo_ustawienia:(v)=>{seoUstawienia={...SEO_USTAWIENIA_DOMYSLNE,...((v&&typeof v==="object")?v:{})};},
+      artway_seo_historia:(v)=>{seoHistoria=Array.isArray(v)?v:[];},
+    };
+    for(const k of Object.keys(setter)){
+      if(k in dane && dane[k]!==undefined && dane[k]!==null){ setter[k](dane[k]); zmieniono=zapiszLS(k, dane[k])||zmieniono; }
+    }
+    return zmieniono;
+  } finally { chmuraWczytywanie = false; }
+}
+function chmuraStatusHTML(){
+  const ok = chmuraStan.dostepna, adm = chmuraStan.admin && maUprawnieniaZapisuChmury();
+  const kolor = adm?"#166534":(ok?"#92400e":"#b91c1c"), tlo = adm?"#f0fdf4":(ok?"#fffbeb":"#fef2f2"), br = adm?"#86efac":(ok?"#fcd34d":"#fecaca");
+  const opis = adm ? `<b>Połączono trwale ✅</b> — podpisana sesja administratora odnawia się automatycznie, a zmiany zapisują się na serwerze i są widoczne na każdym urządzeniu.${chmuraStan.updated_at?` Ostatni zapis: ${new Date(chmuraStan.updated_at).toLocaleString("pl-PL")}.`:""} Synchronizacja odświeża dane co ${Math.round(CHMURA_AUTO_SYNC_MS/60000)} min.`
+    : ok ? `<b>⚠️ Wymagane logowanie administratora</b> — zaloguj się normalnie do panelu. Nie trzeba wklejać żadnego tokenu.`
+    : "Brak połączenia z serwerem — sklep działa lokalnie w tej przeglądarce.";
+  return `<div class="backend-note" style="border-color:${br};background:${tlo};color:${kolor}">
+    <b>☁️ Wspólna baza:</b> ${opis}
+    <div class="diag-actions" style="margin-top:.5rem">
+    ${adm?`<button class="btn" style="background:var(--brand2)" onclick="chmuraWyslijWszystko()">📤 Wyślij wszystko na serwer</button>
+      <button class="btn ghost" onclick="chmuraPobierzWszystko()">📥 Pobierz z serwera</button>
+      <button class="btn ghost" onclick="typeof chmuraOdswiezSesjeAdministratora==='function'&&chmuraOdswiezSesjeAdministratora(true).then(()=>toast('Sesja odnowiona ✅'))">Odśwież sesję</button>`
+      :`<a class="btn" href="#/logowanie">🔐 Zaloguj administratora</a>`}
+    </div>
+  </div>`;
+}
+
+const KLUCZE_PRZESTARZALYCH_CACHE = [
+  "artway_allegro_oferty_cache",
+  "artway_allegro_zamowienia_cache",
+  "artway_allegro_mapowania_cache",
+  "artway_allegro_komunikacja_cache"
+];
+function rozmiarLokalnejPamieci(){
+  let n=0;
+  try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i)||"",v=localStorage.getItem(k)||"";n+=(k.length+v.length)*2;}}catch(e){}
+  return n;
+}
+function zwolnijPamiecPodreczna({wymus=false}={}){
+  const przed=rozmiarLokalnejPamieci();
+  if(!wymus&&przed<7_500_000)return {przed,po:przed,usunieto:[]};
+  const usunieto=[];
+  for(const klucz of KLUCZE_PRZESTARZALYCH_CACHE){
+    try{if(localStorage.getItem(klucz)!==null){localStorage.removeItem(klucz);usunieto.push(klucz);}}catch(e){}
+  }
+  try{
+    const logi=JSON.parse(localStorage.getItem("artway_logi")||"[]");
+    if(Array.isArray(logi)&&logi.length>80){localStorage.setItem("artway_logi",JSON.stringify(logi.slice(0,80)));usunieto.push("artway_logi:archiwum");}
+  }catch(e){}
+  return {przed,po:rozmiarLokalnejPamieci(),usunieto};
+}
+// Rewizja danych zasila lekki cache podstron administratora. Zmieniamy ją
+// wyłącznie dla danych biznesowych, nie dla kosmetycznych preferencji widoku.
+var adminRewizjaDanych = 0;
+var adminCachePodstron = new Map();
+var adminRewizjeDomenCache = {catalog:0,orders:0,warehouse:0,allegro:0,agent:0,infakt:0,seo:0,settings:0,system:0};
+const ADMIN_KLUCZE_WIDOKU = new Set([
+  "artway_admin_menu_otwarta_v2","artway_admin_menu_kompaktowe_v1",
+  "artway_produkty_na_stronie_admin","artway_produkty_gestosc_admin",
+  "artway_produkty_sortowanie_admin","artway_seo_na_stronie"
+]);
+function kluczZmieniaDaneAdmina(klucz=""){
+  if(ADMIN_KLUCZE_WIDOKU.has(klucz))return false;
+  return ["artway_ustawienia","artway_produkty","artway_zamowienia","artway_uzytkownicy","artway_stany","artway_dostepnosc","artway_ruchy_magazynowe","artway_magazyn","artway_faktury","artway_agent","artway_producenci","artway_opinie","artway_kosz","artway_seo"].some(prefix=>String(klucz).startsWith(prefix));
+}
+function adminDomenaCacheDlaKlucza(klucz=""){
+  const value=String(klucz||"");
+  if(value==="allegro"||value.startsWith("artway_allegro"))return "allegro";
+  if(value.startsWith("artway_zamowienia")||value.startsWith("artway_uzytkownicy"))return "orders";
+  if(value.startsWith("artway_stany")||value.startsWith("artway_dostepnosc")||value.startsWith("artway_ruchy_magazynowe")||value.startsWith("artway_magazyn")||value.startsWith("artway_producenci"))return "warehouse";
+  if(value.startsWith("artway_agent"))return "agent";
+  if(value.startsWith("artway_faktury")||value.startsWith("artway_infakt"))return "infakt";
+  if(value.startsWith("artway_seo"))return "seo";
+  if(value.startsWith("artway_ustawienia"))return "settings";
+  if(value.startsWith("artway_produkty")||value.startsWith("artway_opinie")||value.startsWith("artway_kosz"))return "catalog";
+  return "system";
+}
+function uniewaznijCachePodstronAdmina(zakres="all"){
+  adminRewizjaDanych++;
+  const domena=zakres==="all"||!zakres?"all":adminDomenaCacheDlaKlucza(zakres);
+  if(domena==="all"){
+    Object.keys(adminRewizjeDomenCache).forEach(key=>adminRewizjeDomenCache[key]++);adminCachePodstron.clear();
+  }else{
+    adminRewizjeDomenCache[domena]=(Number(adminRewizjeDomenCache[domena])||0)+1;
+    for(const [route,entry] of adminCachePodstron)if((entry?.domains||[]).includes(domena))adminCachePodstron.delete(route);
+  }
+  if(typeof uniewaznijAdminMenuStatCache==="function")uniewaznijAdminMenuStatCache();
+}
+function zapiszLS(klucz, dane, opcje={}){
+  if(klucz==="artway_zamowienia" && Array.isArray(dane)) dane = filtrujAktywneZamowienia(dane);
+  if(typeof CENTRAL_PRODUCT_LS_KEYS!=="undefined"&&CENTRAL_PRODUCT_LS_KEYS.has(klucz)){
+    try{localStorage.removeItem(klucz);chmuraUsunChunksLS(klucz);}catch(e){}
+    if(kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina(klucz);
+    return true;
+  }
+  const serial=JSON.stringify(dane);
+  const serialBytes=chmuraRozmiarBajtow(serial);
+  let zmieniono=true;
+  if(!zapiszLS._pomijane) zapiszLS._pomijane = new Set();
+  const pominZLudz = CHMURA_LS_OMIJANE_KLUCZE.has(klucz) && serialBytes > CHMURA_LS_OMIJANE_PRAG_BYTES;
+  const pominZPamieci = chmuraCzyPominacZapisLS(klucz) && serialBytes > CHMURA_LS_OMIJANE_PRAG_BYTES;
+  if(!pominZPamieci && chmuraCzyPominacZapisLS(klucz)) chmuraUsunPominanyZapisLS(klucz);
+  const pomijamyLs = pominZLudz || pominZPamieci;
+  if (pomijamyLs) {
+    if (!zapiszLS._pomijane.has(klucz)) {
+      if(!chmuraPominieteLokalnieZalogowane.has(klucz)){
+        chmuraPominieteLokalnieZalogowane.add(klucz);
+        loguj("info",`Dane ${klucz} są zapisywane centralnie na serwerze; lokalna ciężka kopia nie jest potrzebna (${(serialBytes / 1024).toFixed(0)} KB)`);
+      }
+      zapiszLS._pomijane.add(klucz);
+    }
+    chmuraUsuńDuzyKluczLS(klucz);
+    chmuraUsunChunksLS(klucz);
+    if (pominZLudz && !pominZPamieci) chmuraZapiszPominanyZapisLS(klucz);
+    zmieniono = false;
+  } else {
+    try{
+      const chunks = chmuraCzyKluczBylZaDuzy(klucz, serial);
+      const nowyZapis = () => {
+        if(chunks) return chmuraZapiszZChunksLS(klucz, serial);
+        localStorage.setItem(klucz, serial);
+        if (zapiszLS._pomijane.has(klucz)) {
+          chmuraUsunPominanyZapisLS(klucz);
+          zapiszLS._pomijane.delete(klucz);
+        }
+        return true;
+      };
+      if(chunks){
+        const before = wczytajLS(klucz, null);
+        if(before === null) {
+          chmuraUsunChunksLS(klucz);
+          nowyZapis();
+        } else {
+          nowyZapis();
+        }
+          } else {
+            if(localStorage.getItem(klucz)===serial)zmieniono=false;
+            else nowyZapis();
+          }
+      if (zapiszLS._pomijane.has(klucz)) {
+        chmuraUsunPominanyZapisLS(klucz);
+        zapiszLS._pomijane.delete(klucz);
+      }
+    }
+    catch(e){
+      const wynik=zwolnijPamiecPodreczna({wymus:true});
+      try{
+        const chunks = chmuraCzyKluczBylZaDuzy(klucz, serial);
+        if(chunks){
+          chmuraZapiszZChunksLS(klucz, serial);
+          if (zapiszLS._pomijane.has(klucz)) {
+            chmuraUsunPominanyZapisLS(klucz);
+            zapiszLS._pomijane.delete(klucz);
+          }
+          zmieniono=true;
+        } else {
+          localStorage.setItem(klucz,serial);
+          if (zapiszLS._pomijane.has(klucz)) {
+            chmuraUsunPominanyZapisLS(klucz);
+            zapiszLS._pomijane.delete(klucz);
+          }
+          zmieniono=true;
+        }
+      }
+      catch(e2){
+        const msg=`Nie udało się zapisać: ${klucz} • pamięć po oczyszczeniu ${(wynik.po/1024).toFixed(0)} KB`;
+        if(!zapiszLS._pomijane.has(klucz)) loguj("ostrzezenie",msg);
+        chmuraZapiszPominanyZapisLS(klucz);
+        zapiszLS._pomijane.add(klucz);
+        zmieniono=false;
+      }
+    }
+  }
+  if(zmieniono&&kluczZmieniaDaneAdmina(klucz))uniewaznijCachePodstronAdmina(klucz);
+  if(zmieniono&&["artway_produkty_dodane","artway_produkty_edytowane","artway_produkty_katalog","artway_produkty_ukryte","artway_produkty_definitywne"].includes(klucz)&&typeof asortymentCentralnyWyczyscCache==="function")asortymentCentralnyWyczyscCache();
+  else if(zmieniono&&["artway_stany","artway_dostepnosc","artway_magazyn_produkty"].includes(klucz)&&typeof asortymentCentralnyOznaczNieaktualny==="function")asortymentCentralnyOznaczNieaktualny();
+  if(zmieniono && opcje.synchronizuj!==false && !chmuraWczytywanie && maUprawnieniaZapisuChmury() && KLUCZE_WSPOLNE.includes(klucz)){ chmuraBrudneKlucze.add(klucz); zaplanujZapisUstawien(); }
+  return zmieniono;
+}
+const kwotaNum = v => { const n=Number(String(v ?? 0).replace(",",".").replace(/[^0-9.-]/g,"")); return Number.isFinite(n) ? +n.toFixed(2) : 0; };
+const zl = n => kwotaNum(n).toFixed(2).replace(".", ",") + " zł";
+const $ = id => document.getElementById(id);
+const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const jsArg = s => esc(JSON.stringify(String(s??"")));
+function skrocTekst(v, max=190){
+  const s=String(v??"").replace(/\s+/g," ").trim();
+  return s.length>max ? s.slice(0,max).replace(/\s+\S*$/,"")+"…" : s;
+}
+function zdaniaOpisu(v){
+  const s=String(v??"")
+    .replace(/<[^>]+>/g," ")
+    .replace(/\s+/g," ")
+    .trim();
+  if(!s) return [];
+  const m = s.match(/[^.!?]+(?:[.!?](?=\s|$)|$)/g) || [];
+  return m.map(x=>x.trim()).filter(x=>x.length>18);
+}
+function agentAICzyscOpis(v,max=20000){
+  let s=String(v??"")
+    .replace(/^Domyślny opis(?: krótki| pełny)?\s*/i,"")
+    .replace(/\s*(?:\[?\.{3}\]?\s*Read\s+More|Czytaj\s+więcej)\s*\.{0,3}\s*$/gi,"")
+    .replace(/\r/g,"\n")
+    .replace(/\t+/g," ")
+    .replace(/[ \u00a0]{2,}/g," ")
+    .replace(/\n{3,}/g,"\n\n")
+    .replace(/\s+([,.!?;:])/g,"$1")
+    .replace(/([.!?])([A-ZĄĆĘŁŃÓŚŹŻ])/g,"$1 $2")
+    .trim();
+  s=s.replace(/\b(Zawartość opakowania|W zestawie|Skład zestawu|Wymiary opakowania|Liczba graczy|Wiek graczy)\s*:/gi,"\n\n$1:");
+  s=s.replace(/\n{3,}/g,"\n\n").trim();
+  return s.length>max ? s.slice(0,max).replace(/\s+\S*$/,"")+"…" : s;
+}
+function agentAITnijDoZdania(s,max=280){s=String(s||"").replace(/\s+/g," ").trim();if(s.length<=max)return s;const cut=s.slice(0,max+1),idx=Math.max(cut.lastIndexOf("."),cut.lastIndexOf("!"),cut.lastIndexOf("?"));return idx>90?cut.slice(0,idx+1).trim():cut.slice(0,max).replace(/\s+\S*$/,"").trim()+"…";}
+function wspolnaTrescProduktu(p={}){
+  return p;
+}
+function agentAIUtworzOpisKrotki(p={}){p=wspolnaTrescProduktu(p);
+  const raw=String(p.opisKrotki||p.krotkiOpis||p.shortDescription||"").replace(/^Domyślny opis krótki\s*/i,"").trim();
+  if(raw) return agentAITnijDoZdania(agentAICzyscOpis(raw,500),300);
+  const opis=agentAICzyscOpis(p.opis||"",20000);
+  const zd=zdaniaOpisu(opis).filter(x=>!/^(zawartość opakowania|skład zestawu|wymiary|ostrzeżenie)/i.test(x));
+  if(zd.length) return agentAITnijDoZdania(zd.slice(0,2).join(" "),300);
+  const kat=String(p.kategoria||"produkt").toLowerCase();
+  return agentAITnijDoZdania(`${p.nazwa||"Produkt"} to propozycja z kategorii ${kat}, przygotowana z myślą o wygodnym wyborze i szybkim zakupie w Artway-TM.`,300);
+}
+function agentAIFormatujOpisPelny(p={}){p=wspolnaTrescProduktu(p);
+  const raw=agentAICzyscOpis(p.opis||p.opisKrotki||p.krotkiOpis||p.shortDescription||"",20000);
+  if(!raw)return "";
+  const etykieta=/^(opis produktu|najważniejsze cechy|cechy produktu|zawartość opakowania|w zestawie|skład zestawu|zasady gry|jak grać|wymiary|dane techniczne|informacje dodatkowe|ostrzeżenie|bezpieczeństwo)\s*:?[\s]*$/i;
+  const wejscie=raw
+    .replace(/\s*[•·▪◦]\s*/g,"\n• ")
+    .replace(/\b(Opis produktu|Najważniejsze cechy|Cechy produktu|Zawartość opakowania|W zestawie|Skład zestawu|Zasady gry|Jak grać|Wymiary|Dane techniczne|Informacje dodatkowe|Ostrzeżenie|Bezpieczeństwo)\s*:/gi,"\n\n$1\n")
+    .split(/\n{2,}/)
+    .map(x=>x.trim()).filter(Boolean);
+  const bloki=[];
+  for(const blok of wejscie){
+    const linie=blok.split(/\n+/).map(x=>x.trim()).filter(Boolean);
+    for(const linia of linie){
+      if(etykieta.test(linia)){bloki.push(linia.replace(/:$/,""));continue;}
+      if(/^[-•]\s+/.test(linia)){bloki.push("• "+linia.replace(/^[-•]\s+/,""));continue;}
+      const zd=zdaniaOpisu(linia);
+      if(zd.length>3){for(let i=0;i<zd.length;i+=2)bloki.push(zd.slice(i,i+2).join(" "));}
+      else bloki.push(linia);
+    }
+  }
+  const maNaglowek=bloki.some(x=>etykieta.test(x));
+  const wynik=maNaglowek?bloki:["Opis produktu",...bloki];
+  const fakty=[
+    p.producent?`Producent: ${p.producent}`:"",
+    p.marka?`Marka: ${p.marka}`:"",
+    (p.kodProducenta||p.mpn)?`Kod producenta: ${p.kodProducenta||p.mpn}`:"",
+    (p.gtin||p.ean)?`EAN/GTIN: ${p.gtin||p.ean}`:"",
+    p.rozmiar?`Wymiary / rozmiar: ${p.rozmiar}`:"",
+    p.material?`Materiał: ${p.material}`:""
+  ].filter(Boolean).filter(x=>!raw.toLowerCase().includes(x.toLowerCase()));
+  if(fakty.length)wynik.push("Najważniejsze informacje",...fakty.map(x=>"• "+x));
+  return wynik.join("\n\n").replace(/\n{3,}/g,"\n\n").trim();
+}
+function opisProduktuHTML(p={}){
+  p=wspolnaTrescProduktu(p);
+  if(p.contentEditorial?.layoutPolicy==="allegro_sections"&&Array.isArray(p.allegroDescriptionSections)&&p.allegroDescriptionSections.length){
+    const safeHtml=value=>{const tpl=document.createElement("template");tpl.innerHTML=String(value||"");tpl.content.querySelectorAll("*").forEach(el=>{if(!["P","H2","UL","LI","B","STRONG"].includes(el.tagName))el.replaceWith(document.createTextNode(el.textContent||""));else[...el.attributes].forEach(a=>el.removeAttribute(a.name));});return tpl.innerHTML;};
+    const sections=p.allegroDescriptionSections.map(section=>(section.items||[]).map(item=>item.type==="IMAGE"&&/^https?:\/\//i.test(String(item.url||""))?`<figure><img src="${esc(item.url)}" alt="${esc(p.nazwa||"Produkt")}" loading="lazy"></figure>`:`<section>${safeHtml(item.content)}</section>`).join("")).join("");
+    if(sections)return `<div class="product-description-content product-description-shared-layout">${sections}</div>`;
+  }
+  const tekst=agentAIFormatujOpisPelny(p)||"Szczegółowy opis produktu zostanie wkrótce uzupełniony.";
+  const etykieta=/^(opis produktu|najważniejsze informacje|najważniejsze cechy|cechy produktu|zawartość opakowania|w zestawie|skład zestawu|zasady gry|jak grać|wymiary|dane techniczne|informacje dodatkowe|ostrzeżenie|bezpieczeństwo)$/i;
+  const bloki=tekst.split(/\n{2,}/).map(x=>x.trim()).filter(Boolean);
+  let html="",lista=[];
+  const zamknijListe=()=>{if(lista.length){html+=`<ul>${lista.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`;lista=[];}};
+  for(const blok of bloki){
+    if(/^•\s+/.test(blok)){lista.push(blok.replace(/^•\s+/,""));continue;}
+    zamknijListe();
+    if(etykieta.test(blok))html+=`<h3>${esc(blok)}</h3>`;
+    else html+=`<p>${esc(blok).replace(/\n/g,"<br>")}</p>`;
+  }
+  zamknijListe();
+  return `<div class="product-description-content">${html}</div>`;
+}
+function opisKrotkiProduktu(p={}){
+  return agentAIUtworzOpisKrotki(wspolnaTrescProduktu(p));
+}
+function agentAIPoprawOpisyDanychProduktu(p={}){
+  const out={...p};
+  out.opis=agentAIFormatujOpisPelny(out);
+  out.opisKrotki=agentAIUtworzOpisKrotki(out);
+  if(out.opisKrotki&&out.opis&&out.opisKrotki===out.opis) out.opisKrotki=agentAITnijDoZdania(out.opis,300);
+  return out;
+}
+function agentAIProduktGotowyZLinku(d={},url=""){
+  const source={...(d.product||{})},category=d.storeCategory?.name?d.storeCategory:agentAIDobierzKategorieProduktu(source),canonical=allegroProducentKanoniczny({...source,sourceUrl:source.sourceUrl||url,producentUrl:source.producentUrl||url}),canonicalUrl=String(d.canonicalUrl||d.resolvedUrl||source.sourceUrl||url).trim(),now=new Date().toISOString();
+  const product={...source,kategoria:category.name||source.kategoria||"",producent:canonical||source.producent||source.marka||"",marka:source.marka||canonical||source.producent||"",sourceUrl:canonicalUrl,producentUrl:canonicalUrl,agentImportAt:now,agentImportConfidence:Number(d.confidence||source.agentImportConfidence||0),agentImportSource:d.fromCache?"pamięć Agenta + źródło produktu":"strona źródłowa produktu + Agent",agentImportUrl:canonicalUrl,sourceEvidence:{...(source.sourceEvidence||{}),requestedUrl:url,canonicalUrl,fetchedAt:source.sourceEvidence?.fetchedAt||source.producentSprawdzonoAt||now,fieldSources:d.fieldSources||source.sourceEvidence?.fieldSources||{}},ikona:source.ikona||(/\b(gra|gry|puzzle|układank|zabaw)/i.test(`${source.nazwa||""} ${category.name||""}`)?"🎲":"📦"),sku:source.sku||source.externalId||"",externalId:source.externalId||source.sku||"",cena:Number(source.cena)||0,createdAt:now,createdBy:sesja?.email||"administrator",agentOnboardingStatus:"processing",agentOnboardingStartedAt:now};
+  return domyslneKosztyDoProduktu(agentAIPoprawOpisyDanychProduktu(product),false);
+}
+async function agentAIPoprawOpisyWFormularzu(form){
+  if(!form){toast("Nie znaleziono formularza produktu");return;}
+  return allegroPoprawOpisyWFormularzu(form.querySelector('[onclick^="agentAIPoprawOpisyWFormularzu"]'));
+}
+async function allegroPoprawOpisyWFormularzu(btn){
+  const form=btn?.closest("form");
+  if(!form){ toast("Nie znaleziono formularza produktu"); return; }
+  const id=Number(form.dataset?.productId||0);
+  const produkt=produktRoboczyAllegroZFormularza(form,id,id?pobierzProduktAdmin(id)||{}:{});
+  try{
+    btn.disabled=true;
+    toast("🤖 Przygotowuję krótki i pełny opis oraz układ wizualny Allegro…");
+    const d=await chmura("allegro-description-improve",{method:"POST",body:{product:produkt},timeout:120000});
+    if(form.elements.allegroTitle&&d.allegroTitle) form.elements.allegroTitle.value=d.allegroTitle;
+    if(form.elements.allegroShortDescription) form.elements.allegroShortDescription.value=d.shortDescription||form.elements.allegroShortDescription.value||"";
+    if(form.elements.allegroDescription&&d.allegroDescription) form.elements.allegroDescription.value=d.allegroDescription;
+    let cloudSaved=null;
+    if(id){
+      cloudSaved=await zapiszPolaProduktuTrwale(id,{allegroTitle:d.allegroTitle||produkt.allegroTitle||"",allegroShortDescription:d.shortDescription||produkt.allegroShortDescription||"",allegroDescription:d.allegroDescription||produkt.allegroDescription||"",contentEditorial:d.contentEditorial||produkt.contentEditorial,allegroDescriptionSections:Array.isArray(d.sections)?d.sections:[],allegroDescriptionEditedAt:new Date().toISOString(),allegroDescriptionSource:"agent-independent-allegro-content"},false,"allegro-description-agent").then(()=>true);
+    }
+    const box=document.getElementById("allegroDescriptionPreview");
+    if(box) box.innerHTML=`<div class="backend-note"><b>✅ Niezależna treść Allegro przygotowana</b><br>Nazwa: ${esc(d.allegroTitle||"—")}<br><small>Treść sklepu i Von Halsky nie została zmieniona.</small></div><div class="allegro-description-preview"><div class="allegro-description-preview-head"><b>Podgląd układu w Allegro</b><small>Ta wersja ma własną walidację i kolejkę aktualizacji.</small></div>${(d.sections||[]).map(s=>(s.items||[]).map(item=>item.type==="IMAGE"?`<img src="${esc(item.url||"")}" alt="Podgląd zdjęcia produktu" loading="lazy">`:`<section>${item.content||""}</section>`).join("")).join("")||`<section><p>Brak sekcji do podglądu.</p></section>`}</div>`;
+    toast(id?(cloudSaved?"✅ Treść Allegro zapisano i odczytano z serwera":"⚠️ Serwer nie potwierdził treści Allegro"):"🤖 Treść Allegro zostanie zapisana z produktem");
+  }catch(e){ toast("⚠️ Poprawianie opisów Allegro: "+(e.message||e)); }
+  finally{ btn.disabled=false; }
+}
+function tylkoCyfry(v){ return String(v??"").replace(/[^0-9]/g,""); }
+function formatTelefonPlatnosci(v=KONFIG.numerPrzelewuTelefon){
+  const c = tylkoCyfry(v || NUMER_PRZELEWU_TELEFON_DOMYSLNY);
+  return c.length===9 ? `${c.slice(0,3)} ${c.slice(3,6)} ${c.slice(6)}` : String(v||NUMER_PRZELEWU_TELEFON_DOMYSLNY).trim();
+}
+function ustawNumerPrzelewuTelefon(v){
+  const c = tylkoCyfry(v || NUMER_PRZELEWU_TELEFON_DOMYSLNY).slice(0,15);
+  KONFIG.numerPrzelewuTelefon = c || NUMER_PRZELEWU_TELEFON_DOMYSLNY;
+  return KONFIG.numerPrzelewuTelefon;
+}

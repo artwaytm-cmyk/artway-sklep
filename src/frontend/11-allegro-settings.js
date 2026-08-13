@@ -1,0 +1,89 @@
+/* Ustawienia integracji Allegro — mapowanie, harmonogram i automatyzacje. */
+async function allegroZapiszDaneAplikacji(event){
+  event?.preventDefault();const form=event?.currentTarget,button=form?.querySelector("button[type=submit]");
+  const clientId=String(form?.elements?.clientId?.value||"").trim(),clientSecret=String(form?.elements?.clientSecret?.value||"").trim();
+  if(!clientId||!clientSecret){toast("Wpisz pełny Client ID i Client Secret");return false;}
+  if(button){button.disabled=true;button.textContent="⏳ Sprawdzam w Allegro…";}
+  try{
+    const data=await chmura("allegro-credentials",{method:"POST",body:{clientId,clientSecret,environment:"production"},timeout:30000});
+    form.reset();allegroStan={...allegroStan,...(data.allegro||{}),credentialsRedacted:false,credentialsInvalid:false,sprawdzono:true};
+    toast(data.refreshed?"✅ Dane aplikacji sprawdzone — połączenie Allegro działa":"✅ Dane aplikacji sprawdzone — dokończ jednorazowe połączenie konta");
+    if(data.requiresOAuth)setTimeout(()=>allegroPolacz(),300);else{await allegroWczytajDane(true,true,"config");renderuj();}
+  }catch(error){toast("⚠️ Allegro: "+(error?.message||error));}
+  finally{if(button){button.disabled=false;button.textContent="🔐 Sprawdź i zapisz bezpiecznie";}}
+  return false;
+}
+function allegroNaprawaDanychAplikacjiHTML(){
+  if(!allegroStan.credentialsRedacted&&!allegroStan.credentialsInvalid)return "";
+  return `<section class="allegro-credential-repair"><header><span>🔐</span><div><small>Naprawa połączenia • dane tylko na serwerze</small><h3>Wpisz ponownie pełne dane aplikacji Allegro</h3><p>Wcześniej do konfiguracji trafiły zamaskowane wartości z gwiazdkami. Nie są prawdziwym Client ID ani Client Secret, dlatego Allegro zwracało <code>invalid_client</code>. Agent AI i GPT‑5 nano działają prawidłowo.</p></div></header><form autocomplete="off" onsubmit="return allegroZapiszDaneAplikacji(event)"><label>Client ID<input name="clientId" required minlength="12" autocomplete="off" spellcheck="false" placeholder="Pełna wartość z aplikacji Allegro"></label><label>Client Secret<input name="clientSecret" type="password" required minlength="12" autocomplete="new-password" spellcheck="false" placeholder="Pełna wartość — bez gwiazdek"></label><button class="btn" type="submit">🔐 Sprawdź i zapisz bezpiecznie</button></form><footer><span>✓ Dane są najpierw weryfikowane bezpośrednio w OAuth Allegro</span><span>✓ Sekret nie trafia do przeglądarki, bazy sklepu ani repozytorium</span><span>✓ Zamaskowana wartość nigdy więcej nie nadpisze sejfu</span></footer></section>`;
+}
+function allegroUstawieniaPanelHTML(){
+  const offerStock=allegroStanOfertyProduktu(),audit=Object.values(allegroStan.offerDefaultsAudit?.items||{}),auditOpen=audit.filter(x=>!x.stockUpdated||!x.republishUpdated).length;
+  const settings={autoMapping:true,mappingMinScore:88,lightSyncMinutes:15,fullSyncHours:6,autonomousAgent:true,autoResolveDuplicates:true,autoResolveDuplicateMinScore:97,...(allegroStan.offerSettings||{})};
+  const sync=allegroStan.offerSyncState||{},maintenance=allegroStan.catalogMaintenance||{},agent=allegroStan.autonomousAgent||{};
+  const dataLabel=value=>value&&Number.isFinite(Date.parse(value))?esc(new Date(value).toLocaleString("pl-PL")):"jeszcze nie wykonano";
+  const connectionReady=allegroStan.configured===true&&allegroStan.connected===true&&allegroStan.requiresReauth!==true;
+  const missingScopes=Array.isArray(allegroStan.missingAuthorizedScopes)?allegroStan.missingAuthorizedScopes:[];
+  const connectionMessage=connectionReady?`Konto ${esc(allegroStan.account||"sprzedawcy")} jest autoryzowane i gotowe do operacji.`:esc(allegroStan.authError?.message||(missingScopes.length?`Brakuje ${missingScopes.length} zakresów OAuth.`:"Połączenie wymaga dokończenia lub naprawy."));
+  const option=(value,current,label)=>`<option value="${value}" ${Number(current)===Number(value)?"selected":""}>${label}</option>`;
+  setTimeout(()=>void allegroPobierzWarunkiDoEdytora(),0);
+  return `<div class="panel allegro-section-panel allegro-integration-settings">
+    <div class="order-section-head">
+      <div><span class="order-pro-label">Allegro API</span><h2>⚙️ Ustawienia integracji</h2><p class="order-detail-lead">Jedno miejsce do ustawienia automatycznego mapowania, rytmu synchronizacji, aktualizacji ofert i domyślnych danych.</p></div>
+      <div class="diag-actions"><button class="btn" type="button" onclick="allegroWczytajDane(true)">↻ Sprawdź teraz</button>${connectionReady?`<button class="btn ghost" type="button" onclick="allegroPolacz()">Zmień lub odnów konto</button>`:`<button class="btn" type="button" onclick="allegroPolacz()">🔐 Napraw połączenie</button>`}</div>
+    </div>
+    ${allegroNaprawaDanychAplikacjiHTML()}
+    <section class="allegro-connection-truth ${connectionReady?"ready":"attention"}"><span>${connectionReady?"✓":"!"}</span><div><small>RZECZYWISTY STAN POŁĄCZENIA</small><h3>${connectionReady?"Allegro API działa":"Allegro wymaga działania"}</h3><p>${connectionMessage}</p>${missingScopes.length?`<em>Brakujące zakresy: ${missingScopes.map(x=>esc(x)).join(", ")}</em>`:""}</div><dl><div><dt>Środowisko</dt><dd>${esc(allegroStan.env||"production")}</dd></div><div><dt>OAuth</dt><dd>${allegroStan.connected?"aktywny":"nieaktywny"}</dd></div><div><dt>Uprawnienia</dt><dd>${missingScopes.length?`${missingScopes.length} braków`:"kompletne"}</dd></div><div><dt>Ostatni zapis</dt><dd>${dataLabel(allegroStan.updated_at)}</dd></div></dl></section>
+    <div class="orders-stat-grid">
+      <div class="order-stat-card ${allegroStan.configured?"money":"hot"}"><span>🔧</span><b>${allegroStan.configured?"OK":"BRAK"}</b><small>konfiguracja aplikacji</small></div>
+      <div class="order-stat-card ${allegroStan.connected?"money":"hot"}"><span>🔐</span><b>${allegroStan.connected?"TAK":"NIE"}</b><small>autoryzacja OAuth</small></div>
+      <div class="order-stat-card"><span>🔄</span><b>${settings.lightSyncMinutes} min</b><small>lekka synchronizacja</small></div>
+      <div class="order-stat-card"><span>📚</span><b>${settings.fullSyncHours} h</b><small>pełna synchronizacja</small></div>
+    </div>
+    <form class="allegro-settings-layout" onsubmit="event.preventDefault();allegroZapiszUstawieniaOfert(this)">
+      <section class="allegro-settings-section primary">
+        <div class="allegro-settings-section-head"><div><span>🧠</span><div><h3>Autonomiczny Agent sprzedaży</h3><p>Agent pracuje na serwerze przy zamkniętym panelu: łączy pewne oferty z kartoteką, wykrywa duplikaty, wskazuje najlepszą ofertę i zapisuje pełny audyt. Zakończenie oferty wymaga decyzji.</p></div></div><label class="switch-check"><input type="checkbox" name="autonomousAgent" ${settings.autonomousAgent!==false?"checked":""}><span>Włączony</span></label></div>
+        <div class="allegro-settings-grid compact"><div class="allegro-setting-action"><b>Tryb zdarzeniowy — bez cykli</b><small>Nowa albo zmieniona oferta przekazuje pojedynczy sygnał. Bez zmian Agent nie wykonuje pustej kontroli.</small></div><label>Minimalna pewność rekomendacji duplikatu<input name="autoResolveDuplicateMinScore" type="number" min="95" max="100" step="1" value="${esc(settings.autoResolveDuplicateMinScore)}"><small>Nazwa nigdy nie wystarcza. Agent wymaga EAN/GTIN, ID katalogu lub EXTERNAL_ID/SKU.</small></label></div>
+        <div class="allegro-settings-checks"><label class="check"><input type="checkbox" name="autoResolveDuplicates" ${settings.autoResolveDuplicates!==false?"checked":""}> Automatycznie wykrywaj duplikaty i przygotowuj decyzję z najlepszą ofertą</label></div>
+        <div class="allegro-sync-status-grid"><span><small>Ostatnie zdarzenie</small><b>${dataLabel(agent.completedAt)}</b><em>Status: ${esc(agent.status||"oczekuje")}</em></span><span><small>Ostatni rezultat</small><b>${esc(agent.duplicateOffersEnded||0)} duplikatów zakończonych</b><em>${esc(agent.mapping?.autoMapped||0)} nowych powiązań • ${esc(agent.reviewCount||0)} do decyzji</em></span><button class="btn" type="button" onclick="allegroUruchomAgentAutonomiczny()">Sprawdź nowe oferty teraz</button></div>
+      </section>
+      <section class="allegro-settings-section primary">
+        <div class="allegro-settings-section-head"><div><span>🤖</span><div><h3>Automatyczne mapowanie ofert</h3><p>Pewne, jednoznaczne zgodności EAN, ID produktu i kodu są łączone bez klikania. Wyjątki pozostają do ręcznej kontroli.</p></div></div><label class="switch-check"><input type="checkbox" name="autoMapping" ${settings.autoMapping!==false?"checked":""}><span>Włączone</span></label></div>
+        <div class="allegro-settings-grid compact"><label>Próg pewności od 55%<input name="mappingMinScore" type="number" min="55" max="100" step="1" required value="${esc(settings.mappingMinScore)}"><small>Możesz ustawić dowolny próg od 55% do 100%. System nadal odrzuca konflikty i niejednoznaczne duplikaty.</small></label><div class="allegro-setting-action"><b>Natychmiastowa kontrola</b><small>Zapisz nowy próg i od razu połącz wszystkie pozycje, które go spełniają.</small><button class="btn" type="button" onclick="this.form.requestSubmit()">💾 Zapisz i połącz według progu</button></div></div>
+      </section>
+      <section class="allegro-settings-section">
+        <div class="allegro-settings-section-head"><div><span>⏱️</span><div><h3>Harmonogram synchronizacji</h3><p>Ustawienia są wykonywane przez serwer również wtedy, gdy panel administratora jest zamknięty.</p></div></div></div>
+        <div class="allegro-settings-grid"><label>Zamówienia, komunikacja i lista ofert<select name="lightSyncMinutes">${option(15,settings.lightSyncMinutes,"co 15 minut")}${option(30,settings.lightSyncMinutes,"co 30 minut")}${option(60,settings.lightSyncMinutes,"co 1 godzinę")}${option(120,settings.lightSyncMinutes,"co 2 godziny")}</select></label><label>Pełne dane, opisy i katalog<select name="fullSyncHours">${option(6,settings.fullSyncHours,"automatycznie co 6 godzin")}${option(12,settings.fullSyncHours,"automatycznie co 12 godzin")}${option(24,settings.fullSyncHours,"automatycznie co 24 godziny")}</select></label></div>
+        <div class="allegro-sync-status-grid"><span><small>Ostatnia lekka</small><b>${dataLabel(sync.lastLightSyncAt)}</b><em>Następna: ${dataLabel(sync.nextLightSyncAt)}</em></span><span><small>Ostatnia pełna</small><b>${dataLabel(sync.lastFullSyncAt)}</b><em>Następna: ${dataLabel(sync.nextFullSyncAt)}</em></span><button class="btn ghost" type="button" onclick="allegroSynchronizujWszystko()">Synchronizuj wszystko teraz</button></div>
+      </section>
+      <section class="allegro-settings-section">
+        <div class="allegro-settings-section-head"><div><span>🏷️</span><div><h3>Dane i konserwacja ofert</h3><p>Wybierz, które elementy system ma utrzymywać automatycznie po zapisaniu lub synchronizacji produktu.</p></div></div></div>
+        <div class="allegro-settings-checks"><label class="check"><input type="checkbox" name="autoCatalog" ${settings.autoCatalog!==false?"checked":""}> Dobieraj katalog i kategorię</label><label class="check"><input type="checkbox" name="syncDescriptions" ${settings.syncDescriptions!==false?"checked":""}> Automatycznie poprawiaj krótki opis, pełny opis i układ</label><label class="check"><input type="checkbox" name="autoUpdateOffers" ${settings.autoUpdateOffers!==false?"checked":""}> Aktualizuj powiązaną ofertę</label><label class="check"><input type="checkbox" name="autoFees" ${settings.autoFees!==false?"checked":""}> Pobieraj prowizje i opłaty</label><label class="check"><input type="checkbox" name="autoCorrections" ${settings.autoCorrections!==false?"checked":""}> Kwarantanna błędnych powiązań</label></div>
+      </section>
+      <section class="allegro-settings-section">
+        <div class="allegro-settings-section-head"><div><span>📦</span><div><h3>Domyślne dane oferty</h3><p>Stan ofertowy pozostaje niezależny od fizycznego stanu magazynu. Automatyczne wznawianie jest zawsze aktywne.</p></div></div></div>
+        <div class="allegro-settings-grid"><label>Domyślny stan każdej oferty<input name="defaultStock" type="number" min="1" max="99999" step="1" required value="${offerStock}"><small>Nowe i aktualizowane oferty otrzymają tę wartość. Domyślny istniejący cennik dostawy: <b>${esc(settings.shippingRateName||"artway2")}</b>.</small></label><label>Znani producenci i aliasy<textarea name="producers" rows="4" required>${esc(allegroListaProducentow().join("\n"))}</textarea><small>Lista pomaga rozpoznawać nazwy w tekście. Nie ogranicza innych producentów zapisanych w kartotece lub źródle.</small></label></div>
+        <div class="product-channel-block allegro-sales-conditions allegro-default-sales-conditions" data-allegro-sales-conditions>
+          <div class="product-channel-block-head"><div><small>Domyślne dla nowych i aktualizowanych ofert</small><h3>Dostawa, zwroty, reklamacje i gwarancja</h3></div><button class="btn ghost" type="button" onclick="allegroPobierzWarunkiDoEdytora(this)">↻ Odśwież z Allegro</button></div>
+          <p class="muted">Wybierasz istniejące ustawienia konta Allegro. Produkt może mieć własny wyjątek; w pozostałych przypadkach system zawsze zastosuje poniższe wartości.</p>
+          <input type="hidden" name="shippingRateName" value="${esc(settings.shippingRateName||"artway2")}">
+          <input type="hidden" name="returnPolicyName" value="${esc(settings.returnPolicyName||"")}">
+          <input type="hidden" name="impliedWarrantyName" value="${esc(settings.impliedWarrantyName||"")}">
+          <input type="hidden" name="warrantyName" value="${esc(settings.warrantyName||"")}">
+          <div class="product-sales-condition-grid">
+            <label class="f-group"><span>Domyślny cennik dostawy *</span><select name="shippingRateId" data-name-field="shippingRateName" data-allegro-condition="shippingRates" data-current="${esc(settings.shippingRateId||"")}"><option value="${esc(settings.shippingRateId||"")}">${esc(settings.shippingRateName||"artway2")}</option></select></label>
+            <label class="f-group"><span>Domyślne warunki zwrotu *</span><select name="returnPolicyId" data-name-field="returnPolicyName" data-allegro-condition="returnPolicies" data-current="${esc(settings.returnPolicyId||"")}"><option value="${esc(settings.returnPolicyId||"")}">${esc(settings.returnPolicyName||"pobierz z konta")}</option></select></label>
+            <label class="f-group"><span>Domyślne warunki reklamacji *</span><select name="impliedWarrantyId" data-name-field="impliedWarrantyName" data-allegro-condition="impliedWarranties" data-current="${esc(settings.impliedWarrantyId||"")}"><option value="${esc(settings.impliedWarrantyId||"")}">${esc(settings.impliedWarrantyName||"pobierz z konta")}</option></select></label>
+            <label class="f-group"><span>Domyślna gwarancja</span><select name="warrantyId" data-name-field="warrantyName" data-allegro-condition="warranties" data-current="${esc(settings.warrantyId||"")}"><option value="${esc(settings.warrantyId||"")}">${esc(settings.warrantyName||"brak lub pobierz z konta")}</option></select></label>
+          </div>
+          <div data-allegro-sales-condition-status class="backend-note">Pobieram bieżące opcje bezpośrednio z konta Allegro…</div>
+        </div>
+        <label class="check allegro-apply-existing"><input type="checkbox" name="applyExisting"> Zastosuj stan i wznawianie także do wszystkich ${allegroOferty.length} istniejących ofert</label>
+        ${audit.length?`<small class="allegro-settings-audit">Ostatni audyt: ${audit.length-auditOpen} bez problemu • ${auditOpen} wymaga uzupełnienia.</small>`:""}
+      </section>
+      <div class="allegro-settings-savebar"><div><b>Wszystkie ustawienia zapisują się na serwerze</b><small>Obowiązują na każdym urządzeniu i dla zadań automatycznych.</small></div><button class="btn" type="submit" ${allegroOperacjaUstawien.busy?"disabled":""}>💾 Zapisz wszystkie ustawienia</button></div>
+    </form>
+    ${allegroPostepUstawienHTML()}
+    <details class="allegro-manual-sync"><summary>Zaawansowane narzędzia i informacje techniczne</summary><div class="panel-subtle"><div class="diag-actions"><button class="btn ghost" type="button" onclick="allegroSynchronizujZamowienia()">Zamówienia</button><button class="btn ghost" type="button" onclick="allegroSynchronizujOferty()">Oferty</button><button class="btn ghost" type="button" onclick="allegroUruchomAutomatycznaKonserwacje()">Katalog i opisy</button><button class="btn ghost" type="button" onclick="allegroSynchronizujKomunikacje(false)">Komunikacja</button></div><p><b>Konserwacja:</b> ${maintenance.lastRun?`${dataLabel(maintenance.lastRun)} • sprawdzono ${esc(maintenance.scanned||0)} • poprawiono ${esc(maintenance.updated||0)}`:"oczekuje na pierwsze uruchomienie"}.</p><p>Środowisko: <b>${esc(allegroStan.env||"production")}</b>. Ostatni odczyt integracji: ${dataLabel(allegroStan.updated_at)}.</p></div></details>
+  </div>`;
+}
