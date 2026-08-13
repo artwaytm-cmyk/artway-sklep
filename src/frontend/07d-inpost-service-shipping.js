@@ -189,8 +189,7 @@ function inpostServicePotwierdzenieHTML(item={},warning=""){
   const carrierGross=Number(item.pricing?.totalGross),commissionGross=Number(item.billing?.commissionGross??item.pricing?.commissionGross),storedTotal=Number(item.pricing?.customerTotalGross);
   const customerTotalGross=Number.isFinite(storedTotal)?storedTotal:(Number.isFinite(carrierGross)?carrierGross+(Number.isFinite(commissionGross)?commissionGross:0):NaN);
   const money=value=>Number.isFinite(value)?zl(value):"—";
-  return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Potwierdzenie ${esc(item.reference||item.id||"nadania")}</title><style>
-  @page{size:A4;margin:12mm}:root{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff}*{box-sizing:border-box}body{margin:0;padding:16px;background:#fff}.sheet{width:100%;max-width:186mm;margin:0 auto;background:#fff;border:1.5px solid #000}.head{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:start;padding:16px 18px;border-bottom:2px solid #000}.brand{font-size:18px;font-weight:700;letter-spacing:.04em}.head h1{margin:8px 0 2px;font-size:21px;text-transform:uppercase;letter-spacing:.035em}.head small,.head-meta small{display:block;margin-top:4px;font-size:11px}.head-meta{text-align:right;font-size:12px}.status{padding:11px 18px;border-bottom:1px solid #000}.status b{display:block;font-size:15px}.status span{display:block;margin-top:3px;font-size:11px}.content{padding:14px 18px}.meta,.costs{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #000;margin-bottom:12px}.meta div,.costs div{min-height:54px;padding:9px 10px;border-right:1px solid #000}.meta div:last-child,.costs div:last-child{border-right:0}.meta small,.party small,.parcel small,.costs small{display:block;margin-bottom:5px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.035em}.meta b,.costs b{font-size:12px}.costs .total{border-left:1px solid #000}.parties{display:grid;grid-template-columns:1fr 1fr;border:1px solid #000;margin-bottom:12px}.party{display:grid;align-content:start;gap:3px;min-height:118px;padding:10px}.party:first-child{border-right:1px solid #000}.party span{font-size:11px}.parcel{padding:10px;border:1px solid #000;margin-bottom:12px}.parcel b,.parcel span{display:block;font-size:11px;margin-top:3px}.section-title{margin:16px 0 7px;padding-bottom:4px;border-bottom:1px solid #000;font-size:13px;text-transform:uppercase;letter-spacing:.035em}.timeline{margin:0;padding:0;list-style:none;border:1px solid #000}.timeline li{display:grid;grid-template-columns:1fr auto;gap:8px;padding:7px 9px;border-bottom:1px solid #000;break-inside:avoid}.timeline li:last-child{border-bottom:0}.timeline b{font-size:11px}.timeline span,.timeline small{font-size:10px}.timeline small{grid-column:1/-1}.track-link{display:inline-block;margin-top:10px;color:#000;font-size:10px;font-weight:700;text-decoration:underline}.warning{margin:0 18px 12px;padding:9px;border:1.5px solid #000;font-size:11px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px}.signature-box{height:74px;padding-top:50px;border-bottom:1px solid #000;text-align:center;font-size:10px}.stamp-box{height:74px;border:1px solid #000;display:flex;align-items:flex-end;justify-content:center;padding:7px;font-size:10px}.formal-note{margin:14px 0 0;font-size:9px;line-height:1.45}.foot{display:flex;justify-content:space-between;gap:20px;padding:10px 18px;border-top:1px solid #000;font-size:9px}.actions{display:flex;justify-content:center;gap:10px;padding:18px}.actions button{padding:9px 15px;border:1px solid #000;background:#000;color:#fff;font-weight:700;cursor:pointer}.actions button:last-child{background:#fff;color:#000}@media(max-width:650px){body{padding:0}.sheet{border-left:0;border-right:0}.head{grid-template-columns:1fr}.head-meta{text-align:left}.meta,.costs,.parties,.signatures{grid-template-columns:1fr}.meta div,.costs div,.party:first-child{border-right:0;border-bottom:1px solid #000}.costs .total{border-left:0}.foot{display:block}.foot span{display:block;margin-top:4px}}@media print{body{padding:0}.sheet{max-width:none}.actions{display:none}}</style></head><body><main class="sheet">
+  return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Potwierdzenie ${esc(item.reference||item.id||"nadania")}</title></head><body><main class="sheet">
     <header class="head"><div><div class="brand">${esc(company.nazwa||"Artway‑TM")}</div><h1>Potwierdzenie nadania przesyłki</h1><small>Dokument operacyjny dotyczący usługi przewozu</small></div><div class="head-meta"><b>Nr dokumentu: ${esc(item.reference||item.id||"—")}</b><small>Data wystawienia: ${esc(inpostServiceDataPotwierdzenia(new Date().toISOString()))}</small></div></header>
     <section class="status"><b>${esc(eventLabel(currentEvent||{status:currentStatus}))}</b><span>Stan danych na: ${esc(inpostServiceDataPotwierdzenia(updated))}</span></section>
     ${warning?`<div class="warning"><b>Uwaga:</b> nie udało się pobrać świeżego statusu. Dokument pokazuje ostatnie dane zapisane w systemie.</div>`:""}
@@ -205,13 +204,25 @@ function inpostServicePotwierdzenieHTML(item={},warning=""){
     </div><footer class="foot"><span>${esc([company.nazwa,pelnyAdresFirmy?.(company)].filter(Boolean).join(" • "))}</span><span>Dokument nie jest fakturą ani paragonem.</span></footer>
   </main><div class="actions"><button onclick="window.print()">Drukuj / zapisz PDF</button><button onclick="window.close()">Zamknij</button></div></body></html>`;
 }
+function inpostServiceCzekajNaOknoPotwierdzenia(popup,timeout=7000){
+  return new Promise((resolve,reject)=>{const started=Date.now(),check=()=>{
+    if(!popup||popup.closed)return reject(new Error("Okno potwierdzenia zostało zamknięte"));
+    try{if(popup.location.pathname==="/assets/inpost-confirmation.html"&&popup.document.readyState==="complete")return resolve();}catch{}
+    if(Date.now()-started>=timeout)return reject(new Error("Nie udało się przygotować okna potwierdzenia"));
+    setTimeout(check,50);
+  };check();});
+}
 async function inpostServicePotwierdzenie(id){
-  const popup=window.open("","_blank","width=980,height=900");if(!popup)return toast("Przeglądarka zablokowała okno wydruku");
-  popup.document.write('<!doctype html><html lang="pl"><meta charset="utf-8"><title>Przygotowanie potwierdzenia</title><body style="font-family:Arial;padding:40px"><h2>Odświeżam tracking InPost…</h2><p>Dokument otworzy się za chwilę.</p></body></html>');popup.document.close();
+  const popup=window.open("/assets/inpost-confirmation.html","_blank","width=980,height=900");if(!popup)return toast("Przeglądarka zablokowała okno wydruku");
   let item=inpostServiceStan.items.find(row=>row.id===id),warning="";
   try{item=await inpostServicePobierzStatus(id);}catch(e){warning=e.message||String(e);}
   if(!item){popup.close();return toast("Nie znaleziono nadania");}
-  popup.document.open();popup.document.write(inpostServicePotwierdzenieHTML(item,warning));popup.document.close();
+  try{
+    await inpostServiceCzekajNaOknoPotwierdzenia(popup);
+    const documentHtml=new DOMParser().parseFromString(inpostServicePotwierdzenieHTML(item,warning),"text/html");
+    popup.document.title=documentHtml.title;
+    popup.document.body.innerHTML=documentHtml.body.innerHTML;
+  }catch(e){popup.close();return toast(e.message||String(e));}
   renderuj();
 }
 async function inpostServiceEtykieta(id,format="A6"){

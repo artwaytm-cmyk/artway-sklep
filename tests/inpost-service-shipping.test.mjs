@@ -263,11 +263,13 @@ test('brak stawki za wybraną dopłatę blokuje fakturę, ale pełny koszt ręcz
 });
 
 test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt', async () => {
-  const [shipping, inventory, core, css] = await Promise.all([
+  const [shipping, inventory, core, css, confirmationHtml, confirmationCss] = await Promise.all([
     readFile(new URL('../assets/admin-shipping.js', import.meta.url), 'utf8'),
     readFile(new URL('../assets/admin-inventory.js', import.meta.url), 'utf8'),
     readFile(new URL('../assets/admin-core.js', import.meta.url), 'utf8'),
     readFile(new URL('../assets/admin.css', import.meta.url), 'utf8'),
+    readFile(new URL('../assets/inpost-confirmation.html', import.meta.url), 'utf8'),
+    readFile(new URL('../assets/inpost-confirmation.css', import.meta.url), 'utf8'),
   ]);
   assert.match(shipping, /#\/admin\/wysylki\/inpost/);
   assert.match(shipping, /function panelWysylkiUslugowejInpost/);
@@ -296,6 +298,11 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /Razem dla klienta/);
   assert.match(shipping, /Podpis osoby wystawiającej/);
   assert.match(shipping, /Pieczęć firmowa Artway-TM/);
+  assert.match(shipping, /\/assets\/inpost-confirmation\.html/);
+  assert.doesNotMatch(shipping, /<title>Potwierdzenie[^]*<style>/);
+  assert.match(confirmationHtml, /\/assets\/inpost-confirmation\.css/);
+  assert.match(confirmationCss, /\.signatures/);
+  assert.match(confirmationCss, /\.stamp-box/);
   assert.doesNotMatch(shipping, /linear-gradient\(135deg,#111827,#312e81\)/);
   assert.match(shipping, /Kontrola ShipX:<\/b>.*niepotwierdzona/s);
   assert.equal((shipping.match(/function inpostServiceUstawTyp\(/g) || []).length, 1);

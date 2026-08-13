@@ -816,6 +816,9 @@ test('potwierdzenie klienta otwiera druk A4 z aktualną historią transportu', a
   await expect(popup.getByText('Razem dla klienta')).toBeVisible();
   await expect(popup.getByText('Podpis osoby wystawiającej')).toBeVisible();
   await expect(popup.getByText('Pieczęć firmowa Artway-TM')).toBeVisible();
+  await expect(popup.locator('.sheet')).toHaveCSS('border-top-style', 'solid');
+  await expect(popup.locator('.parties')).toHaveCSS('display', 'grid');
+  await expect(popup.locator('.stamp-box')).toHaveCSS('height', '74px');
   await expect(popup.getByRole('button', { name: 'Drukuj / zapisz PDF' })).toBeVisible();
   await expect(popup.getByText('Dokument nie jest fakturą ani paragonem.')).toBeVisible();
   await popup.close();

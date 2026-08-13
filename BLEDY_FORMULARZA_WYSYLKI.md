@@ -62,3 +62,20 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 - Miejsce: rejestr nadań i historia przesyłki w panelu sklepu.
 - Obecne działanie: panel pokazuje „Przesyłka potwierdzona”, podczas gdy oficjalne śledzenie InPost dla tego samego numeru mówi „Przesyłka utworzona, ale nie jest gotowa do nadania”.
 - Oczekiwane działanie: etap przed fizycznym przekazaniem paczki powinien brzmieć np. „Etykieta utworzona — paczka czeka na nadanie w PaczkoPunkcie”, aby nie mylić utworzenia etykiety z rzeczywistym nadaniem.
+
+### WYS-008 — Zabezpieczenia przeglądarki blokują styl wydruku potwierdzenia
+
+- Data zgłoszenia: 2026-08-13
+- Status: naprawiono i przetestowano 2026-08-13
+- Miejsce: wydruk „Potwierdzenie nadania” otwierany w nowej karcie.
+- Obecne działanie: treść dokumentu jest kompletna, ale reguły bezpieczeństwa CSP blokują osadzony arkusz stylów, przez co sekcje zlewają się i brakuje czytelnych pól na podpis oraz pieczęć.
+- Oczekiwane działanie: formalny czarno-biały arkusz jest ładowany jako dozwolony plik strony, a układ A4, ramki, podpis i pieczęć pozostają czytelne na ekranie i wydruku.
+
+## Błędy danych wykryte podczas kontroli
+
+### DANE-001 — Kod pocztowy odbiorcy nie odpowiada miejscowości
+
+- Data wykrycia: 2026-08-13
+- Status: wymaga decyzji użytkownika przed anulowaniem lub ponownym utworzeniem przesyłki.
+- Kontrola: formularz nie znajduje miejscowości dla podanego kodu, natomiast po wpisaniu prawidłowego kodu automatycznie rozpoznaje właściwą miejscowość.
+- Działanie ochronne: nie wykonywać automatycznego anulowania ani ponownego nadania, ponieważ może to wpłynąć na etykietę i rozliczenie InPost.
