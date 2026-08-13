@@ -153,7 +153,7 @@ function inpostServicePayload(form){
   const codAmount=Math.max(0,Number(String(data.get("codAmount")||"0").replace(",","."))||0),insuranceAmount=Math.max(0,Number(String(data.get("insuranceAmount")||"0").replace(",","."))||0),sendingMethod=String(data.get("sendingMethod")||"");
   const sender=inpostServiceStronaOsoby(form,"sender");
   const technicalSenderRequired=data.get("technicalSenderRequired")==="on";
-  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:inpostServiceUwagiZeZwrotem(data.get("comments"),sender,technicalSenderRequired),returnAddress:sender.address,principal:sender,sender,technicalSenderRequired,receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod,targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:codAmount>0||data.get("codEnabled")==="on",amount:codAmount},insurance:{enabled:insuranceAmount>0||data.get("insuranceEnabled")==="on",amount:insuranceAmount},weekend:["on","true","1"].includes(String(data.get("weekend")||"")),additionalServices,pickupRequested:sendingMethod==="dispatch_order"||data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
+  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:inpostServiceUwagiZeZwrotem(data.get("comments"),sender,technicalSenderRequired),returnAddress:sender.address,principal:sender,sender,technicalSenderRequired,receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod,targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:codAmount>0||data.get("codEnabled")==="on",amount:codAmount},insurance:{enabled:insuranceAmount>0||data.get("insuranceEnabled")==="on",amount:insuranceAmount},weekend:["on","true","1"].includes(String(data.get("weekend")||"")),additionalServices,pickupRequested:sendingMethod==="dispatch_order"||data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride"),priceDifferenceConfirmed:data.get("priceDifferenceConfirmed")==="on"};
 }
 function inpostServiceSzczegolyBledu(fields,prefix=""){
   const out=[];
@@ -169,7 +169,7 @@ function inpostServiceSzczegolyBledu(fields,prefix=""){
   visit(fields,prefix);return out;
 }
 function inpostServiceNazwaPola(path=""){
-  const map={"sender.firstName":"senderFirstName","sender.email":"senderEmail","sender.phone":"senderPhone","sender.address.street":"senderStreet","sender.address.buildingNumber":"senderBuilding","sender.address.postCode":"senderPostCode","sender.address.city":"senderCity","receiver.firstName":"receiverFirstName","receiver.email":"receiverEmail","receiver.phone":"receiverPhone","receiver.address.street":"receiverStreet","receiver.address.buildingNumber":"receiverBuilding","receiver.address.postCode":"receiverPostCode","receiver.address.city":"receiverCity","targetPoint":"targetPoint","dropoffPoint":"dropoffPoint","sending_method":"sendingMethod","custom_attributes.target_point":"targetPoint","custom_attributes.dropoff_point":"dropoffPoint","custom_attributes.sending_method":"sendingMethod","cod.amount":"codAmount","insurance.amount":"insuranceAmount","parcel.weight":"weight","commissionGross":"commissionGross","technicalSenderRequired":"technicalSenderRequired"};
+  const map={"sender.firstName":"senderFirstName","sender.email":"senderEmail","sender.phone":"senderPhone","sender.address.street":"senderStreet","sender.address.buildingNumber":"senderBuilding","sender.address.postCode":"senderPostCode","sender.address.city":"senderCity","receiver.firstName":"receiverFirstName","receiver.email":"receiverEmail","receiver.phone":"receiverPhone","receiver.address.street":"receiverStreet","receiver.address.buildingNumber":"receiverBuilding","receiver.address.postCode":"receiverPostCode","receiver.address.city":"receiverCity","targetPoint":"targetPoint","dropoffPoint":"dropoffPoint","sending_method":"sendingMethod","custom_attributes.target_point":"targetPoint","custom_attributes.dropoff_point":"dropoffPoint","custom_attributes.sending_method":"sendingMethod","cod.amount":"codAmount","insurance.amount":"insuranceAmount","parcel.weight":"weight","commissionGross":"commissionGross","technicalSenderRequired":"technicalSenderRequired","priceDifferenceConfirmed":"priceDifferenceConfirmed"};
   return map[path]||path.split(".").at(-1)||"";
 }
 function inpostServicePrzyjaznyBlad(detail={},form=null){
@@ -202,6 +202,11 @@ async function inpostServiceUtworz(event){
     inpostServiceBladPol([{field:"sender.firstName",message:"Wybierz z książki albo wpisz rzeczywistego nadawcę przesyłki. Dane Artway-TM są wyłącznie kontaktem technicznym."}],form);
     return;
   }
+  const priceDifference=inpostServiceRoznicaCeny(inpostServiceStan.pricing);
+  if(priceDifference.mismatch&&!payload.priceDifferenceConfirmed){
+    inpostServiceBladPol([{field:"priceDifferenceConfirmed",message:"Potwierdź różnicę między cennikiem umownym a kontrolą ShipX."}],form);
+    return;
+  }
   inpostServiceStan={...inpostServiceStan,saving:true};if(button){button.disabled=true;button.textContent="⏳ Tworzę przesyłkę…";}
   try{
     const d=await chmura("inpost-service-create",{method:"POST",body:payload,timeout:90000});
@@ -211,7 +216,7 @@ async function inpostServiceUtworz(event){
     toast(d.invoice?.error?`Przesyłka utworzona ✅ Faktura wymaga uwagi: ${d.invoice.error}`:`Przesyłka InPost utworzona ✅ ${d.item?.trackingNumber||"oczekuje na numer"}`);
     renderuj();
   }catch(e){if(e.code==="previous_attempt_failed"){inpostServiceNowyRequestId();if(form.elements.requestId)form.elements.requestId.value=inpostServiceStan.requestId;}const details=inpostServiceBladPol(e.details,form,false),message=details[0]?.message||"Nie udało się utworzyć przesyłki. Sprawdź dane i spróbuj ponownie.";toast("Nie utworzono przesyłki: "+message);}
-  finally{inpostServiceStan={...inpostServiceStan,saving:false};if(button){button.disabled=false;button.textContent="🟡 Utwórz przesyłkę InPost";}}
+  finally{inpostServiceStan={...inpostServiceStan,saving:false};if(button)button.textContent="🟡 Utwórz przesyłkę InPost";inpostServiceAktualizujWyceneUI(form);}
 }
 async function inpostServiceZapiszUstawienia(event){
   event.preventDefault();const form=event.currentTarget,body={commissionGross:form.commissionGross.value,sender:inpostServiceStronaOsoby(form,"sender")};

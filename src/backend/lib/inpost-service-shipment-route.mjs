@@ -155,6 +155,13 @@ export function createInpostServiceShipmentRoute(deps = {}) {
     }
   }
 
+  function priceDifference(pricing = {}) {
+    const raw = pricing.apiComparison?.differenceGross;
+    const value = raw == null || String(raw).trim() === '' ? null : Number(raw);
+    const differenceGross = Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+    return { differenceGross, mismatch: differenceGross != null && Math.abs(differenceGross) > 0.01 };
+  }
+
   async function saveInvoiceLink(key, link) {
     for (let attempt = 0; attempt < 6; attempt++) {
       const version = await readVersioned('infakt_invoice_links', { items: {}, updated_at: null });
@@ -407,8 +414,28 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       const validation = validateInpostServiceDraft(draft);
       if (!validation.ok) return respond({ ok: false, error: 'Uzupełnij dane nadania.', code: 'inpost_service_validation', details: validation.errors }, 422);
       if (availability.services?.length && availability[draft.deliveryType] !== true) return respond({ ok: false, error: `Konto InPost nie ma aktywnej usługi ${draft.service}.`, code: 'inpost_service_unavailable', service: draft.service }, 422);
+      const verifiedPricing = await calculatePricing(draft, config, store.settings);
+      if (verifiedPricing.apiWarning) {
+        return respond({
+          ok: false,
+          error: 'Kontrola ShipX nie potwierdziła danych przesyłki. Popraw wskazane pola przed utworzeniem.',
+          code: 'inpost_quote_not_confirmed',
+          details: [{ field: 'priceDifferenceConfirmed', message: verifiedPricing.apiWarning }],
+          pricing: verifiedPricing,
+        }, 422);
+      }
+      const verifiedDifference = priceDifference(verifiedPricing);
+      if (verifiedDifference.mismatch && body.priceDifferenceConfirmed !== true) {
+        return respond({
+          ok: false,
+          error: 'Cena z kontroli ShipX różni się od cennika umownego. Potwierdź rozbieżność przed utworzeniem przesyłki.',
+          code: 'inpost_price_difference_confirmation_required',
+          details: [{ field: 'priceDifferenceConfirmed', message: 'Potwierdź różnicę między cennikiem umownym a kontrolą ShipX.' }],
+          pricing: verifiedPricing,
+        }, 409);
+      }
       const id = `IPS-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`, now = new Date().toISOString();
-      const initialPricing = inpostServiceContractPricing(draft, store.settings, {});
+      const initialPricing = verifiedPricing;
       const record = {
         id,
         requestId: draft.requestId,
@@ -443,6 +470,11 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         additionalServices: draft.additionalServices,
         pickupRequested: draft.pickupRequested,
         pickup: null,
+        priceDifferenceConfirmation: verifiedDifference.mismatch ? {
+          confirmed: true,
+          differenceGross: verifiedDifference.differenceGross,
+          confirmedAt: now,
+        } : null,
         pricing: initialPricing,
         billing: { ...draft.billing, commissionGross: initialPricing.commissionGross, status: draft.billing.mode === 'monthly' ? 'pending' : draft.billing.mode === 'single' ? 'awaiting_invoice' : 'not_required', error: '' },
         error: '',
@@ -467,16 +499,6 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       }
       let saved = record;
       try {
-        try {
-          const pricing = await calculatePricing(draft, config, store.settings);
-          saved = await updateRecord(id, (item) => ({ ...item, pricing, billing: { ...item.billing, commissionGross: pricing.commissionGross }, updatedAt: new Date().toISOString() }));
-        } catch (error) {
-          saved = await updateRecord(id, (item) => ({
-            ...item,
-            pricing: { ...(item.pricing || {}), warning: text(error.message, 500), checkedAt: new Date().toISOString() },
-            updatedAt: new Date().toISOString(),
-          }));
-        }
         const created = await call(`/v1/organizations/${encodeURIComponent(config.orgId)}/shipments`, { method: 'POST', bodyObj: inpostServiceShipxPayload(draft) });
         const shipmentId = text(created?.id, 80), current = shipmentId ? await waitForLabel(shipmentId, { proby: 10, opoznienieMs: 1100 }).catch(() => created) : created;
         const actualPricing = inpostServiceContractPricing(draft, store.settings, current || created);

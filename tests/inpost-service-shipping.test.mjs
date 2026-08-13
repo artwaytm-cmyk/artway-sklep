@@ -320,6 +320,9 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /Automat nadawczy \*/);
   assert.match(shipping, /Dane są poprawne/);
   assert.match(shipping, /konta postpaid/);
+  assert.match(shipping, /priceDifferenceConfirmed/);
+  assert.match(shipping, /Rozbieżność ceny wymaga potwierdzenia/);
+  assert.match(shipping, /Potwierdzam tę rozbieżność ceny/);
   assert.match(shipping, /inpost-service-postcode/);
   assert.match(shipping, /Kod rozpoznany/);
   assert.match(shipping, /Koszt nadania/);
@@ -506,7 +509,7 @@ test('endpoint wyceny naprawdę wysyła szkic do ShipX, a książka adresowa zap
   assert.equal(imported.body.total, 2);
 });
 
-test('endpoint tworzenia przesyłki kurierskiej przekazuje wybrany odbiór przez kuriera', async () => {
+test('endpoint wymaga potwierdzenia rozbieżności ceny i przekazuje wybrany odbiór przez kuriera', async () => {
   const storage = new Map(), calls = [];
   const route = createInpostServiceShipmentRoute({
     respond: (body, status = 200) => ({ body, status }),
@@ -520,7 +523,7 @@ test('endpoint tworzenia przesyłki kurierskiej przekazuje wybrany odbiór przez
     serviceAvailability: async () => ({ services: ['inpost_courier_standard'], locker: false, courier: true, lockerService: 'inpost_locker_standard', courierService: 'inpost_courier_standard' }),
     call: async (path, options) => {
       calls.push({ path, options });
-      if (path.endsWith('/shipments/calculate')) return [{ id: 'REQ-COURIER', calculated_charge_amount: '17.58' }];
+      if (path.endsWith('/shipments/calculate')) return [{ id: 'REQ-COURIER', calculated_charge_amount: '1.00' }];
       return { id: 'SHIP-1', status: 'confirmed', tracking_number: '620000000000000000000001' };
     },
     waitForLabel: async () => ({ id: 'SHIP-1', status: 'confirmed', tracking_number: '620000000000000000000001' }),
@@ -532,27 +535,40 @@ test('endpoint tworzenia przesyłki kurierskiej przekazuje wybrany odbiór przez
     infaktCall: async () => ({}),
     infaktReference: () => '',
   });
+  const requestBody = {
+    requestId: 'REQ-COURIER',
+    reference: 'USL-COURIER',
+    sender,
+    receiver,
+    deliveryType: 'courier',
+    sendingMethod: 'dispatch_order',
+    targetPoint: '',
+    dropoffPoint: '',
+    comments: 'Zwroty kierować na adres nadawcy.',
+    parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
+    billingMode: 'none',
+    commissionGross: 4,
+  };
+  const blockedRequest = new Request('http://localhost/api?action=inpost-service-create', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(requestBody),
+  });
+  const blocked = await route(blockedRequest, new URL(blockedRequest.url), 'inpost-service-create');
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.body.code, 'inpost_price_difference_confirmation_required');
+  assert.equal(calls.some((entry) => /\/shipments$/.test(entry.path)), false);
+
   const request = new Request('http://localhost/api?action=inpost-service-create', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      requestId: 'REQ-COURIER',
-      reference: 'USL-COURIER',
-      sender,
-      receiver,
-      deliveryType: 'courier',
-      sendingMethod: 'dispatch_order',
-      targetPoint: '',
-      dropoffPoint: '',
-      comments: 'Zwroty kierować na adres nadawcy.',
-      parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
-      billingMode: 'none',
-      commissionGross: 4,
-    }),
+    body: JSON.stringify({ ...requestBody, priceDifferenceConfirmed: true }),
   });
   const result = await route(request, new URL(request.url), 'inpost-service-create');
   assert.equal(result.status, 201);
   assert.equal(result.body.item.status, 'label_ready');
+  assert.equal(result.body.item.priceDifferenceConfirmation.confirmed, true);
+  assert.equal(result.body.item.priceDifferenceConfirmation.differenceGross, -16.58);
   const createCall = calls.find((entry) => /\/shipments$/.test(entry.path));
   assert.ok(createCall);
   assert.equal(createCall.options.bodyObj.service, 'inpost_courier_standard');

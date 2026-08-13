@@ -697,7 +697,7 @@ function inpostServicePayload(form){
   const codAmount=Math.max(0,Number(String(data.get("codAmount")||"0").replace(",","."))||0),insuranceAmount=Math.max(0,Number(String(data.get("insuranceAmount")||"0").replace(",","."))||0),sendingMethod=String(data.get("sendingMethod")||"");
   const sender=inpostServiceStronaOsoby(form,"sender");
   const technicalSenderRequired=data.get("technicalSenderRequired")==="on";
-  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:inpostServiceUwagiZeZwrotem(data.get("comments"),sender,technicalSenderRequired),returnAddress:sender.address,principal:sender,sender,technicalSenderRequired,receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod,targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:codAmount>0||data.get("codEnabled")==="on",amount:codAmount},insurance:{enabled:insuranceAmount>0||data.get("insuranceEnabled")==="on",amount:insuranceAmount},weekend:["on","true","1"].includes(String(data.get("weekend")||"")),additionalServices,pickupRequested:sendingMethod==="dispatch_order"||data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
+  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:inpostServiceUwagiZeZwrotem(data.get("comments"),sender,technicalSenderRequired),returnAddress:sender.address,principal:sender,sender,technicalSenderRequired,receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod,targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:codAmount>0||data.get("codEnabled")==="on",amount:codAmount},insurance:{enabled:insuranceAmount>0||data.get("insuranceEnabled")==="on",amount:insuranceAmount},weekend:["on","true","1"].includes(String(data.get("weekend")||"")),additionalServices,pickupRequested:sendingMethod==="dispatch_order"||data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride"),priceDifferenceConfirmed:data.get("priceDifferenceConfirmed")==="on"};
 }
 function inpostServiceSzczegolyBledu(fields,prefix=""){
   const out=[];
@@ -713,7 +713,7 @@ function inpostServiceSzczegolyBledu(fields,prefix=""){
   visit(fields,prefix);return out;
 }
 function inpostServiceNazwaPola(path=""){
-  const map={"sender.firstName":"senderFirstName","sender.email":"senderEmail","sender.phone":"senderPhone","sender.address.street":"senderStreet","sender.address.buildingNumber":"senderBuilding","sender.address.postCode":"senderPostCode","sender.address.city":"senderCity","receiver.firstName":"receiverFirstName","receiver.email":"receiverEmail","receiver.phone":"receiverPhone","receiver.address.street":"receiverStreet","receiver.address.buildingNumber":"receiverBuilding","receiver.address.postCode":"receiverPostCode","receiver.address.city":"receiverCity","targetPoint":"targetPoint","dropoffPoint":"dropoffPoint","sending_method":"sendingMethod","custom_attributes.target_point":"targetPoint","custom_attributes.dropoff_point":"dropoffPoint","custom_attributes.sending_method":"sendingMethod","cod.amount":"codAmount","insurance.amount":"insuranceAmount","parcel.weight":"weight","commissionGross":"commissionGross","technicalSenderRequired":"technicalSenderRequired"};
+  const map={"sender.firstName":"senderFirstName","sender.email":"senderEmail","sender.phone":"senderPhone","sender.address.street":"senderStreet","sender.address.buildingNumber":"senderBuilding","sender.address.postCode":"senderPostCode","sender.address.city":"senderCity","receiver.firstName":"receiverFirstName","receiver.email":"receiverEmail","receiver.phone":"receiverPhone","receiver.address.street":"receiverStreet","receiver.address.buildingNumber":"receiverBuilding","receiver.address.postCode":"receiverPostCode","receiver.address.city":"receiverCity","targetPoint":"targetPoint","dropoffPoint":"dropoffPoint","sending_method":"sendingMethod","custom_attributes.target_point":"targetPoint","custom_attributes.dropoff_point":"dropoffPoint","custom_attributes.sending_method":"sendingMethod","cod.amount":"codAmount","insurance.amount":"insuranceAmount","parcel.weight":"weight","commissionGross":"commissionGross","technicalSenderRequired":"technicalSenderRequired","priceDifferenceConfirmed":"priceDifferenceConfirmed"};
   return map[path]||path.split(".").at(-1)||"";
 }
 function inpostServicePrzyjaznyBlad(detail={},form=null){
@@ -746,6 +746,11 @@ async function inpostServiceUtworz(event){
     inpostServiceBladPol([{field:"sender.firstName",message:"Wybierz z książki albo wpisz rzeczywistego nadawcę przesyłki. Dane Artway-TM są wyłącznie kontaktem technicznym."}],form);
     return;
   }
+  const priceDifference=inpostServiceRoznicaCeny(inpostServiceStan.pricing);
+  if(priceDifference.mismatch&&!payload.priceDifferenceConfirmed){
+    inpostServiceBladPol([{field:"priceDifferenceConfirmed",message:"Potwierdź różnicę między cennikiem umownym a kontrolą ShipX."}],form);
+    return;
+  }
   inpostServiceStan={...inpostServiceStan,saving:true};if(button){button.disabled=true;button.textContent="⏳ Tworzę przesyłkę…";}
   try{
     const d=await chmura("inpost-service-create",{method:"POST",body:payload,timeout:90000});
@@ -755,7 +760,7 @@ async function inpostServiceUtworz(event){
     toast(d.invoice?.error?`Przesyłka utworzona ✅ Faktura wymaga uwagi: ${d.invoice.error}`:`Przesyłka InPost utworzona ✅ ${d.item?.trackingNumber||"oczekuje na numer"}`);
     renderuj();
   }catch(e){if(e.code==="previous_attempt_failed"){inpostServiceNowyRequestId();if(form.elements.requestId)form.elements.requestId.value=inpostServiceStan.requestId;}const details=inpostServiceBladPol(e.details,form,false),message=details[0]?.message||"Nie udało się utworzyć przesyłki. Sprawdź dane i spróbuj ponownie.";toast("Nie utworzono przesyłki: "+message);}
-  finally{inpostServiceStan={...inpostServiceStan,saving:false};if(button){button.disabled=false;button.textContent="🟡 Utwórz przesyłkę InPost";}}
+  finally{inpostServiceStan={...inpostServiceStan,saving:false};if(button)button.textContent="🟡 Utwórz przesyłkę InPost";inpostServiceAktualizujWyceneUI(form);}
 }
 async function inpostServiceZapiszUstawienia(event){
   event.preventDefault();const form=event.currentTarget,body={commissionGross:form.commissionGross.value,sender:inpostServiceStronaOsoby(form,"sender")};
@@ -1248,25 +1253,41 @@ function inpostServicePelnaCenaKlienta(totalGross){
   const carrier=Math.round((Number(totalGross)||0)*100)/100,customer=Math.ceil((carrier+4)-1e-9),commission=Math.round((customer-carrier)*100)/100;
   return {customerTotalGross:customer,commissionGross:commission,minimumCommissionGross:4,maximumCommissionGross:5};
 }
+function inpostServiceRoznicaCeny(pricing={}){
+  const raw=pricing?.apiComparison?.differenceGross,value=raw==null||String(raw).trim()===""?null:Number(raw),difference=Number.isFinite(value)?Math.round(value*100)/100:null;
+  return {difference,mismatch:difference!=null&&Math.abs(difference)>0.01};
+}
+function inpostServiceUstawBlokadeCeny(form,{mismatch=false,loading=false}={}){
+  const input=form?.elements?.priceDifferenceConfirmed,wrapper=form?.querySelector?.("[data-inpost-price-confirmation]");
+  if(wrapper)wrapper.hidden=!mismatch;
+  if(input&&!mismatch)input.checked=false;
+  const confirmed=!mismatch||input?.checked===true,submit=form?.querySelector?.('[type="submit"]');
+  if(submit)submit.disabled=inpostServiceStan.saving===true||loading||!confirmed;
+  return confirmed;
+}
 function inpostServiceAktualizujWyceneUI(form,pricing=inpostServiceStan.pricing){
   const box=form?.querySelector("[data-inpost-pricing]");if(!box)return;
   if(!pricing){
+    inpostServiceUstawBlokadeCeny(form);
     box.innerHTML='<div class="inpost-price-empty"><b>Uzupełnij dane paczki i adresy</b><small>Koszt zostanie sprawdzony automatycznie w InPost.</small></div>';
     return;
   }
   if(pricing.loading){
+    inpostServiceUstawBlokadeCeny(form,{loading:true});
     box.innerHTML='<div class="inpost-price-empty"><b>Sprawdzam koszt w ShipX…</b><small>Wycena nie tworzy przesyłki.</small></div>';
     return;
   }
   const total=inpostServiceWycenaKwota(pricing),rounded=total==null?null:inpostServicePelnaCenaKlienta(total),fee=Number.isFinite(Number(pricing.commissionGross))?Number(pricing.commissionGross):(rounded?.commissionGross||0),dataReady=inpostServiceMozeWycenic(inpostServicePayload(form));
   if(total==null){
+    inpostServiceUstawBlokadeCeny(form);
     box.innerHTML=`<div class="inpost-price-empty warning"><b>Brak pasującej stawki w cenniku umownym</b><small>${esc(pricing.message||"Uzupełnij właściwą stawkę w cenniku albo podaj pełny koszt ręcznie. ShipX pozostaje wyłącznie kontrolą porównawczą.")}</small></div>`;
     return;
   }
   const customer=Number.isFinite(Number(pricing.customerTotalGross))?Number(pricing.customerTotalGross):rounded.customerTotalGross,b=pricing.breakdown||{},source=pricing.source==="manual"?"pełny koszt wpisany ręcznie":"Twój cennik umowny";
-  const api=pricing.apiComparison||{},difference=Number.isFinite(Number(api.differenceGross))?Number(api.differenceGross):null;
+  const api=pricing.apiComparison||{},{difference,mismatch}=inpostServiceRoznicaCeny(pricing),priceConfirmed=inpostServiceUstawBlokadeCeny(form,{mismatch});
   box.innerHTML=`<div class="inpost-price-main"><span><small>Koszt nadania</small><strong>${zl(total)}</strong></span><span><small>Prowizja Artway-TM</small><strong>${zl(fee)}</strong></span><span class="total"><small>Kwota na FV klienta</small><strong>${zl(customer)}</strong></span></div>
-    ${pricing.complete&&!pricing.apiWarning&&dataReady?'<div class="inpost-price-meta"><span class="lvl lvl-ok">Dane są poprawne</span><small>Formularz jest gotowy do utworzenia przesyłki.</small></div>':""}
+    ${pricing.complete&&!pricing.apiWarning&&dataReady&&!mismatch?'<div class="inpost-price-meta"><span class="lvl lvl-ok">Dane są poprawne</span><small>Formularz jest gotowy do utworzenia przesyłki.</small></div>':""}
+    ${mismatch?`<div class="inpost-price-warning"><b>Rozbieżność ceny wymaga potwierdzenia:</b> cennik umowny ${zl(total)}, kontrola ShipX ${zl(api.totalGross)}. ${priceConfirmed?"Rozbieżność została świadomie potwierdzona.":"Utworzenie przesyłki jest zablokowane do czasu zaznaczenia potwierdzenia poniżej."}</div>`:""}
     ${pricing.complete&&!pricing.apiWarning?'<div class="inpost-price-meta"><span class="lvl lvl-ok">Cena dopasowana do pełnej kwoty</span><small>Prowizja pierwszego przedziału jest automatycznie dobierana w zakresie 4–5 zł.</small></div>':""}
     <div class="inpost-price-meta"><span class="lvl ${pricing.complete?"lvl-ok":"lvl-ostrzezenie"}">${esc(source)}</span><small>${esc(pricing.rateLabel||"stawka indywidualna")}</small>${Number(b.extrasGross)>0?`<small>Dopłaty: ${zl(b.extrasGross)}</small>`:""}<small>Opłata paliwowa: w cenie</small></div>
     ${pricing.complete?"":`<div class="inpost-price-warning"><b>Niepełna wycena opcji dodatkowych:</b> ${esc((pricing.unpricedOptions||[]).join(", ")||"brak stawki")}. Uzupełnij dopłaty w cenniku albo wpisz pełny koszt ręcznie — do tego czasu FV jest zablokowana.</div>`}
@@ -1473,6 +1494,7 @@ function inpostServiceFormHTML(){
         <div class="inpost-options-layout">
         <fieldset class="inpost-billing-card" id="inpost-settlement"><legend>💰 Koszt i faktura Artway‑TM</legend>
           <div class="inpost-pricing-layout"><div data-inpost-pricing></div><div class="inpost-pricing-controls"><label>Pełny koszt ręczny — tylko awaryjnie<input name="carrierCostOverride" type="number" min="0" step=".01" placeholder="zastępuje cennik umowny"></label><button class="btn ghost" type="button" onclick="inpostServiceWycena(this.form,true)">↻ Przelicz według umowy</button><a class="btn ghost" href="#/admin/wysylki/inpost-ustawienia">Otwórz cennik</a></div></div>
+          <label class="check wide inpost-price-confirmation" data-inpost-price-confirmation hidden><input type="checkbox" name="priceDifferenceConfirmed" onchange="inpostServiceAktualizujWyceneUI(this.form)"> Potwierdzam tę rozbieżność ceny i chcę utworzyć przesyłkę według cennika umownego.</label>
           <div class="inpost-settlement-grid">
             <label class="inpost-settlement-option"><input type="radio" name="billingMode" value="none" checked><span><b>Bez faktury</b><small>Tylko nadanie i rejestr kosztu</small></span></label>
             <label class="inpost-settlement-option"><input type="radio" name="billingMode" value="single"><span><b>FV od razu</b><small>Artway‑TM wystawia koszt nadania + prowizję</small></span></label>
