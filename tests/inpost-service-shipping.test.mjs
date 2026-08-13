@@ -76,12 +76,25 @@ test('nadanie usługowe waliduje klienta i obsługuje Paczkomat, pobranie, ochro
   assert.deepEqual(payload.insurance, { amount: 200, currency: 'PLN' });
 });
 
-test('kurier odrzuca metodę Paczkomatu i bezpiecznie wybiera PaczkoPunkt', () => {
-  const value = draft({
+test('kurier standard nie przełącza po cichu Paczkomatu na PaczkoPunkt', () => {
+  const invalid = draft({
     deliveryType: 'courier',
     targetPoint: '',
     dropoffPoint: 'BOJ01N',
     sendingMethod: 'parcel_locker',
+    weekend: true,
+    additionalServices: ['sms'],
+    parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
+  });
+  assert.equal(invalid.sendingMethod, '');
+  assert.equal(validateInpostServiceDraft(invalid).ok, false);
+  assert.ok(validateInpostServiceDraft(invalid).errors.some((error) => error.field === 'sendingMethod'));
+
+  const value = draft({
+    deliveryType: 'courier',
+    targetPoint: '',
+    dropoffPoint: '',
+    sendingMethod: 'pop',
     weekend: true,
     additionalServices: ['sms'],
     parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
@@ -98,6 +111,29 @@ test('kurier odrzuca metodę Paczkomatu i bezpiecznie wybiera PaczkoPunkt', () =
   assert.deepEqual(payload.parcels[0].weight, { amount: '1', unit: 'kg' });
 });
 
+test('aktywny Kurier C2C zachowuje domyślne nadanie w Paczkomacie', () => {
+  const value = normalizeInpostServiceDraft({
+    requestId: 'REQ-C2C',
+    reference: 'USL-C2C',
+    sender,
+    receiver,
+    deliveryType: 'courier',
+    sendingMethod: 'parcel_locker',
+    dropoffPoint: 'BOJ01N',
+    parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
+  }, { sender }, {
+    services: ['inpost_courier_standard', 'inpost_courier_c2c'],
+    courierService: 'inpost_courier_standard',
+  });
+  assert.equal(value.sendingMethod, 'parcel_locker');
+  assert.equal(value.service, 'inpost_courier_c2c');
+  assert.equal(validateInpostServiceDraft(value).ok, true);
+  const payload = inpostServiceShipxPayload(value);
+  assert.equal(payload.service, 'inpost_courier_c2c');
+  assert.deepEqual(payload.custom_attributes, { sending_method: 'parcel_locker', dropoff_point: 'BOJ01N' });
+  assert.equal(value.pricing.manualGross, 0);
+});
+
 test('ręcznie wyczyszczona firma nadawcy nie wraca z domyślnych ani starszych pól ustawień', () => {
   const value = normalizeInpostServiceDraft({
     requestId: 'REQ-PERSON',
@@ -112,6 +148,33 @@ test('ręcznie wyczyszczona firma nadawcy nie wraca z domyślnych ani starszych 
   assert.equal(value.sender.companyName, '');
   assert.equal(value.sender.firstName, 'Piotr');
   assert.equal(value.sender.lastName, 'Modelski');
+  assert.equal(inpostServiceShipxPayload(value).sender.company_name, undefined);
+});
+
+test('dane klienta usuwają firmę Artway, uzupełniają tylko kontakt techniczny i zawsze dodają adres zwrotny', () => {
+  const clientAddress = { street: 'Wałowa', buildingNumber: '12', postCode: '83-011', city: 'Wiślinka' };
+  const value = normalizeInpostServiceDraft({
+    requestId: 'REQ-RETURN',
+    reference: 'USL-RETURN',
+    sender: { ...sender, firstName: 'Piotr', lastName: 'Modelski', email: '', phone: '', address: clientAddress },
+    receiver: { ...receiver, email: '', phone: '' },
+    deliveryType: 'courier',
+    sendingMethod: 'pop',
+    comments: 'Ostrożnie. Zwroty kierować na adres nadawcy: stary adres.',
+    parcel: { template: 'small', length: 64, width: 38, height: 8, weight: 1 },
+  }, { sender }, {
+    services: ['inpost_courier_standard'],
+    courierService: 'inpost_courier_standard',
+  });
+  assert.equal(value.sender.companyName, '');
+  assert.equal(value.sender.taxCode, '');
+  assert.equal(value.sender.email, sender.email);
+  assert.equal(value.sender.phone, sender.phone);
+  assert.equal(value.receiver.email, sender.email);
+  assert.equal(value.receiver.phone, sender.phone);
+  assert.equal(value.returnAddress.street, 'Wałowa');
+  assert.equal(value.returnAddressNote, 'Zwroty kierować pod adres nadawcy: Piotr Modelski, Wałowa 12, 83-011 Wiślinka.');
+  assert.equal(value.comments, 'Ostrożnie. Zwroty kierować pod adres nadawcy: Piotr Modelski, Wałowa 12, 83-011 Wiślinka.');
   assert.equal(inpostServiceShipxPayload(value).sender.company_name, undefined);
 });
 
@@ -557,5 +620,6 @@ test('endpoint tworzenia przesyłki kurierskiej przekazuje wybrany odbiór przez
   assert.deepEqual(createCall.options.bodyObj.custom_attributes, { sending_method: 'dispatch_order' });
   assert.deepEqual(createCall.options.bodyObj.parcels[0].dimensions, { length: '640', width: '380', height: '80', unit: 'mm' });
   assert.deepEqual(createCall.options.bodyObj.parcels[0].weight, { amount: '1', unit: 'kg' });
-  assert.equal(result.body.item.comments, 'Zwroty kierować na adres nadawcy.');
+  assert.match(result.body.item.comments, /^Zwroty kierować pod adres nadawcy: Nadawca sp\. z o\.o\., Gryfa Pomorskiego 1\/A, 84-207 Bojano\.$/);
+  assert.equal(result.body.item.returnAddress.street, 'Gryfa Pomorskiego');
 });

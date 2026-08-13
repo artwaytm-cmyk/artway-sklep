@@ -275,6 +275,7 @@ async function inpostServiceUsunKontakt(prefix,button=null){
 function inpostServiceMozeWycenic(payload){
   const people=[payload.sender,payload.receiver];
   if(people.some(person=>!person?.email||String(person.phone||"").replace(/\D/g,"").length<9))return false;
+  if(!String(payload.sendingMethod||"").trim())return false;
   const senderAddress=payload.sender?.address||{};
   if(!senderAddress.street||!senderAddress.buildingNumber||!senderAddress.postCode||!senderAddress.city)return false;
   if(payload.deliveryType==="locker"&&!payload.targetPoint)return false;
@@ -322,6 +323,8 @@ function inpostServiceLokalnaWycena(form){
       if(dimensions[0]<=64&&dimensions[1]<=38){if(dimensions[2]<=8)size="small";else if(dimensions[2]<=19)size="medium";else if(dimensions[2]<=41)size="large";}
     }
     rate=list.locker?.[size]||null;rateKey=size?`locker.${size}`:"";
+  }else if(String(form?.elements?.sendingMethod?.value||"")==="parcel_locker"){
+    rate=list.courierManager?.[template]||null;rateKey=rate?`courierManager.${template}`:"";
   }else{
     rate=(list.courierStandard||[]).find(item=>weight<=Number(item.maxKg))||null;rateKey=rate?`courierStandard.${rate.maxKg}`:"";
   }
@@ -344,7 +347,9 @@ function inpostServicePrzelicz(form){
 }
 function inpostServiceZaplanujWycene(form){
   clearTimeout(inpostServiceWycenaTimer);
+  inpostServiceNormalizujNadawceKlienta(form);
   inpostServiceAktualizujKartyStron(form);
+  inpostServiceAktualizujAdresZwrotu(form);
   inpostServicePrzelicz(form);
   inpostServiceWycenaTimer=setTimeout(()=>inpostServiceWycena(form,false),650);
 }
@@ -371,8 +376,8 @@ async function inpostServiceWycena(form=document.getElementById("inpostServiceFo
   }
   inpostServiceAktualizujWyceneUI(form);
 }
-function inpostServiceUstawTyp(form){
-  inpostServiceZastosujZgodnoscTypu(form);
+function inpostServiceUstawTyp(form,source=null){
+  inpostServiceZastosujZgodnoscTypu(form,source?.name==="deliveryType");
   inpostServiceZaplanujWycene(form);
 }
 function inpostServiceOsobaFields(prefix,title,person={}){
@@ -448,8 +453,8 @@ function inpostServiceFormHTML(){
       <div class="inpost-shipment-builder">
         <fieldset id="inpost-delivery"><legend>Sposób doręczenia</legend>
           <div class="inpost-delivery-choice">
-            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="locker" checked onchange="inpostServiceUstawTyp(this.form)"><span><b>Paczkomat® 24/7</b><small>Doręczenie do automatu lub PaczkoPunktu</small></span></label>
-            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="courier" onchange="inpostServiceUstawTyp(this.form)"><span><b>InPost Kurier</b><small>Doręczenie bezpośrednio pod adres</small></span></label>
+            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="locker" checked onchange="inpostServiceUstawTyp(this.form,this)"><span><b>Paczkomat® 24/7</b><small>Doręczenie do automatu lub PaczkoPunktu</small></span></label>
+            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="courier" onchange="inpostServiceUstawTyp(this.form,this)"><span><b>InPost Kurier</b><small>Doręczenie bezpośrednio pod adres</small></span></label>
           </div>
           <div class="inpost-reference-row"><label>Numer referencyjny<input name="reference" required value="USL-${Date.now().toString(36).toUpperCase()}" placeholder="Nazwij swoją przesyłkę"></label><span><b>📒 ${inpostServiceStan.addressBook?.length||0}</b><small>adresów w książce</small></span></div>
         </fieldset>
@@ -459,7 +464,7 @@ function inpostServiceFormHTML(){
           <input type="checkbox" name="senderRoleSender" checked hidden>
           <div class="inpost-contact-selector"><div class="inpost-selected-contact" data-inpost-selected-contact="sender">${inpostServiceWybranyKontaktHTML(sender,"sender")}</div><div class="inpost-contact-selector-actions"><button class="btn" type="button" onclick="inpostServiceOtworzKsiazke('sender',this)">📒 Wybierz z książki</button><button class="btn ghost" type="button" onclick="inpostServiceNowyAdres('sender',this)">＋ Nowy adres</button></div></div>
           <details><summary>Sprawdź lub popraw dane nadawcy</summary><div class="inpost-form-grid">
-            <label>Firma<input name="senderCompany" value="${esc(sender.companyName||"")}"></label><label>NIP<input name="senderTaxCode" inputmode="numeric" maxlength="10" value="${esc(sender.taxCode||"")}"></label><label>Imię<input name="senderFirstName" value="${esc(sender.firstName||"")}"></label><label>Nazwisko<input name="senderLastName" value="${esc(sender.lastName||"")}"></label><label>E-mail *<input name="senderEmail" type="email" required value="${esc(sender.email||"")}"></label><label>Telefon *<input name="senderPhone" inputmode="tel" required value="${esc(sender.phone||"")}"></label><small class="wide inpost-technical-contact-note">Brakujący e-mail lub telefon zostanie uzupełniony danymi kontaktowymi Artway-TM.</small>
+            <label>Firma<input name="senderCompany" value="${esc(sender.companyName||"")}"></label><label>NIP<input name="senderTaxCode" inputmode="numeric" maxlength="10" value="${esc(sender.taxCode||"")}"></label><label>Imię<input name="senderFirstName" value="${esc(sender.firstName||"")}"></label><label>Nazwisko<input name="senderLastName" value="${esc(sender.lastName||"")}"></label><label>E-mail *<input name="senderEmail" type="email" required value="${esc(sender.email||"")}"></label><label>Telefon *<input name="senderPhone" inputmode="tel" required value="${esc(sender.phone||"")}"></label><small class="wide inpost-technical-contact-note"><b>Nadawcą pozostaje klient.</b> Firma i NIP Artway-TM są automatycznie usuwane po wpisaniu danych klienta. Tylko brakujący e-mail lub telefon zostanie uzupełniony kontaktem technicznym Artway-TM.</small>
             <label>Kod pocztowy *<input name="senderPostCode" required pattern="\\d{2}-?\\d{3}" inputmode="numeric" autocomplete="postal-code" value="${esc(sender.address?.postCode||sender.address?.post_code||"")}" oninput="inpostServiceKodPocztowyWpis(this,'sender')"></label><label>Miasto *<input name="senderCity" required list="inpostServicesenderCityHints" autocomplete="address-level2" value="${esc(sender.address?.city||"")}" oninput="inpostServiceMiastoWpis(this,'sender')"><datalist id="inpostServicesenderCityHints"></datalist></label><div class="backend-note wide" data-inpost-postcode-hint="sender" hidden></div><label class="wide">Ulica *<input name="senderStreet" required list="inpostServicesenderStreetHints" autocomplete="address-line1" value="${esc(sender.address?.street||"")}"><datalist id="inpostServicesenderStreetHints"></datalist></label><label>Nr budynku *<input name="senderBuilding" required value="${esc(sender.address?.buildingNumber||sender.address?.building_number||"")}"></label><label>Nr lokalu<input name="senderFlat" value="${esc(sender.address?.flatNumber||sender.address?.flat_number||"")}"></label>
             <div class="inpost-address-actions wide"><button class="btn ghost" type="button" onclick="inpostServiceZapiszKontakt('sender',this)">💾 Zapisz w książce</button><button class="btn ghost danger" type="button" onclick="inpostServiceUsunKontakt('sender',this)">Usuń zapis</button></div><label class="check wide"><input type="checkbox" name="saveSender" checked> Zapamiętaj lub zaktualizuj nadawcę</label>
           </div></details>
@@ -482,7 +487,7 @@ function inpostServiceFormHTML(){
             ${[["small","A","maks. 8 × 38 × 64 cm"],["medium","B","maks. 19 × 38 × 64 cm"],["large","C","maks. 41 × 38 × 64 cm"],["xlarge","D","maks. 80 × 50 × 50 cm"]].map(([value,label,description],index)=>`<label class="inpost-choice-card" ${value==="xlarge"?'data-inpost-size="xlarge" data-inpost-only="courier"':""}><input type="radio" name="template" value="${value}" ${index===0?"checked":""} onchange="inpostServiceUstawGabaryt(this.form,'${value}')"><span><b>${label}</b><small>${description}</small></span></label>`).join("")}
           </div>
           <input type="hidden" name="length" value="64"><input type="hidden" name="width" value="38"><input type="hidden" name="height" value="8">
-          <div class="inpost-form-grid inpost-parcel-details"><label>Waga (kg)<input name="weight" type="number" min=".01" max="30" step=".01" value="1"></label><label class="check" data-inpost-only="courier"><input type="checkbox" name="nonStandard"> Element niestandardowy</label><label class="wide">Uwagi<input name="comments" maxlength="100"></label></div>
+          <div class="inpost-form-grid inpost-parcel-details"><label>Waga (kg)<input name="weight" type="number" min=".01" max="30" step=".01" value="1"></label><label class="check" data-inpost-only="courier"><input type="checkbox" name="nonStandard"> Element niestandardowy</label><label class="wide">Dodatkowe uwagi (opcjonalne)<input name="comments" maxlength="100" placeholder="Adres zwrotny zostanie dopisany automatycznie"></label><div class="backend-note wide inpost-return-address"><b>Automatyczny adres zwrotny</b><span data-inpost-return-address>${esc(inpostServiceAdresZwrotuNotatka(sender))}</span></div></div>
         </fieldset>
 
         <fieldset><legend>Dodatkowe usługi</legend>
@@ -495,7 +500,8 @@ function inpostServiceFormHTML(){
         </fieldset>
 
         <fieldset><legend>Sposób nadania</legend>
-          <div class="inpost-method-choice">${inpostServiceMetodyNadania.locker.map(([value,label],index)=>`<label class="inpost-method-card" data-inpost-method-card><input type="radio" name="sendingMethod" value="${value}" ${value==="dispatch_order"?"checked":""} onchange="inpostServiceUstawTyp(this.form)"><span><b>${esc(label)}</b><small>${value==="parcel_locker"?"Wybierz automat nadawczy":value==="dispatch_order"?"Odbiór z adresu nadawcy":"Nadaj w obsługiwanym punkcie"}</small></span></label>`).join("")}</div>
+          <div class="backend-note inpost-method-compatibility" data-inpost-method-compatibility hidden><b>Domyślny Paczkomat nie jest dostępny dla Kuriera Standard.</b> InPost dopuszcza tutaj PaczkoPunkt/POP albo odbiór przez kuriera. Wybierz świadomie jedną z tych metod — formularz nie przełączy jej automatycznie.</div>
+          <div class="inpost-method-choice">${inpostServiceMetodyNadania.locker.map(([value,label])=>`<label class="inpost-method-card" data-inpost-method-card><input type="radio" name="sendingMethod" value="${value}" ${value==="parcel_locker"?"checked":""} onchange="inpostServiceUstawTyp(this.form)"><span><b>${esc(label)}</b><small>${value==="parcel_locker"?"Wybierz automat nadawczy":value==="dispatch_order"?"Odbiór z adresu nadawcy":"Nadaj w obsługiwanym punkcie"}</small></span></label>`).join("")}</div>
           <div class="inpost-dropoff-panel" data-inpost-dropoff-panel hidden><label><span data-inpost-dropoff-label>Automat nadawczy *</span><div class="inpost-inline"><input id="inpostServiceDropoffPoint" name="dropoffPoint" placeholder="Wybierz automat nadawczy"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape('dropoff')">Mapa</button></div><small data-inpost-dropoff-hint></small></label><div class="inpost-point-search"><input id="inpostServiceDropoffSearch" placeholder="Miasto, kod, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow('dropoff')">Szukaj</button></div><div id="inpostServiceDropoffResults"></div></div>
         </fieldset>
 
@@ -536,7 +542,7 @@ function inpostServiceHistoriaHTML(){
       <td data-label="Koszt">${inpostServiceKosztHTML(item)}</td>
       <td data-label="Status">${label}<br><small>${events.length} zdarzeń • aktualizacja ${esc(inpostServiceDataPotwierdzenia(item.trackingUpdatedAt||item.updatedAt))}</small></td>
       <td data-label="Rozliczenie">${inpostServiceBillingLabel(item)}<br><small>FV klienta: ${item.billing?.mode==="none"?"—":zl(item.pricing?.customerTotalGross||0)}</small></td>
-      <td data-label="Akcje"><div class="inpost-row-actions"><button class="btn receipt" onclick="inpostServicePotwierdzenie(${jsArg(item.id)})">🖨️ Potwierdzenie</button><button class="btn ghost" onclick="inpostServiceStatus(${jsArg(item.id)})">↻ Status</button>${item.labelReady?`<button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A6')">A6</button><button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A4')">A4</button>`:""}${item.pickupRequested&&!item.pickup?.id?`<button class="btn ghost" onclick="inpostServiceOdbior(${jsArg(item.id)})">Odbiór</button>`:""}${item.billing?.mode==="single"&&!["processing","created"].includes(String(item.billing?.link?.status||item.billing?.status))?`<button class="btn" ${item.pricing?.complete===true?"":"disabled title='Uzupełnij koszt przesyłki'"} onclick="inpostServiceFaktura(${jsArg(item.id)})">FV inFakt</button>`:""}${["creating","created"].includes(item.status)?`<button class="btn danger" onclick="inpostServiceAnuluj(${jsArg(item.id)})">Anuluj</button>`:""}</div></td>
+      <td data-label="Akcje"><div class="inpost-row-actions"><button class="btn receipt" onclick="inpostServicePotwierdzenie(${jsArg(item.id)})">🖨️ Potwierdzenie</button><button class="btn ghost" onclick="inpostServiceStatus(${jsArg(item.id)})">↻ Status</button>${item.labelReady?`<button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A6')">A6</button><button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A4')">A4</button>`:""}${item.labelReady&&!item.pickup?.id?`<button class="btn ghost" onclick="inpostServiceOdbior(${jsArg(item.id)})">🚚 Zamów kuriera</button>`:""}${item.billing?.mode==="single"&&!["processing","created"].includes(String(item.billing?.link?.status||item.billing?.status))?`<button class="btn" ${item.pricing?.complete===true?"":"disabled title='Uzupełnij koszt przesyłki'"} onclick="inpostServiceFaktura(${jsArg(item.id)})">FV inFakt</button>`:""}${["creating","created"].includes(item.status)?`<button class="btn danger" onclick="inpostServiceAnuluj(${jsArg(item.id)})">Anuluj</button>`:""}</div></td>
     </tr>`;
   };
   return `<section class="panel inpost-service-history"><div class="order-section-head"><div><span class="order-pro-label">Rejestr</span><h2>Nadania i tracking</h2></div><button class="btn ghost" onclick="inpostServiceLaduj(true,false)">↻ Odśwież</button></div>${adminWyszukiwaniePanelHTML({id:"inpost-service-history",description:"Numer, klient, tracking lub rozliczenie.",fields,results:rows.length,active:!!(inpostServiceSzukaj||inpostServiceFiltr!=="wszystkie"||inpostServiceBillingFiltr!=="wszystkie"),open:true})}<div class="inpost-batch-confirmation"><div><b>Jedno potwierdzenie dla wielu paczek</b><small>Zaznacz przesyłki tego samego zleceniodawcy. Wybrano: <strong data-inpost-confirm-count>${inpostServicePotwierdzenieWybrane.size}</strong></small></div><div><button class="btn receipt" data-inpost-confirm-selected ${inpostServicePotwierdzenieWybrane.size?"":"disabled"} onclick="inpostServicePotwierdzenieZbiorcze()">🖨️ Potwierdzenie zbiorcze A4</button><button class="btn ghost" data-inpost-confirm-clear ${inpostServicePotwierdzenieWybrane.size?"":"disabled"} onclick="inpostServiceWyczyscWyborPotwierdzenia()">Wyczyść wybór</button></div></div><div class="warehouse-worktable-wrap"><table class="log-table inpost-service-table admin-responsive-table"><thead><tr><th>Wybór</th><th>Nadanie</th><th>Odbiorca</th><th>Usługa</th><th>Koszt</th><th>Status i historia</th><th>Rozliczenie</th><th>Akcje</th></tr></thead><tbody>${rows.map(row).join("")||'<tr><td colspan="8">Brak nadań pasujących do filtrów.</td></tr>'}</tbody></table></div></section>`;

@@ -59,6 +59,55 @@ function party(raw = {}) {
   };
 }
 
+function normalizedText(value) {
+  return clean(value, 200).toLocaleLowerCase('pl-PL');
+}
+
+function addressKey(value = {}) {
+  const current = value.address || value;
+  return [current.street, current.building_number || current.buildingNumber, current.flat_number || current.flatNumber, current.post_code || current.postCode, current.city]
+    .map(normalizedText)
+    .filter(Boolean)
+    .join('|');
+}
+
+function senderWithTechnicalContact(raw = {}, technical = {}) {
+  const value = party(raw);
+  const personalIdentityChanged = !!(value.firstName || value.lastName)
+    && [normalizedText(value.firstName), normalizedText(value.lastName)].join('|') !== [normalizedText(technical.firstName), normalizedText(technical.lastName)].join('|');
+  const currentAddressKey = addressKey(value), technicalAddressKey = addressKey(technical);
+  const addressChanged = !!currentAddressKey && currentAddressKey !== technicalAddressKey;
+  if (personalIdentityChanged || addressChanged) {
+    if (technical.companyName && normalizedText(value.companyName) === normalizedText(technical.companyName)) value.companyName = '';
+    if (technical.taxCode && value.taxCode === technical.taxCode) value.taxCode = '';
+  }
+  return { ...value, email: value.email || technical.email, phone: value.phone || technical.phone };
+}
+
+function partyWithTechnicalContact(raw = {}, technical = {}) {
+  const value = party(raw);
+  return { ...value, email: value.email || technical.email, phone: value.phone || technical.phone };
+}
+
+function returnAddressNote(sender = {}) {
+  const value = party(sender), current = value.address || {};
+  const name = value.companyName || `${value.firstName} ${value.lastName}`.trim();
+  const building = [current.building_number, current.flat_number].filter(Boolean).join('/');
+  const street = [current.street, building].filter(Boolean).join(' ');
+  const city = [current.post_code, current.city].filter(Boolean).join(' ');
+  const destination = [name, street, city].filter(Boolean).join(', ');
+  return clean(`Zwroty kierować pod adres nadawcy: ${destination}${destination ? '.' : ''}`, 100);
+}
+
+function commentsWithReturnAddress(value, sender) {
+  const note = returnAddressNote(sender);
+  const custom = clean(value, 500).replace(/(?:^|\s)Zwroty\s+kierować(?:\s+pod|\s+na)?\s+adres(?:\s+nadawcy)?\s*:?.*$/iu, '').trim();
+  if (!custom) return note;
+  const available = Math.max(0, 100 - note.length - 1);
+  const prefix = clean(custom, available).replace(/[\s,;:-]+$/u, '');
+  return clean([prefix, note].filter(Boolean).join(' '), 100);
+}
+
 function shipxParty(value, includeAddress = true) {
   const result = {
     first_name: value.firstName || (value.companyName ? 'Obsługa' : 'Klient'),
@@ -211,24 +260,34 @@ export function inpostServiceContactFingerprint(raw = {}) {
 export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = {}) {
   const deliveryType = DELIVERY_TYPES.has(clean(raw.deliveryType, 20)) ? clean(raw.deliveryType, 20) : 'locker';
   const requestedSendingMethod = SENDING_METHODS.has(clean(raw.sendingMethod, 40)) ? clean(raw.sendingMethod, 40) : '';
+  const courierC2CAvailable = Array.isArray(services.services) && services.services.includes('inpost_courier_c2c');
+  const courierLocker = deliveryType === 'courier' && requestedSendingMethod === 'parcel_locker' && courierC2CAvailable;
   const sendingMethod = deliveryType === 'locker'
-    ? (LOCKER_SENDING_METHODS.has(requestedSendingMethod) ? requestedSendingMethod : 'parcel_locker')
-    : (COURIER_SENDING_METHODS.has(requestedSendingMethod) ? requestedSendingMethod : 'pop');
+    ? (LOCKER_SENDING_METHODS.has(requestedSendingMethod) ? requestedSendingMethod : '')
+    : (COURIER_SENDING_METHODS.has(requestedSendingMethod) || courierLocker ? requestedSendingMethod : '');
   const allowedExtras = deliveryType === 'locker' ? LOCKER_EXTRAS : COURIER_EXTRAS;
   const extras = [...new Set((Array.isArray(raw.additionalServices) ? raw.additionalServices : []).map((item) => clean(item, 30)).filter((item) => allowedExtras.has(item)))];
   const billingMode = BILLING_MODES.has(clean(raw.billingMode, 20)) ? clean(raw.billingMode, 20) : 'none';
   const commissionGross = money(raw.commissionGross, money(settings.commissionGross, 4));
   const rawSender = raw.sender && typeof raw.sender === 'object' ? raw.sender : null;
-  const sender = party(rawSender || settings.sender || {});
-  const principal = party(raw.principal || raw.requester || sender);
-  const receiver = party(raw.receiver || {});
+  const technical = party(settings.sender || {});
+  const sender = senderWithTechnicalContact(rawSender || settings.sender || {}, technical);
+  const principal = raw.principal || raw.requester
+    ? senderWithTechnicalContact(raw.principal || raw.requester, technical)
+    : sender;
+  const receiver = partyWithTechnicalContact(raw.receiver || {}, technical);
+  const returnNote = returnAddressNote(sender);
   const service = deliveryType === 'locker'
     ? clean(services.lockerService || services.locker || 'inpost_locker_standard', 80)
-    : clean(services.courierService || services.courier || 'inpost_courier_standard', 80);
+    : courierLocker
+      ? 'inpost_courier_c2c'
+      : clean(services.courierService || services.courier || 'inpost_courier_standard', 80);
   return {
     requestId: clean(raw.requestId, 100),
     reference: clean(raw.reference, 80),
-    comments: clean(raw.comments, 100),
+    comments: commentsWithReturnAddress(raw.comments, sender),
+    returnAddress: { ...sender.address },
+    returnAddressNote: returnNote,
     deliveryType,
     service,
     sendingMethod,
@@ -278,6 +337,7 @@ export function validateInpostServiceDraft(draft = {}) {
     if (!value?.city) errors.push({ field: `${prefix}.address.city`, message: 'Brak miejscowości.' });
   }
   if (draft.deliveryType === 'locker' && !draft.targetPoint) errors.push({ field: 'targetPoint', message: 'Wybierz Paczkomat lub PaczkoPunkt odbiorcy.' });
+  if (!draft.sendingMethod) errors.push({ field: 'sendingMethod', message: draft.deliveryType === 'courier' ? 'Wybierz sposób przekazania paczki: PaczkoPunkt albo odbiór przez kuriera.' : 'Wybierz sposób nadania przesyłki.' });
   if (DROPOFF_POINT_REQUIRED_METHODS.has(draft.sendingMethod) && !draft.dropoffPoint) {
     errors.push({ field: 'dropoffPoint', message: 'Wybierz konkretny punkt nadania dla wybranego sposobu nadania.' });
   }
@@ -375,6 +435,11 @@ function contractRate(draft = {}, priceList = {}) {
     }
     const selected = priceList.locker?.[template];
     return selected ? { ...selected, key: `locker.${template}` } : null;
+  }
+  if (draft.service === 'inpost_courier_c2c' || draft.sendingMethod === 'parcel_locker') {
+    const template = ['small', 'medium', 'large', 'xlarge'].includes(draft.parcel?.template) ? draft.parcel.template : '';
+    const selected = priceList.courierManager?.[template];
+    return selected ? { ...selected, key: `courierManager.${template}` } : null;
   }
   const weight = Number(draft.parcel?.weight) || 0;
   const selected = (priceList.courierStandard || []).find((rate) => weight <= Number(rate.maxKg));

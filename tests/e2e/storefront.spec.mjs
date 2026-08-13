@@ -733,6 +733,37 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
   await shipmentForm.locator('.inpost-delivery-choice label').filter({ hasText: 'Paczkomat® 24/7' }).click();
   await expect(shipmentForm.locator('[name="targetPoint"]')).toBeVisible();
   await page.evaluate(() => {
+    inpostServiceStan.serviceAvailability = { locker: true, courier: true, services: ['inpost_locker_standard', 'inpost_courier_standard', 'inpost_courier_c2c'] };
+    inpostServiceStan.settings.sender = {
+      companyName: 'ARTWAY-TM SPÓŁKA Z OGRANICZONĄ ODPOWIEDZIALNOŚCIĄ',
+      taxCode: '5882468333',
+      firstName: 'Artway',
+      lastName: 'TM',
+      email: 'artwaytm@gmail.com',
+      phone: '530038914',
+      address: { street: 'Gryfa Pomorskiego', buildingNumber: '1/A', postCode: '84-207', city: 'Bojano' },
+    };
+    renderuj();
+  });
+  const c2cForm = page.locator('#inpostServiceForm');
+  await c2cForm.locator('.inpost-delivery-choice label').filter({ hasText: 'InPost Kurier' }).click();
+  await expect(c2cForm.locator('[name="sendingMethod"][value="parcel_locker"]')).toBeEnabled();
+  await expect(c2cForm.locator('[name="sendingMethod"][value="parcel_locker"]')).toBeChecked();
+  await expect(c2cForm.locator('[data-inpost-method-compatibility]')).toContainText('Domyślny Paczkomat jest dostępny');
+  const clientSender = page.locator('#inpost-party-sender');
+  await clientSender.getByText('Sprawdź lub popraw dane nadawcy', { exact: true }).click();
+  await clientSender.getByLabel('Imię', { exact: true }).fill('Piotr');
+  await clientSender.getByLabel('Nazwisko', { exact: true }).fill('Modelski');
+  await clientSender.getByLabel('Kod pocztowy *', { exact: true }).fill('83-011');
+  await clientSender.getByLabel('Miasto *', { exact: true }).fill('Wiślinka');
+  await clientSender.getByLabel('Ulica *', { exact: true }).fill('Wałowa');
+  await clientSender.getByLabel('Nr budynku *', { exact: true }).fill('12');
+  await expect(clientSender.getByLabel('Firma', { exact: true })).toHaveValue('');
+  await expect(clientSender.getByLabel('NIP', { exact: true })).toHaveValue('');
+  await expect(clientSender.getByLabel('E-mail *', { exact: true })).toHaveValue('artwaytm@gmail.com');
+  await expect(clientSender.getByLabel('Telefon *', { exact: true })).toHaveValue('530038914');
+  await expect(c2cForm.locator('[data-inpost-return-address]')).toHaveText('Zwroty kierować pod adres nadawcy: Piotr Modelski, Wałowa 12, 83-011 Wiślinka.');
+  await page.evaluate(() => {
     inpostServiceStan.addressBook = [{
       id: 'IPA-E2E',
       label: 'Nadawca testowy',

@@ -15,7 +15,7 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 ### WYS-013 — Brak jawnego adresu zwrotnego klienta nadającego paczkę
 
 - Data zgłoszenia: 2026-08-13
-- Status: częściowo naprawiono 2026-08-13 — uwaga trafia do ShipX i rejestru; nadal brakuje osobnego pola adresu zwrotnego
+- Status: naprawiono i objęto testem 2026-08-13 — formularz pokazuje adres zwrotny, zapisuje go osobno i zawsze dopisuje na końcu uwag ShipX
 - Miejsce: panel administracyjny → Wysyłki → dane nadawcy i uwagi
 - Obecne działanie: adres zwrotu można zapisać tylko ręcznie w ogólnym polu uwag; formularz nie pokazuje osobnego potwierdzenia, dokąd ma wrócić niedoręczona przesyłka.
 - Oczekiwane działanie: adres zwrotu jest domyślnie równy adresowi klienta wskazanego jako nadawca/zleceniodawca, jest widoczny w podsumowaniu przed utworzeniem etykiety i automatycznie dopisywany do uwag przekazywanych do przewoźnika. Operator może go świadomie zmienić.
@@ -23,7 +23,7 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 ### WYS-014 — „InPost Kurier” nie rozstrzyga sposobu przekazania paczki przewoźnikowi
 
 - Data zgłoszenia: 2026-08-13
-- Status: zapisano do poprawy — produkcja nadal domyślnie zaznacza odbiór przez kuriera
+- Status: naprawiono i objęto testem 2026-08-13 — aktywny Kurier C2C zachowuje domyślny Paczkomat; Kurier Standard nie przełącza metody po cichu
 - Miejsce: panel administracyjny → Wysyłki → sposób doręczenia i sposób nadania
 - Obecne działanie: po wybraniu doręczenia „InPost Kurier” formularz domyślnie zaznacza odbiór przez kuriera. Operator może błędnie uznać, że wybór „kurier” określił wyłącznie doręczenie, mimo że został też wybrany płatny odbiór z adresu nadawcy.
 - Oczekiwane działanie: przed utworzeniem etykiety operator musi jawnie wybrać, czy paczkę odbierze kurier z adresu nadawcy, czy zostanie przekazana w PaczkoPunkcie. Podsumowanie pokazuje oba wybory osobno i nie stosuje niejawnego wariantu domyślnego.
@@ -87,6 +87,22 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 - Miejsce: podsumowanie kosztu przesyłki kurierskiej A, 1 kg, nadawanej w PaczkoPunkcie
 - Obecne działanie: panel wylicza koszt umowny 17,58 zł, natomiast kontrola ShipX dla tych samych danych zwraca 32,07 zł, czyli o 14,49 zł więcej.
 - Oczekiwane działanie: panel jednoznacznie wskazuje stawkę, która rzeczywiście zostanie naliczona przez organizację InPost, a przy rozbieżności blokuje zakup do czasu zatwierdzenia lub aktualizacji cennika.
+
+### WYS-022 — Przesyłka z API nie jest widoczna w Managerze mimo tej samej organizacji
+
+- Data zgłoszenia: 2026-08-13
+- Status: potwierdzono po stronie ShipX; wymaga wyjaśnienia widoczności aplikacji API w Managerze InPost
+- Miejsce: Manager InPost → Moje przesyłki
+- Kontrola: konto w Chrome i serwer sklepu wskazują organizację 45690, a API tej organizacji zwraca próbną przesyłkę w statusie `confirmed`. Manager nie pokazuje jej nawet po wyszukaniu pełnego numeru oraz włączeniu wszystkich typów i statusów.
+- Oczekiwane działanie: przesyłki utworzone przez aplikację API organizacji są możliwe do odnalezienia i obsługi w Managerze tej samej organizacji albo Manager jasno informuje, że dany widok nie pokazuje przesyłek utworzonych przez tę aplikację.
+
+### WYS-023 — Brak możliwości zamówienia kuriera po utworzeniu etykiety na stronie sklepu
+
+- Data zgłoszenia: 2026-08-13
+- Status: naprawiono i objęto potwierdzeniem przed operacją zewnętrzną 2026-08-13
+- Miejsce: rejestr nadań → akcje przesyłki
+- Obecne działanie: przycisk odbioru był widoczny wyłącznie wtedy, gdy odbiór zaznaczono przed utworzeniem etykiety.
+- Oczekiwane działanie: każda potwierdzona przesyłka bez istniejącego zlecenia ma przycisk „Zamów kuriera”. Przed wysłaniem zlecenia panel pokazuje nadawcę, adres odbioru i ostrzeżenie o możliwej opłacie.
 
 ## Naprawione
 
@@ -183,12 +199,12 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 
 ## Błędy danych wykryte podczas kontroli
 
-### DANE-002 — Manager InPost i token sklepu wskazują różne przestrzenie konta
+### DANE-002 — Manager InPost nie pokazuje przesyłki aplikacji API
 
 - Data wykrycia: 2026-08-13
-- Status: przesyłka bezpieczna; do połączenia właściwego konta Managera z organizacją API.
-- Kontrola: ShipX potwierdza dzisiejszą przesyłkę i pokazuje ją na liście organizacji firmowej, natomiast wyszukanie pełnego numeru na aktualnie zalogowanym koncie Managera zwraca brak wyników.
-- Działanie ochronne: nie tworzyć duplikatu. Zalogować Manager do organizacji używanej przez token sklepu albo wygenerować token API na koncie, które ma pozostać głównym.
+- Status: organizacja zweryfikowana jako zgodna; pozostaje problem widoczności w Managerze.
+- Kontrola: konto w Chrome, konfiguracja serwera i odpowiedź ShipX wskazują tę samą organizację 45690. ShipX potwierdza dzisiejszą przesyłkę, natomiast wyszukanie pełnego numeru w Managerze nadal zwraca brak wyników.
+- Działanie ochronne: nie tworzyć duplikatu. Koszty i następne operacje wykonywać wyłącznie w organizacji 45690; do czasu wyjaśnienia widoczności używać rejestru sklepu oraz bezpośredniej kontroli ShipX.
 
 ### DANE-001 — Kod pocztowy odbiorcy nie odpowiada miejscowości
 

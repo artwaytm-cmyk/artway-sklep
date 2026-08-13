@@ -43,21 +43,31 @@ const inpostServiceMetodyNadania={
     ["pop","Nadam w PaczkoPunkcie"]
   ],
   courier:[
+    ["parcel_locker","Nadam w automacie Paczkomat"],
     ["dispatch_order","Przesyłkę odbierze kurier InPost"],
     ["pop","Nadam w PaczkoPunkcie"]
   ]
 };
 const inpostServiceMetodyWymagajacePunktu=new Set(["parcel_locker","pok","courier_pok"]);
+function inpostServiceCourierC2CAktywny(){return (inpostServiceStan.serviceAvailability?.services||[]).includes("inpost_courier_c2c");}
 function inpostServiceMetodyNadaniaOpcjeHTML(type="locker",selected=""){
   return (inpostServiceMetodyNadania[type]||inpostServiceMetodyNadania.locker).map(([value,label])=>`<option value="${esc(value)}" ${String(value)===String(selected)?"selected":""}>${esc(label)}</option>`).join("");
 }
-function inpostServiceZastosujZgodnoscTypu(form){
+function inpostServiceZastosujZgodnoscTypu(form,preferDefault=false){
   const type=String(form?.deliveryType?.value||"locker");
   form?.querySelectorAll("[data-inpost-only]").forEach(el=>el.hidden=!String(el.dataset.inpostOnly||"").split(",").includes(type));
-  const allowed=inpostServiceMetodyNadania[type]||[],allowedValues=new Set(allowed.map(([value])=>value)),methodInputs=[...(form?.querySelectorAll?.('[name="sendingMethod"]')||[])];
+  const allowed=(inpostServiceMetodyNadania[type]||[]).filter(([value])=>type!=="courier"||value!=="parcel_locker"||inpostServiceCourierC2CAktywny()),allowedValues=new Set(allowed.map(([value])=>value)),methodInputs=[...(form?.querySelectorAll?.('[name="sendingMethod"]')||[])];
   methodInputs.forEach(input=>{const enabled=allowedValues.has(input.value),card=input.closest("[data-inpost-method-card]");input.disabled=!enabled;if(card){card.hidden=!enabled;if(enabled)card.style.removeProperty("display");else card.style.setProperty("display","none","important");}});
   let method=String(form?.elements?.sendingMethod?.value||"");
-  if(!allowedValues.has(method)){const fallback=methodInputs.find(input=>input.value==="dispatch_order"&&!input.disabled)||methodInputs.find(input=>!input.disabled);if(fallback)fallback.checked=true;method=String(fallback?.value||"");}
+  if(preferDefault){
+    const preferred=methodInputs.find(input=>input.value==="parcel_locker"&&!input.disabled);
+    methodInputs.forEach(input=>{input.checked=Boolean(preferred&&input===preferred);});
+    method=preferred?.value||"";
+  }
+  if(!allowedValues.has(method)){
+    methodInputs.forEach(input=>{input.checked=false;});method="";
+    if(type==="locker"){const preferred=methodInputs.find(input=>input.value==="parcel_locker"&&!input.disabled);if(preferred){preferred.checked=true;method=preferred.value;}}
+  }
   const requiresPoint=inpostServiceMetodyWymagajacePunktu.has(method),dropoff=form?.elements?.dropoffPoint;
   if(dropoff){
     dropoff.required=requiresPoint;
@@ -66,6 +76,7 @@ function inpostServiceZastosujZgodnoscTypu(form){
     dropoff.placeholder=requiresPoint?"Wybierz automat nadawczy":"";
   }
   const dropoffPanel=form?.querySelector("[data-inpost-dropoff-panel]");if(dropoffPanel)dropoffPanel.hidden=!requiresPoint;
+  const compatibility=form?.querySelector("[data-inpost-method-compatibility]");if(compatibility){compatibility.hidden=type!=="courier";compatibility.innerHTML=inpostServiceCourierC2CAktywny()?"<b>Domyślny Paczkomat jest dostępny.</b> Formularz użyje usługi Kurier C2C z tej samej organizacji InPost. Możesz też świadomie wybrać PaczkoPunkt albo odbiór przez kuriera.":"<b>Domyślny Paczkomat nie jest dostępny dla Kuriera Standard.</b> Wybierz PaczkoPunkt/POP albo odbiór przez kuriera — formularz nie przełączy metody automatycznie.";}
   const label=form?.querySelector("[data-inpost-dropoff-label]"),hint=form?.querySelector("[data-inpost-dropoff-hint]");
   if(label)label.textContent=requiresPoint?"Automat nadawczy *":"";
   if(hint)hint.textContent=requiresPoint?"ShipX wymaga kodu automatu dla tego sposobu nadania.":"";
@@ -94,6 +105,32 @@ function inpostServiceWypelnijKlienta(input){
 function inpostServiceStronaOsoby(form,prefix){
   return {companyName:form.elements[`${prefix}Company`]?.value||"",taxCode:form.elements[`${prefix}TaxCode`]?.value||"",firstName:form.elements[`${prefix}FirstName`]?.value||"",lastName:form.elements[`${prefix}LastName`]?.value||"",email:form.elements[`${prefix}Email`]?.value||"",phone:form.elements[`${prefix}Phone`]?.value||"",address:{street:form.elements[`${prefix}Street`]?.value||"",buildingNumber:form.elements[`${prefix}Building`]?.value||"",flatNumber:form.elements[`${prefix}Flat`]?.value||"",postCode:form.elements[`${prefix}PostCode`]?.value||"",city:form.elements[`${prefix}City`]?.value||""}};
 }
+function inpostServiceTekstPorownawczy(value){return String(value||"").trim().toLocaleLowerCase("pl-PL");}
+function inpostServiceAdresKlucz(person={}){const a=person.address||{};return [a.street,a.buildingNumber||a.building_number,a.flatNumber||a.flat_number,a.postCode||a.post_code,a.city].map(inpostServiceTekstPorownawczy).filter(Boolean).join("|");}
+function inpostServiceNormalizujNadawceKlienta(form){
+  if(!form)return;
+  const current=inpostServiceStronaOsoby(form,"sender"),technical=inpostServiceNadawca();
+  const personalChanged=!!(current.firstName||current.lastName)&&[current.firstName,current.lastName].map(inpostServiceTekstPorownawczy).join("|")!==[technical.firstName,technical.lastName].map(inpostServiceTekstPorownawczy).join("|");
+  const currentAddress=inpostServiceAdresKlucz(current),technicalAddress=inpostServiceAdresKlucz(technical),addressChanged=!!currentAddress&&currentAddress!==technicalAddress;
+  if(!personalChanged&&!addressChanged)return;
+  const company=form.elements.senderCompany,taxCode=form.elements.senderTaxCode;
+  if(company&&technical.companyName&&inpostServiceTekstPorownawczy(company.value)===inpostServiceTekstPorownawczy(technical.companyName))company.value="";
+  if(taxCode&&technical.taxCode&&String(taxCode.value||"").replace(/\D/g,"")===String(technical.taxCode||"").replace(/\D/g,""))taxCode.value="";
+}
+function inpostServiceAdresZwrotuNotatka(person={}){
+  const a=person.address||{},name=person.companyName||`${person.firstName||""} ${person.lastName||""}`.trim(),building=[a.buildingNumber||a.building_number,a.flatNumber||a.flat_number].filter(Boolean).join("/"),street=[a.street,building].filter(Boolean).join(" "),city=[a.postCode||a.post_code,a.city].filter(Boolean).join(" "),destination=[name,street,city].filter(Boolean).join(", ");
+  return `Zwroty kierować pod adres nadawcy: ${destination}${destination?".":""}`.replace(/\s+/g," ").trim().slice(0,100);
+}
+function inpostServiceUwagiZeZwrotem(value,sender){
+  const note=inpostServiceAdresZwrotuNotatka(sender),custom=String(value||"").replace(/(?:^|\s)Zwroty\s+kierować(?:\s+pod|\s+na)?\s+adres(?:\s+nadawcy)?\s*:?.*$/iu,"").replace(/\s+/g," ").trim();
+  if(!custom)return note;
+  const prefix=custom.slice(0,Math.max(0,100-note.length-1)).replace(/[\s,;:-]+$/u,"");
+  return [prefix,note].filter(Boolean).join(" ").slice(0,100);
+}
+function inpostServiceAktualizujAdresZwrotu(form){
+  const target=form?.querySelector?.("[data-inpost-return-address]");if(!target)return;
+  target.textContent=inpostServiceAdresZwrotuNotatka(inpostServiceStronaOsoby(form,"sender"))||"Uzupełnij adres nadawcy.";
+}
 function inpostServiceUzupelnijKontaktTechniczny(form){
   const technical=inpostServiceNadawca(),fallback=inpostServiceAdresFirmy(),email=technical.email||fallback.email||"",phone=technical.phone||fallback.phone||"";
   ["sender","receiver"].forEach(prefix=>{
@@ -103,11 +140,12 @@ function inpostServiceUzupelnijKontaktTechniczny(form){
   });
 }
 function inpostServicePayload(form){
+  inpostServiceNormalizujNadawceKlienta(form);
   inpostServiceUzupelnijKontaktTechniczny(form);
   const data=new FormData(form),additionalServices=[...form.querySelectorAll('[name="additionalServices"]:checked')].map(input=>input.value);
   const codAmount=Math.max(0,Number(String(data.get("codAmount")||"0").replace(",","."))||0),insuranceAmount=Math.max(0,Number(String(data.get("insuranceAmount")||"0").replace(",","."))||0),sendingMethod=String(data.get("sendingMethod")||"");
   const sender=inpostServiceStronaOsoby(form,"sender");
-  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:String(data.get("comments")||"").trim(),principal:sender,sender,receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod,targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:codAmount>0||data.get("codEnabled")==="on",amount:codAmount},insurance:{enabled:insuranceAmount>0||data.get("insuranceEnabled")==="on",amount:insuranceAmount},weekend:["on","true","1"].includes(String(data.get("weekend")||"")),additionalServices,pickupRequested:sendingMethod==="dispatch_order"||data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
+  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:inpostServiceUwagiZeZwrotem(data.get("comments"),sender),returnAddress:sender.address,principal:sender,sender,receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod,targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:codAmount>0||data.get("codEnabled")==="on",amount:codAmount},insurance:{enabled:insuranceAmount>0||data.get("insuranceEnabled")==="on",amount:insuranceAmount},weekend:["on","true","1"].includes(String(data.get("weekend")||"")),additionalServices,pickupRequested:sendingMethod==="dispatch_order"||data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
 }
 function inpostServiceSzczegolyBledu(fields,prefix=""){
   const out=[];
@@ -276,6 +314,8 @@ async function inpostServiceEtykieta(id,format="A6"){
   try{const d=await chmura("inpost-label",{params:{id:item.inpostId,type:format},timeout:30000}),url=URL.createObjectURL(b64toBlob(d.base64,"application/pdf"));window.open(url,"_blank","noopener");setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(e){toast("Etykieta: "+(e.message||e));}
 }
 async function inpostServiceOdbior(id){
+  const item=inpostServiceStan.items.find(record=>record.id===id),sender=item?.sender||{},address=sender.address||{},senderName=sender.companyName||`${sender.firstName||""} ${sender.lastName||""}`.trim()||"nadawca",addressText=[address.street,[address.buildingNumber||address.building_number,address.flatNumber||address.flat_number].filter(Boolean).join("/"),address.postCode||address.post_code,address.city].filter(Boolean).join(" ");
+  if(!confirm(`Zamówić kuriera InPost po paczkę od: ${senderName}, ${addressText}? InPost może naliczyć opłatę za odbiór. Paczka i koszt pozostaną w organizacji firmowej InPost.`))return;
   try{const d=await chmura("inpost-service-pickup",{method:"POST",body:{id},timeout:45000});if(d.item)inpostServiceStan.items=inpostServiceStan.items.map(item=>item.id===id?d.item:item);toast(d.duplicatePrevented?"Odbiór kuriera jest już zlecony":"Odbiór kuriera zlecony ✅");renderuj();}catch(e){toast("Odbiór kuriera: "+(e.message||e));}
 }
 async function inpostServiceAnuluj(id){
@@ -332,7 +372,7 @@ function inpostServiceBillingLabel(item){
 function inpostServiceHistoriaHTML(){
   const rows=inpostServiceLista();
   const fields=`<label class="search-wide">Szukaj<input value="${esc(inpostServiceSzukaj)}" placeholder="Numer nadania, klient, NIP, e-mail, punkt lub referencja…" oninput="inpostServiceSzukaj=this.value;zaplanujRenderPoWpisaniu()"></label><label>Status<select onchange="inpostServiceFiltr=this.value;renderuj()"><option value="wszystkie">Wszystkie statusy</option>${[["label_ready","Etykieta gotowa"],["created","Utworzone"],["error","Błędy"],["cancelled","Anulowane"]].map(([v,l])=>`<option value="${v}" ${inpostServiceFiltr===v?"selected":""}>${l}</option>`).join("")}</select></label><label>Rozliczenie<select onchange="inpostServiceBillingFiltr=this.value;renderuj()"><option value="wszystkie">Wszystkie rozliczenia</option><option value="oczekuje" ${inpostServiceBillingFiltr==="oczekuje"?"selected":""}>Do FV miesięcznej</option><option value="rozliczone" ${inpostServiceBillingFiltr==="rozliczone"?"selected":""}>Przekazane do inFakt</option><option value="bez" ${inpostServiceBillingFiltr==="bez"?"selected":""}>Bez faktury</option></select></label><button class="btn ghost" onclick="inpostServiceSzukaj='';inpostServiceFiltr='wszystkie';inpostServiceBillingFiltr='wszystkie';renderuj()">Wyczyść</button>`;
-  return `<section class="panel inpost-service-history"><div class="order-section-head"><div><span class="order-pro-label">Rejestr operacyjny</span><h2>Nadania i rozliczenia</h2><p class="order-detail-lead">Tracking, etykieta, zlecenie odbioru i faktura tworzą jeden ślad operacyjny. Koszt umowny przewoźnika nie jest wyświetlany.</p></div><button class="btn ghost" onclick="inpostServiceLaduj(true,false)">↻ Odśwież</button></div>${adminWyszukiwaniePanelHTML({id:"inpost-service-history",description:"Filtry działają po danych nadania i rozliczenia klienta.",fields,results:rows.length,active:!!(inpostServiceSzukaj||inpostServiceFiltr!=="wszystkie"||inpostServiceBillingFiltr!=="wszystkie"),open:true})}<div class="warehouse-worktable-wrap"><table class="log-table inpost-service-table"><thead><tr><th>Nadanie</th><th>Odbiorca</th><th>Usługa</th><th>Status</th><th>Rozliczenie</th><th>Akcje</th></tr></thead><tbody>${rows.map(item=>`<tr data-stable-key="${esc(item.id)}"><td><b>${esc(item.reference||item.id)}</b><br><small>${esc(item.trackingNumber||"numer oczekuje")}</small><br><small>${esc(allegroDataTxt(item.createdAt))}</small></td><td><b>${esc(item.receiver?.companyName||`${item.receiver?.firstName||""} ${item.receiver?.lastName||""}`.trim()||"Klient")}</b><br><small>${esc(item.receiver?.email||"")}${item.receiver?.taxCode?` • NIP ${esc(item.receiver.taxCode)}`:""}</small></td><td>${item.deliveryType==="locker"?"📮 Paczkomat / punkt":"🚚 Kurier"}${item.targetPoint?`<br><small>${esc(item.targetPoint)}</small>`:""}${item.weekend?'<br><span class="lvl lvl-info">Paczka w Weekend</span>':""}${item.cod?.enabled?`<br><span class="lvl lvl-info">pobranie ${zl(item.cod.amount)}</span>`:""}</td><td>${inpostServiceStatusLabel(item)}<br><small>${esc(item.inpostStatus||"")}</small>${item.pickup?.id?`<br><span class="lvl lvl-ok">odbiór kuriera ${esc(item.pickup.status||"")}</span>`:""}</td><td>${inpostServiceBillingLabel(item)}<br><small>prowizja ${zl(item.billing?.commissionGross||0)}</small>${item.billing?.error?`<br><small class="error">${esc(item.billing.error)}</small>`:""}</td><td><div class="inpost-row-actions"><button class="btn ghost" onclick="inpostServiceStatus(${jsArg(item.id)})">↻ Status</button>${item.labelReady?`<button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A6')">A6</button><button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A4')">A4</button>`:""}${item.pickupRequested&&!item.pickup?.id?`<button class="btn ghost" onclick="inpostServiceOdbior(${jsArg(item.id)})">Odbiór kuriera</button>`:""}${item.billing?.mode==="single"&&!["processing","created"].includes(String(item.billing?.link?.status||item.billing?.status))?`<button class="btn" onclick="inpostServiceFaktura(${jsArg(item.id)})">FV inFakt</button>`:""}${["creating","created"].includes(item.status)?`<button class="btn danger" onclick="inpostServiceAnuluj(${jsArg(item.id)})">Anuluj</button>`:""}</div></td></tr>`).join("")||'<tr><td colspan="6">Brak nadań pasujących do filtrów.</td></tr>'}</tbody></table></div></section>`;
+  return `<section class="panel inpost-service-history"><div class="order-section-head"><div><span class="order-pro-label">Rejestr operacyjny</span><h2>Nadania i rozliczenia</h2><p class="order-detail-lead">Tracking, etykieta, zlecenie odbioru i faktura tworzą jeden ślad operacyjny. Koszt umowny przewoźnika nie jest wyświetlany.</p></div><button class="btn ghost" onclick="inpostServiceLaduj(true,false)">↻ Odśwież</button></div>${adminWyszukiwaniePanelHTML({id:"inpost-service-history",description:"Filtry działają po danych nadania i rozliczenia klienta.",fields,results:rows.length,active:!!(inpostServiceSzukaj||inpostServiceFiltr!=="wszystkie"||inpostServiceBillingFiltr!=="wszystkie"),open:true})}<div class="warehouse-worktable-wrap"><table class="log-table inpost-service-table"><thead><tr><th>Nadanie</th><th>Odbiorca</th><th>Usługa</th><th>Status</th><th>Rozliczenie</th><th>Akcje</th></tr></thead><tbody>${rows.map(item=>`<tr data-stable-key="${esc(item.id)}"><td><b>${esc(item.reference||item.id)}</b><br><small>${esc(item.trackingNumber||"numer oczekuje")}</small><br><small>${esc(allegroDataTxt(item.createdAt))}</small></td><td><b>${esc(item.receiver?.companyName||`${item.receiver?.firstName||""} ${item.receiver?.lastName||""}`.trim()||"Klient")}</b><br><small>${esc(item.receiver?.email||"")}${item.receiver?.taxCode?` • NIP ${esc(item.receiver.taxCode)}`:""}</small></td><td>${item.deliveryType==="locker"?"📮 Paczkomat / punkt":"🚚 Kurier"}${item.targetPoint?`<br><small>${esc(item.targetPoint)}</small>`:""}${item.weekend?'<br><span class="lvl lvl-info">Paczka w Weekend</span>':""}${item.cod?.enabled?`<br><span class="lvl lvl-info">pobranie ${zl(item.cod.amount)}</span>`:""}</td><td>${inpostServiceStatusLabel(item)}<br><small>${esc(item.inpostStatus||"")}</small>${item.pickup?.id?`<br><span class="lvl lvl-ok">odbiór kuriera ${esc(item.pickup.status||"")}</span>`:""}</td><td>${inpostServiceBillingLabel(item)}<br><small>prowizja ${zl(item.billing?.commissionGross||0)}</small>${item.billing?.error?`<br><small class="error">${esc(item.billing.error)}</small>`:""}</td><td><div class="inpost-row-actions"><button class="btn ghost" onclick="inpostServiceStatus(${jsArg(item.id)})">↻ Status</button>${item.labelReady?`<button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A6')">A6</button><button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A4')">A4</button>`:""}${item.labelReady&&!item.pickup?.id?`<button class="btn ghost" onclick="inpostServiceOdbior(${jsArg(item.id)})">🚚 Zamów kuriera</button>`:""}${item.billing?.mode==="single"&&!["processing","created"].includes(String(item.billing?.link?.status||item.billing?.status))?`<button class="btn" onclick="inpostServiceFaktura(${jsArg(item.id)})">FV inFakt</button>`:""}${["creating","created"].includes(item.status)?`<button class="btn danger" onclick="inpostServiceAnuluj(${jsArg(item.id)})">Anuluj</button>`:""}</div></td></tr>`).join("")||'<tr><td colspan="6">Brak nadań pasujących do filtrów.</td></tr>'}</tbody></table></div></section>`;
 }
 function inpostServiceMiesieczneHTML(){
   const groups=inpostServiceStan.billing?.groups||[];if(!groups.length)return "";
