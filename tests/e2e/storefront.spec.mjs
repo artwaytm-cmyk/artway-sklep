@@ -792,6 +792,7 @@ test('potwierdzenie klienta otwiera druk A4 z aktualną historią transportu', a
       status: 'label_ready',
       inpostStatus: 'ready_to_pickup',
       trackingNumber: '620000000000000000000001',
+      principal: { firstName: 'Iwona', lastName: 'Marschk', address: { street: 'Rolnicza', buildingNumber: '11', postCode: '84-207', city: 'Bojano' } },
       sender: { companyName: 'Artway-TM', email: 'artwaytm@gmail.com', phone: '530038914', address: { street: 'Testowa', buildingNumber: '1', postCode: '84-207', city: 'Bojano' } },
       receiver: { firstName: 'Jan', lastName: 'Klient', email: 'jan@example.pl', phone: '500600700', address: { street: 'Odbiorcza', buildingNumber: '2', postCode: '80-001', city: 'Gdańsk' } },
       deliveryType: 'locker',
@@ -808,19 +809,51 @@ test('potwierdzenie klienta otwiera druk A4 z aktualną historią transportu', a
   });
   const popup = await popupPromise;
   await expect(popup.getByRole('heading', { name: 'Potwierdzenie nadania przesyłki' })).toBeVisible();
-  await expect(popup.getByText('Gotowa do odbioru', { exact: true })).toHaveCount(2);
-  await expect(popup.getByRole('heading', { name: 'Historia transportu' })).toBeVisible();
-  await expect(popup.getByText('Koszt InPost')).toBeVisible();
-  await expect(popup.getByText('17,58 zł')).toBeVisible();
-  await expect(popup.getByText('Prowizja Artway-TM')).toBeVisible();
-  await expect(popup.getByText('Razem dla klienta')).toBeVisible();
+  await expect(popup.getByText('Gotowa do odbioru', { exact: true })).toHaveCount(3);
+  await expect(popup.getByRole('heading', { name: 'Aktualny przebieg transportu' })).toBeVisible();
+  await expect(popup.getByText('Zleceniodawca')).toBeVisible();
+  await expect(popup.getByText('Iwona Marschk')).toBeVisible();
+  await expect(popup.getByText('Cena końcowa usługi')).toBeVisible();
+  await expect(popup.getByText('21,58 zł')).toBeVisible();
+  await expect(popup.getByText('Koszt InPost')).toHaveCount(0);
+  await expect(popup.getByText('Prowizja Artway-TM')).toHaveCount(0);
   await expect(popup.getByText('Podpis osoby wystawiającej')).toBeVisible();
   await expect(popup.getByText('Pieczęć firmowa Artway-TM')).toBeVisible();
   await expect(popup.locator('.sheet')).toHaveCSS('border-top-style', 'solid');
   await expect(popup.locator('.parties')).toHaveCSS('display', 'grid');
   await expect(popup.locator('.stamp-box')).toHaveCSS('height', '74px');
-  await expect(popup.getByRole('button', { name: 'Drukuj / zapisz PDF' })).toBeVisible();
+  await expect(popup.getByRole('button', { name: 'Drukuj na Brother A4' })).toBeVisible();
+  await expect(popup.getByText('Brother DCP‑T525W', { exact: true })).toHaveCount(1);
   await expect(popup.getByText('Dokument nie jest fakturą ani paragonem.')).toBeVisible();
+  await popup.close();
+  assertRuntime();
+});
+
+test('potwierdzenie zbiorcze łączy paczki jednego zleceniodawcy i sumuje tylko cenę końcową', async ({ page }) => {
+  const assertRuntime = observeRuntime(page);
+  await loginAdmin(page);
+  await page.goto('/#/admin/wysylki/inpost');
+  await expect(page.getByRole('heading', { name: 'Wysyłka z InPost', exact: true })).toBeVisible();
+  const popupPromise = page.waitForEvent('popup');
+  await page.evaluate(() => {
+    const principal = { firstName: 'Iwona', lastName: 'Marschk', address: { street: 'Rolnicza', buildingNumber: '11', postCode: '84-207', city: 'Bojano' } };
+    const common = { principal, sender: principal, deliveryType: 'courier', parcel: { template: 'medium', weight: 1 }, billing: { mode: 'none', commissionGross: 4 }, status: 'label_ready', inpostStatus: 'confirmed', labelReady: true, createdAt: '2026-08-13T08:00:00.000Z' };
+    inpostServiceStan.items = [
+      { ...common, id: 'IPS-BATCH-1', reference: 'USL-BATCH-1', trackingNumber: '520000000000000000000001', receiver: { companyName: 'Odbiorca A', address: { street: 'Pierwsza', buildingNumber: '1', postCode: '80-001', city: 'Gdańsk' } }, pricing: { totalGross: 17, commissionGross: 4, customerTotalGross: 21 } },
+      { ...common, id: 'IPS-BATCH-2', reference: 'USL-BATCH-2', trackingNumber: '520000000000000000000002', receiver: { companyName: 'Odbiorca B', address: { street: 'Druga', buildingNumber: '2', postCode: '81-001', city: 'Gdynia' } }, pricing: { totalGross: 18, commissionGross: 4, customerTotalGross: 22 } },
+    ];
+    inpostServicePotwierdzenieWybrane = new Set(['IPS-BATCH-1', 'IPS-BATCH-2']);
+    inpostServicePotwierdzenieZbiorcze();
+  });
+  const popup = await popupPromise;
+  await expect(popup.getByRole('heading', { name: 'Potwierdzenie nadania przesyłek' })).toBeVisible();
+  await expect(popup.getByText('2 przesyłek na jednym potwierdzeniu')).toBeVisible();
+  await expect(popup.getByText('Odbiorca A')).toBeVisible();
+  await expect(popup.getByText('Odbiorca B')).toBeVisible();
+  await expect(popup.getByText('Cena końcowa usługi — łącznie')).toBeVisible();
+  await expect(popup.getByText('43,00 zł')).toBeVisible();
+  await expect(popup.getByText('Koszt InPost')).toHaveCount(0);
+  await expect(popup.getByText('Prowizja Artway-TM')).toHaveCount(0);
   await popup.close();
   assertRuntime();
 });

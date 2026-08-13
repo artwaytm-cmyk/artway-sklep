@@ -47,13 +47,13 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 - Obecne działanie: oba przyciski pokazują `Etykieta: Wystąpiły błędy podczas walidacji (type: Nieznany)`. Jednocześnie podgląd oficjalnego PDF może się otworzyć, więc stan interfejsu jest sprzeczny.
 - Oczekiwane działanie: wybrany format otwiera albo pobiera oficjalny PDF bez błędu; jeśli format jest niedostępny, przycisk jest wyłączony i pokazuje jednoznaczny komunikat.
 
-### WYS-006 — Potwierdzenie nazywa kwotę z prowizją „kosztem nadania”
+### WYS-006 — Potwierdzenie ujawnia wewnętrzny koszt i prowizję
 
 - Data zgłoszenia: 2026-08-13
 - Status: naprawiono i przetestowano 2026-08-13
 - Miejsce: wydruk „Potwierdzenie nadania”.
-- Obecne działanie: rejestr pokazuje koszt InPost 17,58 zł oraz kwotę z prowizją 21,58 zł, ale potwierdzenie opisuje 21,58 zł jako „Koszt nadania”.
-- Oczekiwane działanie: potwierdzenie osobno pokazuje „Koszt InPost: 17,58 zł”, „Prowizja Artway-TM: 4,00 zł” i „Razem dla klienta: 21,58 zł”, również przy rozliczeniu bez faktury.
+- Obecne działanie: potwierdzenie pokazywało zleceniodawcy koszt przewoźnika i prowizję Artway-TM.
+- Oczekiwane działanie: dokument zawsze pokazuje wyłącznie „Cenę końcową usługi”; koszt wewnętrzny, prowizja i sposób kalkulacji pozostają w panelu administracyjnym.
 
 ### WYS-007 — Status „Przesyłka potwierdzona” może sugerować, że paczka została już nadana
 
@@ -71,7 +71,38 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 - Obecne działanie: treść dokumentu jest kompletna, ale reguły bezpieczeństwa CSP blokują osadzony arkusz stylów, przez co sekcje zlewają się i brakuje czytelnych pól na podpis oraz pieczęć.
 - Oczekiwane działanie: formalny czarno-biały arkusz jest ładowany jako dozwolony plik strony, a układ A4, ramki, podpis i pieczęć pozostają czytelne na ekranie i wydruku.
 
+### WYS-009 — Potwierdzenie myli technicznego nadawcę z klientem zlecającym usługę
+
+- Data zgłoszenia: 2026-08-13
+- Status: naprawiono i przetestowano 2026-08-13
+- Miejsce: wydruk „Potwierdzenie nadania”.
+- Obecne działanie: dokument pobierał dane nadawcy technicznego użytego w ShipX, dlatego przy przesyłce klienta mógł pokazać dane Artway-TM zamiast danych osoby zlecającej usługę.
+- Oczekiwane działanie: potwierdzenie ma osobne pole „Zleceniodawca”, zapisane razem z nadaniem; dane Artway-TM występują wyłącznie jako wystawca dokumentu.
+
+### WYS-010 — Brak jednego potwierdzenia dla wielu paczek klienta
+
+- Data zgłoszenia: 2026-08-13
+- Status: naprawiono i przetestowano 2026-08-13
+- Miejsce: rejestr nadań usługowych InPost.
+- Obecne działanie: każda paczka mogła mieć tylko osobne potwierdzenie.
+- Oczekiwane działanie: operator zaznacza wiele przesyłek tego samego zleceniodawcy i tworzy jeden dokument A4 z tabelą paczek, odbiorców, numerów, statusów oraz jedną łączną ceną końcową. System nie pozwala połączyć przesyłek różnych zleceniodawców.
+
+### WYS-011 — Potwierdzenie nie wskazuje docelowej drukarki A4
+
+- Data zgłoszenia: 2026-08-13
+- Status: naprawiono i przetestowano 2026-08-13
+- Miejsce: podgląd i wydruk potwierdzenia.
+- Obecne działanie: przycisk uruchamiał ogólny dialog drukowania bez czytelnej informacji o urządzeniu i formacie.
+- Oczekiwane działanie: dokument jest dokładnie dopasowany do A4, wskazuje Brother DCP-T525W jako drukarkę docelową, a komputer ma zapisane A4 i tryb czarno-biały dla tego urządzenia.
+
 ## Błędy danych wykryte podczas kontroli
+
+### DANE-002 — Manager InPost i token sklepu wskazują różne przestrzenie konta
+
+- Data wykrycia: 2026-08-13
+- Status: przesyłka bezpieczna; do połączenia właściwego konta Managera z organizacją API.
+- Kontrola: ShipX potwierdza dzisiejszą przesyłkę i pokazuje ją na liście organizacji firmowej, natomiast wyszukanie pełnego numeru na aktualnie zalogowanym koncie Managera zwraca brak wyników.
+- Działanie ochronne: nie tworzyć duplikatu. Zalogować Manager do organizacji używanej przez token sklepu albo wygenerować token API na koncie, które ma pozostać głównym.
 
 ### DANE-001 — Kod pocztowy odbiorcy nie odpowiada miejscowości
 

@@ -1,6 +1,6 @@
 @page {
-  size: A4;
-  margin: 12mm;
+  size: A4 portrait;
+  margin: 8mm;
 }
 
 :root {
@@ -21,10 +21,13 @@ body {
 
 .sheet {
   width: 100%;
-  max-width: 186mm;
+  max-width: 194mm;
+  min-height: 281mm;
   margin: 0 auto;
   border: 1.5px solid #000;
   background: #fff;
+  display: flex;
+  flex-direction: column;
 }
 
 .head {
@@ -78,33 +81,31 @@ body {
 }
 
 .content {
+  flex: 1;
   padding: 14px 18px;
 }
 
-.meta,
-.costs {
+.meta {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   margin-bottom: 12px;
   border: 1px solid #000;
 }
 
-.meta div,
-.costs div {
+.meta div {
   min-height: 54px;
   padding: 9px 10px;
   border-right: 1px solid #000;
 }
 
-.meta div:last-child,
-.costs div:last-child {
+.meta div:last-child {
   border-right: 0;
 }
 
 .meta small,
 .party small,
 .parcel small,
-.costs small {
+.final-price small {
   display: block;
   margin-bottom: 5px;
   font-size: 10px;
@@ -113,13 +114,8 @@ body {
   text-transform: uppercase;
 }
 
-.meta b,
-.costs b {
+.meta b {
   font-size: 12px;
-}
-
-.costs .total {
-  border-left: 1px solid #000;
 }
 
 .parties {
@@ -143,6 +139,86 @@ body {
 
 .party span {
   font-size: 11px;
+}
+
+.party.issuer {
+  background: #f5f5f5;
+}
+
+.shipments {
+  width: 100%;
+  margin: 0 0 12px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 9px;
+}
+
+.shipments th,
+.shipments td {
+  padding: 6px;
+  border: 1px solid #000;
+  vertical-align: top;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.shipments th {
+  background: #efefef;
+  font-size: 8px;
+  letter-spacing: .025em;
+  text-transform: uppercase;
+}
+
+.shipments th:first-child,
+.shipments td:first-child {
+  width: 7mm;
+  text-align: center;
+}
+
+.shipments th:nth-child(2) { width: 34mm; }
+.shipments th:nth-child(3) { width: 42mm; }
+.shipments th:nth-child(4) { width: 43mm; }
+
+.shipments b,
+.shipments small {
+  display: block;
+}
+
+.shipments small {
+  margin-top: 3px;
+  font-size: 8px;
+  line-height: 1.35;
+}
+
+.shipments tr {
+  break-inside: avoid;
+}
+
+.final-price {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 14px;
+  align-items: end;
+  margin: 12px 0;
+  padding: 11px 12px;
+  border: 2px solid #000;
+  break-inside: avoid;
+}
+
+.final-price small {
+  margin: 0;
+}
+
+.final-price b {
+  grid-row: 1 / 3;
+  grid-column: 2;
+  font-size: 22px;
+  white-space: nowrap;
+}
+
+.final-price span {
+  font-size: 9px;
+  line-height: 1.4;
 }
 
 .parcel {
@@ -253,14 +329,25 @@ body {
   gap: 20px;
   padding: 10px 18px;
   border-top: 1px solid #000;
-  font-size: 9px;
+  font-size: 8px;
 }
 
 .actions {
   display: flex;
+  align-items: center;
   justify-content: center;
   gap: 10px;
   padding: 18px;
+}
+
+.actions > div {
+  display: grid;
+  margin-right: 8px;
+  font-size: 11px;
+}
+
+.actions > div small {
+  margin-top: 2px;
 }
 
 .actions button {
@@ -296,21 +383,30 @@ body {
   }
 
   .meta,
-  .costs,
   .parties,
   .signatures {
     grid-template-columns: 1fr;
   }
 
   .meta div,
-  .costs div,
   .party:first-child {
     border-right: 0;
     border-bottom: 1px solid #000;
   }
 
-  .costs .total {
-    border-left: 0;
+  .shipments {
+    display: block;
+    overflow-x: auto;
+    table-layout: auto;
+  }
+
+  .final-price {
+    grid-template-columns: 1fr;
+  }
+
+  .final-price b {
+    grid-row: auto;
+    grid-column: auto;
   }
 
   .foot {
@@ -329,7 +425,10 @@ body {
   }
 
   .sheet {
-    max-width: none;
+    width: 194mm;
+    max-width: 194mm;
+    min-height: 281mm;
+    margin: 0;
   }
 
   .actions {

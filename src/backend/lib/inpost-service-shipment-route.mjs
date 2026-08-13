@@ -408,6 +408,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
         trackingUpdatedAt: '',
         labelReady: false,
         offerId: '',
+        principal: draft.principal,
         sender: draft.sender,
         receiver: draft.receiver,
         deliveryType: draft.deliveryType,

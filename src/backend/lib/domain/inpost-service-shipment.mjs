@@ -219,6 +219,7 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
   const billingMode = BILLING_MODES.has(clean(raw.billingMode, 20)) ? clean(raw.billingMode, 20) : 'none';
   const commissionGross = money(raw.commissionGross, money(settings.commissionGross, 4));
   const sender = party({ ...(settings.sender || {}), ...(raw.sender || {}) });
+  const principal = party(raw.principal || raw.requester || sender);
   const receiver = party(raw.receiver || {});
   const service = deliveryType === 'locker'
     ? clean(services.lockerService || services.locker || 'inpost_locker_standard', 80)
@@ -232,6 +233,7 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
     sendingMethod,
     targetPoint: clean(raw.targetPoint, 40).toUpperCase(),
     dropoffPoint: clean(raw.dropoffPoint, 40).toUpperCase(),
+    principal,
     sender,
     receiver,
     parcel: {
@@ -251,7 +253,7 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
       mode: billingMode,
       commissionGross,
       month: /^\d{4}-\d{2}$/.test(clean(raw.billingMonth, 7)) ? clean(raw.billingMonth, 7) : new Date().toISOString().slice(0, 7),
-      clientKey: sender.taxCode || sender.email,
+      clientKey: principal.taxCode || principal.email || sender.taxCode || sender.email,
     },
     pricing: {
       manualGross: money(raw.carrierCostOverride),
@@ -455,7 +457,8 @@ export function inpostServicePickupPayload(record = {}) {
 }
 
 export function inpostServiceBillingClientKey(record = {}) {
-  return clean(record.sender?.taxCode || record.sender?.email || record.billing?.clientKey, 120).toLowerCase();
+  const principal = record.principal || record.sender || {};
+  return clean(principal.taxCode || principal.email || record.billing?.clientKey, 120).toLowerCase();
 }
 
 export function inpostServiceBillingKey(record = {}) {
@@ -479,7 +482,7 @@ export function inpostServiceInvoicePayload(records = [], options = {}) {
     const error = new Error(`Nie można wystawić FV: ${incomplete.length} nadań nie ma kompletnego kosztu umownego. Uzupełnij brakujące dopłaty albo wpisz pełny koszt ręcznie.`);
     error.code = 'inpost_billing_incomplete_price'; error.status = 422; throw error;
   }
-  const sender = items[0].sender || {}, billingMonth = items[0].billing?.month || new Date().toISOString().slice(0, 7);
+  const sender = items[0].principal || items[0].sender || {}, billingMonth = items[0].billing?.month || new Date().toISOString().slice(0, 7);
   const invoiceDate = /^\d{4}-\d{2}-\d{2}$/.test(clean(options.invoiceDate, 10)) ? clean(options.invoiceDate, 10) : new Date().toISOString().slice(0, 10);
   const paymentDate = new Date(`${invoiceDate}T12:00:00Z`); paymentDate.setUTCDate(paymentDate.getUTCDate() + 7);
   const services = items.map((record) => ({
@@ -530,7 +533,8 @@ export function summarizeInpostServiceBilling(items = []) {
   for (const item of pending) {
     const clientKey = inpostServiceBillingClientKey(item);
     const key = `${item.billing.month}|${clientKey}`;
-    const group = groups.get(key) || { key, month: item.billing.month, clientKey, companyName: item.sender?.companyName || '', taxCode: item.sender?.taxCode || '', count: 0, carrierGross: 0, commissionGross: 0, customerTotalGross: 0, incompletePrices: 0, recordIds: [] };
+    const principal = item.principal || item.sender || {};
+    const group = groups.get(key) || { key, month: item.billing.month, clientKey, companyName: principal.companyName || '', taxCode: principal.taxCode || '', count: 0, carrierGross: 0, commissionGross: 0, customerTotalGross: 0, incompletePrices: 0, recordIds: [] };
     group.count += 1;
     group.carrierGross += money(item.pricing?.totalGross);
     group.commissionGross += money(item.billing.commissionGross);

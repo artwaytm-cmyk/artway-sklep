@@ -913,6 +913,7 @@ function widokAdminWysylki(sekcja="zlecenia"){
 
 let inpostServiceStan={loaded:false,loading:false,saving:false,error:"",items:[],addressBook:[],settings:{commissionGross:4,sender:{}},billing:{groups:[]},serviceAvailability:null,requestId:"",pricing:null};
 let inpostServiceSzukaj="",inpostServiceFiltr="wszystkie",inpostServiceBillingFiltr="wszystkie";
+let inpostServicePotwierdzenieWybrane=new Set();
 
 function inpostServiceNowyRequestId(){
   inpostServiceStan.requestId=(globalThis.crypto?.randomUUID?.()||`inpost-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -1009,7 +1010,8 @@ function inpostServiceStronaOsoby(form,prefix){
 function inpostServicePayload(form){
   const data=new FormData(form),additionalServices=[...form.querySelectorAll('[name="additionalServices"]:checked')].map(input=>input.value);
   const codAmount=Math.max(0,Number(String(data.get("codAmount")||"0").replace(",","."))||0),insuranceAmount=Math.max(0,Number(String(data.get("insuranceAmount")||"0").replace(",","."))||0),sendingMethod=String(data.get("sendingMethod")||"");
-  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:String(data.get("comments")||"").trim(),sender:inpostServiceStronaOsoby(form,"sender"),receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod,targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:codAmount>0||data.get("codEnabled")==="on",amount:codAmount},insurance:{enabled:insuranceAmount>0||data.get("insuranceEnabled")==="on",amount:insuranceAmount},weekend:["on","true","1"].includes(String(data.get("weekend")||"")),additionalServices,pickupRequested:sendingMethod==="dispatch_order"||data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
+  const sender=inpostServiceStronaOsoby(form,"sender");
+  return {requestId:inpostServiceStan.requestId||inpostServiceNowyRequestId(),reference:String(data.get("reference")||"").trim(),comments:String(data.get("comments")||"").trim(),principal:sender,sender,receiver:inpostServiceStronaOsoby(form,"receiver"),saveSender:data.get("saveSender")==="on",saveReceiver:data.get("saveReceiver")==="on",deliveryType:data.get("deliveryType"),sendingMethod,targetPoint:data.get("targetPoint"),dropoffPoint:data.get("dropoffPoint"),parcel:{template:data.get("template"),length:data.get("length"),width:data.get("width"),height:data.get("height"),weight:data.get("weight"),nonStandard:data.get("nonStandard")==="on"},cod:{enabled:codAmount>0||data.get("codEnabled")==="on",amount:codAmount},insurance:{enabled:insuranceAmount>0||data.get("insuranceEnabled")==="on",amount:insuranceAmount},weekend:["on","true","1"].includes(String(data.get("weekend")||"")),additionalServices,pickupRequested:sendingMethod==="dispatch_order"||data.get("pickupRequested")==="on",billingMode:data.get("billingMode"),billingMonth:data.get("billingMonth"),commissionGross:data.get("commissionGross"),carrierCostOverride:data.get("carrierCostOverride")};
 }
 function inpostServiceSzczegolyBledu(fields,prefix=""){
   const out=[];
@@ -1090,32 +1092,53 @@ function inpostServiceAdresPotwierdzenia(person={}){
   const street=[a.street,[a.buildingNumber||a.building_number,a.flatNumber||a.flat_number].filter(Boolean).join("/")].filter(Boolean).join(" ");
   return `<b>${esc(name)}</b>${street?`<span>${esc(street)}</span>`:""}<span>${esc([a.postCode||a.post_code,a.city].filter(Boolean).join(" "))}</span>${person.email?`<span>${esc(person.email)}</span>`:""}${person.phone?`<span>${esc(person.phone)}</span>`:""}`;
 }
-function inpostServicePotwierdzenieHTML(item={},warning=""){
-  const company=typeof daneFirmy==="function"?daneFirmy():{},events=Array.isArray(item.trackingHistory)?item.trackingHistory:[],currentStatus=item.inpostStatus||item.status;
-  const currentEvent=events[0],updated=item.trackingUpdatedAt||currentEvent?.occurredAt||item.updatedAt||item.createdAt;
-  const trackingUrl=item.trackingNumber?`https://inpost.pl/sledzenie-przesylek?number=${encodeURIComponent(item.trackingNumber)}`:"";
-  const service=item.deliveryType==="locker"?`Paczkomat / PaczkoPunkt${item.targetPoint?` • ${item.targetPoint}`:""}`:"Kurier InPost";
-  const parcel=item.parcel||{},size=parcel.template?String(parcel.template).toUpperCase():[parcel.length,parcel.width,parcel.height].filter(Boolean).join(" × ");
-  const billing={none:"Bez faktury",single:"Faktura wystawiana od razu",monthly:"Rozliczenie na fakturze miesięcznej"}[item.billing?.mode]||"—";
-  const timeline=events.length?events:(currentStatus||item.createdAt?[{status:currentStatus||"created",label:inpostServiceStatusNazwa(currentStatus||"created"),occurredAt:updated}]:[]);
+function inpostServiceZleceniodawca(item={}){return item.principal||item.requester||item.customer||item.sender||{};}
+function inpostServiceKluczZleceniodawcy(item={}){
+  const person=inpostServiceZleceniodawca(item),a=person.address||{};
+  return [person.taxCode,person.email,person.companyName,person.firstName,person.lastName,a.street,a.buildingNumber||a.building_number,a.postCode||a.post_code,a.city].map(value=>normalizujSzukanyTekst(String(value||""))).join("|");
+}
+function inpostServiceCenaKoncowa(item={}){
+  const stored=item.pricing?.customerTotalGross;
+  if(stored!==null&&stored!==undefined&&String(stored).trim()!==""&&Number.isFinite(Number(stored)))return Number(stored);
+  const carrier=item.pricing?.totalGross,commission=item.billing?.commissionGross??item.pricing?.commissionGross;
+  return carrier!==null&&carrier!==undefined&&String(carrier).trim()!==""&&Number.isFinite(Number(carrier))?Number(carrier)+(Number.isFinite(Number(commission))?Number(commission):0):NaN;
+}
+function inpostServiceNazwaPotwierdzenia(person={}){return person.companyName||`${person.firstName||""} ${person.lastName||""}`.trim()||"—";}
+function inpostServiceAdresTekstPotwierdzenia(person={}){
+  const a=person.address||{},street=[a.street,[a.buildingNumber||a.building_number,a.flatNumber||a.flat_number].filter(Boolean).join("/")].filter(Boolean).join(" ");
+  return [street,[a.postCode||a.post_code,a.city].filter(Boolean).join(" ")].filter(Boolean).join(", ")||"—";
+}
+function inpostServicePotwierdzenieHTML(input={},warning=""){
+  const items=(Array.isArray(input)?input:[input]).filter(Boolean),first=items[0]||{},company=typeof daneFirmy==="function"?daneFirmy():{},multi=items.length>1;
+  const principal=inpostServiceZleceniodawca(first),keys=new Set(items.map(inpostServiceKluczZleceniodawcy)),samePrincipal=keys.size<=1;
+  if(!samePrincipal)throw new Error("Jedno potwierdzenie może obejmować tylko przesyłki tego samego zleceniodawcy.");
   const eventLabel=event=>String(event?.status||"").toLowerCase()==="confirmed"?inpostServiceStatusNazwa("confirmed"):(event?.label||inpostServiceStatusNazwa(event?.status));
-  const carrierGross=Number(item.pricing?.totalGross),commissionGross=Number(item.billing?.commissionGross??item.pricing?.commissionGross),storedTotal=Number(item.pricing?.customerTotalGross);
-  const customerTotalGross=Number.isFinite(storedTotal)?storedTotal:(Number.isFinite(carrierGross)?carrierGross+(Number.isFinite(commissionGross)?commissionGross:0):NaN);
-  const money=value=>Number.isFinite(value)?zl(value):"—";
-  return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Potwierdzenie ${esc(item.reference||item.id||"nadania")}</title></head><body><main class="sheet">
-    <header class="head"><div><div class="brand">${esc(company.nazwa||"Artway‑TM")}</div><h1>Potwierdzenie nadania przesyłki</h1><small>Dokument operacyjny dotyczący usługi przewozu</small></div><div class="head-meta"><b>Nr dokumentu: ${esc(item.reference||item.id||"—")}</b><small>Data wystawienia: ${esc(inpostServiceDataPotwierdzenia(new Date().toISOString()))}</small></div></header>
-    <section class="status"><b>${esc(eventLabel(currentEvent||{status:currentStatus}))}</b><span>Stan danych na: ${esc(inpostServiceDataPotwierdzenia(updated))}</span></section>
-    ${warning?`<div class="warning"><b>Uwaga:</b> nie udało się pobrać świeżego statusu. Dokument pokazuje ostatnie dane zapisane w systemie.</div>`:""}
-    <div class="content"><div class="meta"><div><small>Numer przesyłki</small><b>${esc(item.trackingNumber||"Oczekuje na numer")}</b></div><div><small>Usługa</small><b>${esc(service)}</b></div><div><small>Rozliczenie</small><b>${esc(billing)}</b></div></div>
-      <div class="parties"><section class="party"><small>Nadawca</small>${inpostServiceAdresPotwierdzenia(item.sender)}</section><section class="party"><small>Odbiorca</small>${inpostServiceAdresPotwierdzenia(item.receiver)}</section></div>
-      <section class="parcel"><small>Dane przesyłki</small><b>${esc(size?`Gabaryt / wymiary: ${size}`:"Przesyłka InPost")}${parcel.weight?` • ${esc(parcel.weight)} kg`:""}</b>${item.cod?.enabled?`<span>Pobranie: ${esc(zl(item.cod.amount))}</span>`:""}${item.weekend?'<span>Paczka w Weekend</span>':""}</section>
-      <div class="costs"><div><small>Koszt InPost</small><b>${esc(money(carrierGross))}</b></div><div><small>Prowizja Artway-TM</small><b>${esc(money(commissionGross))}</b></div><div class="total"><small>Razem dla klienta</small><b>${esc(money(customerTotalGross))}</b></div></div>
-      ${trackingUrl?`<a class="track-link" href="${trackingUrl}" target="_blank" rel="noopener">Sprawdź aktualny status przesyłki w InPost</a>`:""}
-      <h2 class="section-title">Historia transportu</h2><ol class="timeline">${timeline.map(event=>`<li><b>${esc(eventLabel(event))}</b><span>${esc(inpostServiceDataPotwierdzenia(event.occurredAt))}${event.location?` • ${esc(event.location)}`:""}</span>${event.description?`<small>${esc(event.description)}</small>`:""}</li>`).join("")||"<li><b>Oczekuje na pierwsze zdarzenie przewoźnika</b></li>"}</ol>
+  const latestAt=items.map(item=>item.trackingUpdatedAt||item.updatedAt||item.createdAt).filter(Boolean).sort().at(-1)||"";
+  const prices=items.map(inpostServiceCenaKoncowa),finalTotal=prices.every(Number.isFinite)?prices.reduce((sum,value)=>sum+value,0):NaN;
+  const billingLabels=[...new Set(items.map(item=>({none:"Bez faktury",single:"Faktura wystawiana od razu",monthly:"Rozliczenie na fakturze miesięcznej"}[item.billing?.mode]||"—")))];
+  const documentNumber=multi?`ZBIORCZE-${items.length}-${first.reference||first.id||"NADANIE"}`:(first.reference||first.id||"—");
+  const title=multi?"Potwierdzenie nadania przesyłek":"Potwierdzenie nadania przesyłki";
+  const itemRows=items.map((item,index)=>{
+    const parcel=item.parcel||{},size=parcel.template?String(parcel.template).toUpperCase():[parcel.length,parcel.width,parcel.height].filter(Boolean).join(" × "),service=item.deliveryType==="locker"?`Paczkomat / PaczkoPunkt${item.targetPoint?` • ${item.targetPoint}`:""}`:"Kurier InPost",status=eventLabel((item.trackingHistory||[])[0]||{status:item.inpostStatus||item.status});
+    return `<tr><td>${index+1}</td><td><b>${esc(item.trackingNumber||"Oczekuje na numer")}</b><small>${esc(item.reference||item.id||"")}</small></td><td><b>${esc(inpostServiceNazwaPotwierdzenia(item.receiver))}</b><small>${esc(inpostServiceAdresTekstPotwierdzenia(item.receiver))}</small></td><td><b>${esc(service)}</b><small>${esc(size?`Gabaryt / wymiary: ${size}`:"Przesyłka")}${parcel.weight?` • ${esc(parcel.weight)} kg`:""}</small></td><td><b>${esc(status)}</b><small>${esc(inpostServiceDataPotwierdzenia(item.trackingUpdatedAt||item.updatedAt||item.createdAt))}</small></td></tr>`;
+  }).join("");
+  const history=items.flatMap(item=>{
+    const events=Array.isArray(item.trackingHistory)&&item.trackingHistory.length?item.trackingHistory:[{status:item.inpostStatus||item.status||"created",occurredAt:item.trackingUpdatedAt||item.updatedAt||item.createdAt}];
+    return events.slice(0,multi?1:8).map(event=>({...event,shipment:item.trackingNumber||item.reference||item.id}));
+  });
+  return `<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Potwierdzenie ${esc(documentNumber)}</title></head><body><main class="sheet">
+    <header class="head"><div><div class="brand">${esc(company.nazwa||"Artway‑TM")}</div><h1>${title}</h1><small>Dokument potwierdzający przyjęcie i realizację usługi przewozu</small></div><div class="head-meta"><b>Nr dokumentu: ${esc(documentNumber)}</b><small>Data wystawienia: ${esc(inpostServiceDataPotwierdzenia(new Date().toISOString()))}</small></div></header>
+    <section class="status"><b>${multi?`${items.length} przesyłek na jednym potwierdzeniu`:esc(eventLabel((first.trackingHistory||[])[0]||{status:first.inpostStatus||first.status}))}</b><span>Stan danych na: ${esc(inpostServiceDataPotwierdzenia(latestAt))}</span></section>
+    ${warning?`<div class="warning"><b>Uwaga:</b> ${esc(warning)} Dokument pokazuje ostatnie dane zapisane w systemie.</div>`:""}
+    <div class="content"><div class="meta"><div><small>Liczba przesyłek</small><b>${items.length}</b></div><div><small>Rozliczenie</small><b>${esc(billingLabels.join(" / "))}</b></div><div><small>Format dokumentu</small><b>A4 • czarno-biały</b></div></div>
+      <div class="parties principal-only"><section class="party"><small>Zleceniodawca</small>${inpostServiceAdresPotwierdzenia(principal)}</section><section class="party issuer"><small>Wystawca dokumentu</small><b>${esc(company.nazwa||"Artway‑TM")}</b><span>${esc(pelnyAdresFirmy?.(company)||"")}</span></section></div>
+      <h2 class="section-title">Przesyłki objęte potwierdzeniem</h2><table class="shipments"><thead><tr><th>Lp.</th><th>Numer przesyłki</th><th>Odbiorca</th><th>Usługa i paczka</th><th>Status</th></tr></thead><tbody>${itemRows}</tbody></table>
+      <section class="final-price"><small>Cena końcowa usługi${multi?" — łącznie":""}</small><b>${esc(Number.isFinite(finalTotal)?zl(finalTotal):"—")}</b><span>Kwota należna od zleceniodawcy. Dokument nie ujawnia kosztów wewnętrznych ani sposobu kalkulacji ceny.</span></section>
+      <h2 class="section-title">Aktualny przebieg transportu</h2><ol class="timeline">${history.map(event=>`<li><b>${esc(eventLabel(event))}</b><span>${esc(inpostServiceDataPotwierdzenia(event.occurredAt))}${event.location?` • ${esc(event.location)}`:""}</span><small>Przesyłka: ${esc(event.shipment)}${event.description?` • ${esc(event.description)}`:""}</small></li>`).join("")||"<li><b>Oczekuje na pierwsze zdarzenie przewoźnika</b></li>"}</ol>
       <div class="signatures"><div class="signature-box">Podpis osoby wystawiającej</div><div class="stamp-box">Pieczęć firmowa Artway-TM</div></div>
-      <p class="formal-note">Dokument potwierdza utworzenie przesyłki i zapisanie danych w systemie. Status „Etykieta utworzona — paczka czeka na nadanie” nie oznacza fizycznego przekazania paczki przewoźnikowi.</p>
-    </div><footer class="foot"><span>${esc([company.nazwa,pelnyAdresFirmy?.(company)].filter(Boolean).join(" • "))}</span><span>Dokument nie jest fakturą ani paragonem.</span></footer>
-  </main><div class="actions"><button onclick="window.print()">Drukuj / zapisz PDF</button><button onclick="window.close()">Zamknij</button></div></body></html>`;
+      <p class="formal-note">Dokument potwierdza utworzenie wskazanych przesyłek i zapisanie ich danych w systemie. Status „Etykieta utworzona — paczka czeka na nadanie” nie oznacza fizycznego przekazania paczki przewoźnikowi.</p>
+    </div><footer class="foot"><span>${esc([company.nazwa,pelnyAdresFirmy?.(company)].filter(Boolean).join(" • "))}</span><span>Drukarka docelowa: Brother DCP‑T525W • A4</span><span>Dokument nie jest fakturą ani paragonem.</span></footer>
+  </main><div class="actions"><div><b>Brother DCP‑T525W</b><small>A4 • pionowo • czarno-biały</small></div><button onclick="window.print()">Drukuj na Brother A4</button><button onclick="window.close()">Zamknij</button></div></body></html>`;
 }
 function inpostServiceCzekajNaOknoPotwierdzenia(popup,timeout=7000){
   return new Promise((resolve,reject)=>{const started=Date.now(),check=()=>{
@@ -1125,19 +1148,32 @@ function inpostServiceCzekajNaOknoPotwierdzenia(popup,timeout=7000){
     setTimeout(check,50);
   };check();});
 }
-async function inpostServicePotwierdzenie(id){
-  const popup=window.open("/assets/inpost-confirmation.html","_blank","width=980,height=900");if(!popup)return toast("Przeglądarka zablokowała okno wydruku");
-  let item=inpostServiceStan.items.find(row=>row.id===id),warning="";
-  try{item=await inpostServicePobierzStatus(id);}catch(e){warning=e.message||String(e);}
-  if(!item){popup.close();return toast("Nie znaleziono nadania");}
+async function inpostServicePrzygotujPotwierdzenie(ids=[]){
+  const unique=[...new Set((Array.isArray(ids)?ids:[ids]).filter(Boolean))],popup=window.open("/assets/inpost-confirmation.html","_blank","width=1100,height=920");if(!popup)return toast("Przeglądarka zablokowała okno wydruku");
+  let items=[],failures=0;
+  for(const id of unique){const current=inpostServiceStan.items.find(row=>row.id===id);if(!current)continue;try{items.push(await inpostServicePobierzStatus(id));}catch{items.push(current);failures+=1;}}
+  if(!items.length){popup.close();return toast("Nie znaleziono nadań do potwierdzenia");}
+  const keys=new Set(items.map(inpostServiceKluczZleceniodawcy));if(keys.size>1){popup.close();return toast("Wybierz przesyłki tylko jednego zleceniodawcy");}
   try{
     await inpostServiceCzekajNaOknoPotwierdzenia(popup);
-    const documentHtml=new DOMParser().parseFromString(inpostServicePotwierdzenieHTML(item,warning),"text/html");
-    popup.document.title=documentHtml.title;
-    popup.document.body.innerHTML=documentHtml.body.innerHTML;
+    const warning=failures?`Nie udało się odświeżyć statusu ${failures} ${failures===1?"przesyłki":"przesyłek"}.`:"",documentHtml=new DOMParser().parseFromString(inpostServicePotwierdzenieHTML(items,warning),"text/html");
+    popup.document.title=documentHtml.title;popup.document.body.innerHTML=documentHtml.body.innerHTML;
   }catch(e){popup.close();return toast(e.message||String(e));}
   renderuj();
 }
+async function inpostServicePotwierdzenie(id){return inpostServicePrzygotujPotwierdzenie([id]);}
+async function inpostServicePotwierdzenieZbiorcze(){
+  const ids=[...inpostServicePotwierdzenieWybrane];if(!ids.length)return toast("Zaznacz co najmniej jedną przesyłkę");return inpostServicePrzygotujPotwierdzenie(ids);
+}
+function inpostServiceOdswiezWyborPotwierdzenia(){
+  const count=inpostServicePotwierdzenieWybrane.size;document.querySelectorAll("[data-inpost-confirm-count]").forEach(el=>el.textContent=String(count));document.querySelectorAll("[data-inpost-confirm-selected]").forEach(el=>{el.disabled=count===0;});document.querySelectorAll("[data-inpost-confirm-clear]").forEach(el=>{el.disabled=count===0;});
+}
+function inpostServiceZaznaczPotwierdzenie(id,checked,input=null){
+  const item=inpostServiceStan.items.find(row=>row.id===id);if(!item)return;
+  if(checked&&inpostServicePotwierdzenieWybrane.size){const firstId=[...inpostServicePotwierdzenieWybrane][0],first=inpostServiceStan.items.find(row=>row.id===firstId);if(first&&inpostServiceKluczZleceniodawcy(first)!==inpostServiceKluczZleceniodawcy(item)){if(input)input.checked=false;return toast("Do jednego potwierdzenia wybierz paczki tego samego zleceniodawcy");}}
+  if(checked)inpostServicePotwierdzenieWybrane.add(id);else inpostServicePotwierdzenieWybrane.delete(id);inpostServiceOdswiezWyborPotwierdzenia();
+}
+function inpostServiceWyczyscWyborPotwierdzenia(){inpostServicePotwierdzenieWybrane.clear();document.querySelectorAll("[data-inpost-confirm-checkbox]").forEach(input=>{input.checked=false;});inpostServiceOdswiezWyborPotwierdzenia();}
 async function inpostServiceEtykieta(id,format="A6"){
   const item=inpostServiceStan.items.find(row=>row.id===id);if(!item?.inpostId)return toast("Przesyłka nie ma jeszcze ID InPost");
   try{const d=await chmura("inpost-label",{params:{id:item.inpostId,type:format},timeout:30000}),url=URL.createObjectURL(b64toBlob(d.base64,"application/pdf"));window.open(url,"_blank","noopener");setTimeout(()=>URL.revokeObjectURL(url),60000);}catch(e){toast("Etykieta: "+(e.message||e));}
@@ -1744,6 +1780,7 @@ function inpostServiceHistoriaHTML(){
     const events=Array.isArray(item.trackingHistory)?item.trackingHistory:[];
     const label=item.labelReady?`${inpostServiceStatusLabel(item)}<br><small>${esc(inpostServiceStatusNazwa(item.inpostStatus))}</small>`:inpostServiceStatusLabel(item);
     return `<tr data-stable-key="${esc(item.id)}">
+      <td data-label="Wybór"><label class="inpost-confirm-checkbox"><input type="checkbox" data-inpost-confirm-checkbox ${inpostServicePotwierdzenieWybrane.has(item.id)?"checked":""} onchange="inpostServiceZaznaczPotwierdzenie(${jsArg(item.id)},this.checked,this)"><span>Do wspólnego potwierdzenia</span></label></td>
       <td data-label="Nadanie"><b>${esc(item.reference||item.id)}</b><br><small>${esc(item.trackingNumber||"numer oczekuje")}</small><br><small>${esc(allegroDataTxt(item.createdAt))}</small></td>
       <td data-label="Odbiorca"><b>${esc(inpostServiceNazwaKontaktu(item.receiver))}</b><br><small>${esc(inpostServiceAdresKsiazki(item.receiver))}</small><br><small>${esc(item.receiver?.email||"")}</small></td>
       <td data-label="Usługa">${item.deliveryType==="locker"?"📮 Paczkomat":"🚚 Kurier"}${item.targetPoint?`<br><small>${esc(item.targetPoint)}</small>`:""}${item.weekend?'<br><span class="lvl lvl-info">Weekend</span>':""}${item.cod?.enabled?`<br><span class="lvl lvl-info">pobranie ${zl(item.cod.amount)}</span>`:""}</td>
@@ -1753,7 +1790,7 @@ function inpostServiceHistoriaHTML(){
       <td data-label="Akcje"><div class="inpost-row-actions"><button class="btn receipt" onclick="inpostServicePotwierdzenie(${jsArg(item.id)})">🖨️ Potwierdzenie</button><button class="btn ghost" onclick="inpostServiceStatus(${jsArg(item.id)})">↻ Status</button>${item.labelReady?`<button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A6')">A6</button><button class="btn ghost" onclick="inpostServiceEtykieta(${jsArg(item.id)},'A4')">A4</button>`:""}${item.pickupRequested&&!item.pickup?.id?`<button class="btn ghost" onclick="inpostServiceOdbior(${jsArg(item.id)})">Odbiór</button>`:""}${item.billing?.mode==="single"&&!["processing","created"].includes(String(item.billing?.link?.status||item.billing?.status))?`<button class="btn" ${item.pricing?.complete===true?"":"disabled title='Uzupełnij koszt przesyłki'"} onclick="inpostServiceFaktura(${jsArg(item.id)})">FV inFakt</button>`:""}${["creating","created"].includes(item.status)?`<button class="btn danger" onclick="inpostServiceAnuluj(${jsArg(item.id)})">Anuluj</button>`:""}</div></td>
     </tr>`;
   };
-  return `<section class="panel inpost-service-history"><div class="order-section-head"><div><span class="order-pro-label">Rejestr</span><h2>Nadania i tracking</h2></div><button class="btn ghost" onclick="inpostServiceLaduj(true,false)">↻ Odśwież</button></div>${adminWyszukiwaniePanelHTML({id:"inpost-service-history",description:"Numer, klient, tracking lub rozliczenie.",fields,results:rows.length,active:!!(inpostServiceSzukaj||inpostServiceFiltr!=="wszystkie"||inpostServiceBillingFiltr!=="wszystkie"),open:true})}<div class="warehouse-worktable-wrap"><table class="log-table inpost-service-table admin-responsive-table"><thead><tr><th>Nadanie</th><th>Odbiorca</th><th>Usługa</th><th>Koszt</th><th>Status i historia</th><th>Rozliczenie</th><th>Akcje</th></tr></thead><tbody>${rows.map(row).join("")||'<tr><td colspan="7">Brak nadań pasujących do filtrów.</td></tr>'}</tbody></table></div></section>`;
+  return `<section class="panel inpost-service-history"><div class="order-section-head"><div><span class="order-pro-label">Rejestr</span><h2>Nadania i tracking</h2></div><button class="btn ghost" onclick="inpostServiceLaduj(true,false)">↻ Odśwież</button></div>${adminWyszukiwaniePanelHTML({id:"inpost-service-history",description:"Numer, klient, tracking lub rozliczenie.",fields,results:rows.length,active:!!(inpostServiceSzukaj||inpostServiceFiltr!=="wszystkie"||inpostServiceBillingFiltr!=="wszystkie"),open:true})}<div class="inpost-batch-confirmation"><div><b>Jedno potwierdzenie dla wielu paczek</b><small>Zaznacz przesyłki tego samego zleceniodawcy. Wybrano: <strong data-inpost-confirm-count>${inpostServicePotwierdzenieWybrane.size}</strong></small></div><div><button class="btn receipt" data-inpost-confirm-selected ${inpostServicePotwierdzenieWybrane.size?"":"disabled"} onclick="inpostServicePotwierdzenieZbiorcze()">🖨️ Potwierdzenie zbiorcze A4</button><button class="btn ghost" data-inpost-confirm-clear ${inpostServicePotwierdzenieWybrane.size?"":"disabled"} onclick="inpostServiceWyczyscWyborPotwierdzenia()">Wyczyść wybór</button></div></div><div class="warehouse-worktable-wrap"><table class="log-table inpost-service-table admin-responsive-table"><thead><tr><th>Wybór</th><th>Nadanie</th><th>Odbiorca</th><th>Usługa</th><th>Koszt</th><th>Status i historia</th><th>Rozliczenie</th><th>Akcje</th></tr></thead><tbody>${rows.map(row).join("")||'<tr><td colspan="8">Brak nadań pasujących do filtrów.</td></tr>'}</tbody></table></div></section>`;
 }
 function inpostServiceMiesieczneHTML(){
   const groups=inpostServiceStan.billing?.groups||[];if(!groups.length)return "";

@@ -65,6 +65,7 @@ function draft(overrides = {}) {
 test('nadanie usługowe waliduje klienta i obsługuje Paczkomat, pobranie, ochronę i Paczkę w Weekend', () => {
   const value = draft();
   assert.equal(validateInpostServiceDraft(value).ok, true);
+  assert.deepEqual(value.principal, value.sender);
   const payload = inpostServiceShipxPayload(value);
   assert.equal(payload.service, 'inpost_locker_standard');
   assert.equal(payload.custom_attributes.target_point, 'BOJ01N');
@@ -285,17 +286,19 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /Stawki InPost/);
   assert.doesNotMatch(shipping, /Abonament netto|Abonament brutto|Umowa abonamentowa/);
   assert.match(shipping, /inpostServicePotwierdzenie/);
-  assert.match(shipping, /Drukuj \/ zapisz PDF/);
-  assert.match(shipping, /Historia transportu/);
+  assert.match(shipping, /Drukuj na Brother A4/);
+  assert.match(shipping, /Aktualny przebieg transportu/);
+  assert.match(shipping, /Cena końcowa usługi/);
+  assert.match(shipping, /Potwierdzenie zbiorcze A4/);
   assert.match(shipping, /inpostServiceZastosujZgodnoscTypu/);
   assert.match(shipping, /Automat nadawczy \*/);
   assert.match(shipping, /Dane są poprawne/);
   assert.match(shipping, /konta postpaid/);
   assert.match(shipping, /inpost-service-postcode/);
   assert.match(shipping, /Kod rozpoznany/);
-  assert.match(shipping, /Koszt InPost/);
+  assert.match(shipping, /Koszt nadania/);
   assert.match(shipping, /Prowizja Artway-TM/);
-  assert.match(shipping, /Razem dla klienta/);
+  assert.match(shipping, /Kwota na FV klienta/);
   assert.match(shipping, /Podpis osoby wystawiającej/);
   assert.match(shipping, /Pieczęć firmowa Artway-TM/);
   assert.match(shipping, /\/assets\/inpost-confirmation\.html/);
