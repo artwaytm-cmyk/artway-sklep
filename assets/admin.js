@@ -1849,7 +1849,7 @@ function inpostServicePelnaCenaKlienta(totalGross){
 }
 function inpostServiceRoznicaCeny(pricing={}){
   const raw=pricing?.apiComparison?.differenceGross,value=raw==null||String(raw).trim()===""?null:Number(raw),difference=Number.isFinite(value)?Math.round(value*100)/100:null;
-  return {difference,mismatch:difference!=null&&Math.abs(difference)>0.01};
+  return {difference,mismatch:difference!=null&&difference>0.01};
 }
 function inpostServiceUstawBlokadeCeny(form,{mismatch=false,loading=false}={}){
   const input=form?.elements?.priceDifferenceConfirmed,wrapper=form?.querySelector?.("[data-inpost-price-confirmation]");
@@ -2105,9 +2105,9 @@ function inpostServiceFormHTML(){
   </section>`;
 }
 function inpostServiceKosztHTML(item={}){
-  const pricing=item.pricing||{},amount=inpostServiceWycenaKwota(pricing);
+  const pricing=item.pricing||{},amount=inpostServiceWycenaKwota(pricing),api=Number(pricing.apiComparison?.totalGross),difference=Number(pricing.apiComparison?.differenceGross);
   if(amount==null)return '<span class="lvl lvl-ostrzezenie">cena niedostępna</span>';
-  return `<b>${zl(amount)}</b><br><small>${pricing.source==="manual"?"koszt ręczny":"cennik umowny"} • na FV ${zl(pricing.customerTotalGross??amount+(item.billing?.commissionGross||0))}</small>${pricing.complete===false?'<br><span class="lvl lvl-ostrzezenie">uzupełnij dopłaty</span>':""}`;
+  return `<b>${zl(amount)}</b><br><small>${pricing.source==="manual"?"koszt ręczny":"cennik umowny"} • na FV ${zl(pricing.customerTotalGross??amount+(item.billing?.commissionGross||0))}</small>${Number.isFinite(api)?`<br><small>kontrola ShipX ${zl(api)} • różnica ${difference>0?"+":""}${zl(difference)}</small>`:""}${item.priceDifferenceConfirmation?.confirmed?'<br><span class="lvl lvl-ostrzezenie">wyższy koszt potwierdzony</span>':""}${pricing.complete===false?'<br><span class="lvl lvl-ostrzezenie">uzupełnij dopłaty</span>':""}`;
 }
 function inpostServiceHistoriaHTML(){
   const rows=inpostServiceLista();

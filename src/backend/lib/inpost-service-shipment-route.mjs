@@ -159,7 +159,7 @@ export function createInpostServiceShipmentRoute(deps = {}) {
     const raw = pricing.apiComparison?.differenceGross;
     const value = raw == null || String(raw).trim() === '' ? null : Number(raw);
     const differenceGross = Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
-    return { differenceGross, mismatch: differenceGross != null && Math.abs(differenceGross) > 0.01 };
+    return { differenceGross, mismatch: differenceGross != null && differenceGross > 0.01 };
   }
 
   async function saveInvoiceLink(key, link) {
@@ -501,7 +501,8 @@ export function createInpostServiceShipmentRoute(deps = {}) {
       try {
         const created = await call(`/v1/organizations/${encodeURIComponent(config.orgId)}/shipments`, { method: 'POST', bodyObj: inpostServiceShipxPayload(draft) });
         const shipmentId = text(created?.id, 80), current = shipmentId ? await waitForLabel(shipmentId, { proby: 10, opoznienieMs: 1100 }).catch(() => created) : created;
-        const actualPricing = inpostServiceContractPricing(draft, store.settings, current || created);
+        const shipmentPricing = inpostServiceContractPricing(draft, store.settings, current || created);
+        const actualPricing = shipmentPricing.apiComparison?.totalGross == null ? verifiedPricing : shipmentPricing;
         saved = await updateRecord(id, (item) => ({
           ...item,
           status: labelReady(current) || labelReady(created) ? 'label_ready' : 'created',
