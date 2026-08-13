@@ -7,7 +7,7 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 ### WYS-012 — Brak automatycznych danych kontaktowych Artway przy braku e-maila lub telefonu klienta
 
 - Data zgłoszenia: 2026-08-13
-- Status: zapisano do poprawy po zakończeniu prób nadań
+- Status: naprawiono i sprawdzono na produkcji 2026-08-13; brakujące pola są uzupełniane kontaktem technicznym Artway-TM
 - Miejsce: panel administracyjny → Wysyłki → dane nadawcy i odbiorcy
 - Obecne działanie: wymagane pola e-mail i telefon pozostają puste, gdy klient nie poda danych; operator musi za każdym razem ręcznie wpisać kontakt Artway-TM.
 - Oczekiwane działanie: jeśli klient nie poda e-maila lub telefonu, formularz automatycznie uzupełnia odpowiednie brakujące pole danymi technicznymi Artway-TM. Interfejs wyraźnie oznacza, że są to dane kontaktowe Artway użyte zastępczo, aby nie przedstawiać ich jako danych klienta.
@@ -15,7 +15,7 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 ### WYS-013 — Brak jawnego adresu zwrotnego klienta nadającego paczkę
 
 - Data zgłoszenia: 2026-08-13
-- Status: zapisano do poprawy po zakończeniu prób nadań
+- Status: częściowo naprawiono 2026-08-13 — uwaga trafia do ShipX i rejestru; nadal brakuje osobnego pola adresu zwrotnego
 - Miejsce: panel administracyjny → Wysyłki → dane nadawcy i uwagi
 - Obecne działanie: adres zwrotu można zapisać tylko ręcznie w ogólnym polu uwag; formularz nie pokazuje osobnego potwierdzenia, dokąd ma wrócić niedoręczona przesyłka.
 - Oczekiwane działanie: adres zwrotu jest domyślnie równy adresowi klienta wskazanego jako nadawca/zleceniodawca, jest widoczny w podsumowaniu przed utworzeniem etykiety i automatycznie dopisywany do uwag przekazywanych do przewoźnika. Operator może go świadomie zmienić.
@@ -23,7 +23,7 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 ### WYS-014 — „InPost Kurier” nie rozstrzyga sposobu przekazania paczki przewoźnikowi
 
 - Data zgłoszenia: 2026-08-13
-- Status: zapisano do poprawy po zakończeniu prób nadań
+- Status: zapisano do poprawy — produkcja nadal domyślnie zaznacza odbiór przez kuriera
 - Miejsce: panel administracyjny → Wysyłki → sposób doręczenia i sposób nadania
 - Obecne działanie: po wybraniu doręczenia „InPost Kurier” formularz domyślnie zaznacza odbiór przez kuriera. Operator może błędnie uznać, że wybór „kurier” określił wyłącznie doręczenie, mimo że został też wybrany płatny odbiór z adresu nadawcy.
 - Oczekiwane działanie: przed utworzeniem etykiety operator musi jawnie wybrać, czy paczkę odbierze kurier z adresu nadawcy, czy zostanie przekazana w PaczkoPunkcie. Podsumowanie pokazuje oba wybory osobno i nie stosuje niejawnego wariantu domyślnego.
@@ -31,7 +31,7 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 ### WYS-015 — Karty nadawcy i odbiorcy nie odświeżają się po ręcznej zmianie pól
 
 - Data zgłoszenia: 2026-08-13
-- Status: zapisano do poprawy po zakończeniu prób nadań
+- Status: naprawiono i sprawdzono na produkcji 2026-08-13
 - Miejsce: panel administracyjny → Wysyłki → karta nadawcy i karta odbiorcy nad formularzem danych
 - Kroki: zmienić domyślnego nadawcę Artway-TM na klienta oraz ręcznie wpisać kompletne dane odbiorcy.
 - Obecne działanie: pola formularza zawierają nowe poprawne dane, ale karta nadawcy nadal pokazuje Artway-TM, a karta odbiorcy nadal wyświetla „Nie wybrano odbiorcy”. Operator nie ma wiarygodnego wizualnego podsumowania danych, które zostaną wysłane.
@@ -40,7 +40,7 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 ### WYS-016 — Nowa przesyłka nie pojawia się od razu w pełnym rejestrze
 
 - Data zgłoszenia: 2026-08-13
-- Status: zapisano do poprawy po zakończeniu prób nadań
+- Status: naprawiono i wdrożono 2026-08-13; końcowa weryfikacja nastąpi przy następnym utworzeniu etykiety
 - Miejsce: panel administracyjny → Wysyłki → rejestr nadań
 - Kroki: utworzyć poprawną przesyłkę i zaczekać na odświeżenie rejestru.
 - Obecne działanie: licznik oraz informacja o liczbie wyników rosną, ale nowego wiersza nie widać na pełnej liście nawet po użyciu przycisku „Odśwież”. Wiersz pojawia się dopiero po wyszukaniu pełnego numeru przesyłki.
@@ -49,7 +49,7 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 ### WYS-017 — Wyczyszczenie nazwy firmy nadawcy nie trafia do tworzonej przesyłki
 
 - Data zgłoszenia: 2026-08-13
-- Status: krytyczny; wykryto na etykiecie próbnej, do poprawy przed ponownym nadaniem
+- Status: naprawiono i sprawdzono w formularzu produkcyjnym 2026-08-13; oficjalna etykieta wymaga końcowej kontroli przy następnym nadaniu
 - Miejsce: formularz nadawcy, rekord przesyłki, potwierdzenie klienta i oficjalna etykieta InPost
 - Kroki: wyczyścić domyślną firmę Artway-TM i wpisać osobę fizyczną jako nadawcę.
 - Obecne działanie: adres, imię i nazwisko zostają zmienione, ale ukryta/stara nazwa firmy Artway-TM pozostaje w żądaniu. Oficjalna etykieta pokazuje Artway-TM jako nadawcę, a potwierdzenie pokazuje Artway-TM jako zleceniodawcę zamiast osoby wpisanej w formularzu.
@@ -58,7 +58,7 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 ### WYS-018 — Oficjalna etykieta kurierska pokazuje 25 kg zamiast wagi wpisanej w formularzu
 
 - Data zgłoszenia: 2026-08-13
-- Status: krytyczny; wykryto na etykiecie próbnej, do poprawy przed ponownym nadaniem
+- Status: naprawiono i wdrożono 2026-08-13; oficjalna etykieta wymaga końcowej kontroli przy następnym nadaniu
 - Miejsce: budowanie paczki ShipX dla przesyłki kurierskiej z wybranym gabarytem A/B/C/D
 - Kroki: wybrać kuriera, gabaryt A i wpisać wagę 1 kg, a następnie pobrać oficjalną etykietę.
 - Obecne działanie: rekord i potwierdzenie klienta pokazują 1 kg, lecz do ShipX wysyłany jest sam szablon gabarytu bez wagi; oficjalna etykieta InPost pokazuje 25,00 kg.
@@ -67,10 +67,18 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 ### WYS-019 — Uwagi przekazane do InPost nie są zachowywane w rejestrze sklepu
 
 - Data zgłoszenia: 2026-08-13
-- Status: zapisano do poprawy po zakończeniu prób nadań
+- Status: naprawiono i wdrożono 2026-08-13; zapis zostanie potwierdzony przy następnym nadaniu
 - Miejsce: rekord nadania usługowego i podgląd szczegółów przesyłki
 - Obecne działanie: uwaga o adresie zwrotnym poprawnie trafia do ShipX i jest wydrukowana na etykiecie, ale własny rekord sklepu nie przechowuje pola `comments`. Po utworzeniu nie można jej sprawdzić w rejestrze ani na potwierdzeniu.
 - Oczekiwane działanie: uwagi są zapisywane razem z nadaniem, widoczne w szczegółach i na potwierdzeniu oraz porównywane z aktualnym rekordem ShipX.
+
+### WYS-020 — Automatyczne potwierdzenie przesyłki odbiera możliwość korekty i anulowania
+
+- Data zgłoszenia: 2026-08-13
+- Status: krytyczny; zapisano do poprawy przed dalszymi seryjnymi nadaniami
+- Miejsce: końcowy krok tworzenia przesyłki w ShipX
+- Obecne działanie: formularz korzysta z uproszczonego utworzenia, które od razu kupuje przesyłkę i ustawia status `confirmed`. Po wykryciu błędu danych InPost nie pozwala już jej zmienić ani anulować, więc poprawiona etykieta oznacza drugi zakup.
+- Oczekiwane działanie: najpierw utworzyć przesyłkę z `only_choice_of_offer: true` i zatrzymać ją w statusie `offer_selected`, pokazać operatorowi ostateczne dane nadawcy, odbiorcy, wymiarów, wagi, uwag i ceny, a dopiero osobnym świadomym krokiem opłacić przesyłkę. Do chwili opłacenia szkic można anulować.
 
 ## Naprawione
 
