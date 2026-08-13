@@ -375,7 +375,6 @@ export function inpostServiceShipxPayload(draft = {}) {
     service: draft.service,
     reference: draft.reference,
     comments: draft.comments || `Nadanie usługowe ${draft.reference}`.slice(0, 100),
-    external_customer_id: draft.billing.clientKey || undefined,
     only_choice_of_offer: false,
     ...(Object.keys(customAttributes).length ? { custom_attributes: customAttributes } : {}),
   };

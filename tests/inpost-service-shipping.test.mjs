@@ -71,6 +71,7 @@ test('nadanie usługowe waliduje klienta i obsługuje Paczkomat, pobranie, ochro
   assert.equal(payload.service, 'inpost_locker_standard');
   assert.equal(payload.custom_attributes.target_point, 'BOJ01N');
   assert.equal(payload.custom_attributes.dropoff_point, 'BOJ01N');
+  assert.equal('external_customer_id' in payload, false);
   assert.deepEqual(payload.additional_services, ['labelless']);
   assert.equal(payload.end_of_week_collection, true);
   assert.deepEqual(payload.cod, { amount: 149.99, currency: 'PLN' });
