@@ -1,4 +1,6 @@
 const MONEY_MAX = 1_000_000;
+const FIRST_COMMISSION_MIN_GROSS = 4;
+const FIRST_COMMISSION_MAX_GROSS = 5;
 const BILLING_MODES = new Set(['none', 'single', 'monthly']);
 const DELIVERY_TYPES = new Set(['locker', 'courier']);
 const SENDING_METHODS = new Set(['parcel_locker', 'any_point', 'pok', 'pop', 'courier_pok', 'branch', 'dispatch_order']);
@@ -224,7 +226,18 @@ export function normalizeInpostServicePriceList(raw = {}) {
 }
 
 export function inpostServiceDefaultSettings() {
-  return { commissionGross: 4, sender: {}, priceList: inpostServiceDefaultPriceList(), updatedAt: null };
+  return {
+    commissionGross: 4,
+    defaultDeliveryType: 'locker',
+    defaultSendingMethod: 'parcel_locker',
+    defaultDropoffPoint: '',
+    labelDefaultFormat: 'A6',
+    labelOpenMode: 'preview',
+    labelAutoPrint: false,
+    sender: {},
+    priceList: inpostServiceDefaultPriceList(),
+    updatedAt: null,
+  };
 }
 
 export function normalizeInpostServiceContact(raw = {}, options = {}) {
@@ -268,7 +281,7 @@ export function normalizeInpostServiceDraft(raw = {}, settings = {}, services = 
   const allowedExtras = deliveryType === 'locker' ? LOCKER_EXTRAS : COURIER_EXTRAS;
   const extras = [...new Set((Array.isArray(raw.additionalServices) ? raw.additionalServices : []).map((item) => clean(item, 30)).filter((item) => allowedExtras.has(item)))];
   const billingMode = BILLING_MODES.has(clean(raw.billingMode, 20)) ? clean(raw.billingMode, 20) : 'none';
-  const commissionGross = money(raw.commissionGross, money(settings.commissionGross, 4));
+  const commissionGross = FIRST_COMMISSION_MIN_GROSS;
   const rawSender = raw.sender && typeof raw.sender === 'object' ? raw.sender : null;
   const technical = party(settings.sender || {});
   const sender = senderWithTechnicalContact(rawSender || settings.sender || {}, technical);
@@ -391,6 +404,19 @@ function amount(value) {
   return Number.isFinite(number) && number >= 0 ? Math.round(number * 100) / 100 : null;
 }
 
+export function inpostServiceRoundedCustomerPrice(totalGross, range = {}) {
+  const carrierGross = amount(totalGross);
+  if (carrierGross == null) return { customerTotalGross: null, commissionGross: 0 };
+  const minimumGross = amount(range.minimumGross) ?? FIRST_COMMISSION_MIN_GROSS;
+  const maximumGross = Math.max(minimumGross, amount(range.maximumGross) ?? FIRST_COMMISSION_MAX_GROSS);
+  const customerTotalGross = Math.ceil((carrierGross + minimumGross) - 1e-9);
+  const commissionGross = Math.round((customerTotalGross - carrierGross) * 100) / 100;
+  if (commissionGross < minimumGross || commissionGross > maximumGross) {
+    throw new Error(`Nie można dopasować pełnej ceny do prowizji ${minimumGross}–${maximumGross} zł.`);
+  }
+  return { customerTotalGross, commissionGross, minimumGross, maximumGross };
+}
+
 export function inpostServicePricing(raw = {}, options = {}) {
   const value = Array.isArray(raw) ? (raw[0] || {}) : (raw || {});
   const selectedOffer = value.selected_offer || value.selectedOffer || {};
@@ -402,15 +428,18 @@ export function inpostServicePricing(raw = {}, options = {}) {
   const manual = amount(options.manualGross);
   const totalGross = calculated ?? offerRate ?? (manual && manual > 0 ? manual : null);
   const source = calculated != null ? 'shipx_calculation' : offerRate != null ? 'shipx_offer' : totalGross != null ? 'manual' : 'unavailable';
-  const commissionGross = amount(options.commissionGross) || 0;
+  const roundedCustomer = totalGross == null ? null : inpostServiceRoundedCustomerPrice(totalGross);
+  const commissionGross = roundedCustomer?.commissionGross || 0;
   return {
     totalGross,
     currency: clean(value.currency || offer?.currency || options.currency || 'PLN', 8) || 'PLN',
     source,
     estimated: source === 'manual',
     available: totalGross != null,
-    customerTotalGross: totalGross == null ? null : Math.round((totalGross + commissionGross) * 100) / 100,
+    customerTotalGross: roundedCustomer?.customerTotalGross ?? null,
     commissionGross,
+    minimumCommissionGross: roundedCustomer?.minimumGross ?? FIRST_COMMISSION_MIN_GROSS,
+    maximumCommissionGross: roundedCustomer?.maximumGross ?? FIRST_COMMISSION_MAX_GROSS,
     breakdown: {
       baseGross: amount(value.calculated_charge_amount_non_commission),
       fuelGross: amount(value.fuel_charge_amount),
@@ -464,9 +493,10 @@ export function inpostServiceContractPricing(draft = {}, settings = {}, shipxRaw
   }
   const unpricedOptions = selectedExtras.filter(([, key]) => extras[key] == null).map(([label]) => label);
   const extraGross = selectedExtras.reduce((sum, [, key]) => sum + (extras[key] == null ? 0 : Number(extras[key]) || 0), 0);
-  const commissionGross = amount(draft.billing?.commissionGross) || 0;
   const contractGross = rate ? Math.round((Number(rate.gross || 0) + extraGross) * 100) / 100 : null;
   const totalGross = manual != null && manual > 0 ? manual : contractGross;
+  const roundedCustomer = totalGross == null ? null : inpostServiceRoundedCustomerPrice(totalGross);
+  const commissionGross = roundedCustomer?.commissionGross || 0;
   const source = manual != null && manual > 0 ? 'manual' : rate ? 'contract_price_list' : 'unavailable';
   const complete = totalGross != null && (source === 'manual' || unpricedOptions.length === 0);
   return {
@@ -480,7 +510,9 @@ export function inpostServiceContractPricing(draft = {}, settings = {}, shipxRaw
     rateLabel: rate?.label || '',
     contractNet: rate?.net ?? null,
     commissionGross,
-    customerTotalGross: totalGross == null ? null : Math.round((totalGross + commissionGross) * 100) / 100,
+    customerTotalGross: roundedCustomer?.customerTotalGross ?? null,
+    minimumCommissionGross: roundedCustomer?.minimumGross ?? FIRST_COMMISSION_MIN_GROSS,
+    maximumCommissionGross: roundedCustomer?.maximumGross ?? FIRST_COMMISSION_MAX_GROSS,
     breakdown: {
       baseGross: rate?.gross ?? null,
       extrasGross: Math.round(extraGross * 100) / 100,
@@ -603,7 +635,7 @@ export function summarizeInpostServiceBilling(items = []) {
     const group = groups.get(key) || { key, month: item.billing.month, clientKey, companyName: principal.companyName || '', taxCode: principal.taxCode || '', count: 0, carrierGross: 0, commissionGross: 0, customerTotalGross: 0, incompletePrices: 0, recordIds: [] };
     group.count += 1;
     group.carrierGross += money(item.pricing?.totalGross);
-    group.commissionGross += money(item.billing.commissionGross);
+    group.commissionGross += money(item.pricing?.commissionGross ?? item.billing.commissionGross);
     group.customerTotalGross += money(item.pricing?.customerTotalGross);
     if (item.pricing?.complete !== true) group.incompletePrices += 1;
     group.recordIds.push(item.id); groups.set(key, group);
@@ -612,7 +644,7 @@ export function summarizeInpostServiceBilling(items = []) {
     total: active.length,
     pendingMonthly: pending.length,
     carrierPendingGross: Math.round(pending.reduce((sum, item) => sum + money(item.pricing?.totalGross), 0) * 100) / 100,
-    commissionPendingGross: Math.round(pending.reduce((sum, item) => sum + money(item.billing.commissionGross), 0) * 100) / 100,
+    commissionPendingGross: Math.round(pending.reduce((sum, item) => sum + money(item.pricing?.commissionGross ?? item.billing.commissionGross), 0) * 100) / 100,
     customerPendingGross: Math.round(pending.reduce((sum, item) => sum + money(item.pricing?.customerTotalGross), 0) * 100) / 100,
     groups: [...groups.values()].map((group) => ({
       ...group,

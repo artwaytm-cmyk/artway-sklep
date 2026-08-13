@@ -114,6 +114,22 @@ Lista problemów zauważonych podczas obsługi formularza listu przewozowego. Pa
 
 ## Naprawione
 
+### WYS-025 — Cena końcowa usługi zawiera grosze zamiast pełnej kwoty
+
+- Data zgłoszenia: 2026-08-13
+- Status: naprawiono i objęto testami 2026-08-13
+- Miejsce: formularz nadania → Koszt i faktura Artway-TM oraz rozliczenia miesięczne.
+- Obecne działanie: cena klienta była prostą sumą stawki InPost i stałej prowizji 4 zł, dlatego kończyła się groszami, np. 18,16 zł albo 21,58 zł.
+- Oczekiwane działanie: w pierwszym przedziale system dopasowuje prowizję w zakresie 4–5 zł i zaokrągla cenę klienta w górę do pełnej złotówki, np. 14,16 + 4,84 = 19 zł oraz 17,58 + 4,42 = 22 zł.
+
+### WYS-026 — Etapy formularza i osobna strona ustawień InPost zmieniają trasę na błędną
+
+- Data zgłoszenia: 2026-08-13
+- Status: naprawiono i objęto testami 2026-08-13
+- Miejsce: formularz nadania → pasek etapów oraz Centrum wysyłek → Ustawienia InPost.
+- Obecne działanie: kliknięcie etapu ustawiało trasę `#inpost-settlement` i otwierało stronę 404, a ustawienia kończyły się błędem `panelUstawienWysylkiInpost is not defined`.
+- Oczekiwane działanie: przyciski etapów przewijają bieżący formularz bez zmiany trasy, a osobne strony ustawień, rejestru i odbioru kuriera mają kompletne, działające widoki.
+
 ### WYS-001 — Brak wyszukiwania adresu po wpisaniu kodu pocztowego
 
 - Data zgłoszenia: 2026-08-13

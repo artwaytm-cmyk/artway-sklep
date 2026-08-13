@@ -8,6 +8,7 @@ import {
   inpostServiceDefaultSettings,
   inpostServicePricePayload,
   inpostServicePricing,
+  inpostServiceRoundedCustomerPrice,
   inpostServiceShipxPayload,
   normalizeInpostServiceContact,
   normalizeInpostServiceDraft,
@@ -219,12 +220,24 @@ test('wycena ShipX korzysta z tego samego szkicu i pokazuje pełny koszt z prowi
     cod_charge_amount: '2.40',
   }], { commissionGross: 4 });
   assert.equal(pricing.totalGross, 18.9);
-  assert.equal(pricing.customerTotalGross, 22.9);
+  assert.equal(pricing.customerTotalGross, 23);
+  assert.equal(pricing.commissionGross, 4.1);
   assert.equal(pricing.breakdown.baseGross, 15);
   assert.equal(pricing.source, 'shipx_calculation');
   const unavailable = inpostServicePricing([{ calculated_charge_amount: null }], { commissionGross: 4 });
   assert.equal(unavailable.available, false);
   assert.equal(unavailable.totalGross, null);
+});
+
+test('pierwszy przedział dopasowuje prowizję 4–5 zł i zawsze daje pełną cenę klienta', () => {
+  assert.deepEqual(inpostServiceRoundedCustomerPrice(14.16), { customerTotalGross: 19, commissionGross: 4.84, minimumGross: 4, maximumGross: 5 });
+  assert.deepEqual(inpostServiceRoundedCustomerPrice(17.58), { customerTotalGross: 22, commissionGross: 4.42, minimumGross: 4, maximumGross: 5 });
+  assert.deepEqual(inpostServiceRoundedCustomerPrice(18), { customerTotalGross: 22, commissionGross: 4, minimumGross: 4, maximumGross: 5 });
+  for (const gross of [5.52, 11.59, 14.16, 15.93, 17.58, 24.55]) {
+    const rounded = inpostServiceRoundedCustomerPrice(gross);
+    assert.equal(Number.isInteger(rounded.customerTotalGross), true);
+    assert.ok(rounded.commissionGross >= 4 && rounded.commissionGross <= 5);
+  }
 });
 
 test('książka adresowa normalizuje jeden kontakt dla roli nadawcy i odbiorcy', () => {
@@ -238,6 +251,43 @@ test('książka adresowa normalizuje jeden kontakt dla roli nadawcy i odbiorcy',
   assert.deepEqual(contact.roles, ['sender', 'receiver']);
   assert.equal(contact.address.post_code, '80-209');
   assert.equal(contact.address.building_number, '8');
+});
+
+test('ustawienia InPost zapisują domyślny sposób nadania, automat i etykietę oraz dają się ponownie odczytać', async () => {
+  const storage = new Map();
+  const route = createInpostServiceShipmentRoute({
+    respond: (body, status = 200) => ({ body, status }),
+    isAdmin: () => true,
+    text: (value, max = 200) => String(value ?? '').slice(0, max),
+    readVersioned: async (key, fallback) => ({ value: storage.has(key) ? storage.get(key) : structuredClone(fallback), version: 1 }),
+    writeIfVersion: async (key, value) => { storage.set(key, structuredClone(value)); return { modified: true }; },
+  });
+  const saveRequest = new Request('http://localhost/api?action=inpost-service-settings', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      commissionGross: 99,
+      defaultDeliveryType: 'locker',
+      defaultSendingMethod: 'parcel_locker',
+      defaultDropoffPoint: 'boj01n',
+      labelDefaultFormat: 'A4',
+      labelOpenMode: 'preview',
+      labelAutoPrint: true,
+      sender,
+    }),
+  });
+  const saved = await route(saveRequest, new URL(saveRequest.url), 'inpost-service-settings');
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.settings.commissionGross, 4);
+  assert.equal(saved.body.settings.defaultDropoffPoint, 'BOJ01N');
+  assert.equal(saved.body.settings.labelDefaultFormat, 'A4');
+  assert.equal(saved.body.settings.labelAutoPrint, true);
+
+  const getRequest = new Request('http://localhost/api?action=inpost-service-settings');
+  const loaded = await route(getRequest, new URL(getRequest.url), 'inpost-service-settings');
+  assert.equal(loaded.status, 200);
+  assert.equal(loaded.body.settings.defaultSendingMethod, 'parcel_locker');
+  assert.equal(loaded.body.settings.sender.address.street, 'Gryfa Pomorskiego');
 });
 
 test('historia transportu scala zdarzenia ShipX, zachowuje starsze wpisy i tłumaczy statusy', () => {
@@ -271,11 +321,11 @@ test('FV miesięczna wymaga firmy i NIP, a Artway-TM fakturuje koszt nadania wra
     sender: base.sender,
     receiver: base.receiver,
     billing: base.billing,
-    pricing: { totalGross: 14.16, customerTotalGross: 18.16, complete: true },
+    pricing: { totalGross: 14.16, commissionGross: 4.84, customerTotalGross: 19, complete: true },
   };
   const payload = inpostServiceInvoicePayload([record], { invoiceDate: '2026-07-23' });
   assert.equal(payload.invoice.services.length, 1);
-  assert.equal(payload.invoice.services[0].gross_price, 1816);
+  assert.equal(payload.invoice.services[0].gross_price, 1900);
   assert.match(payload.invoice.services[0].name, /Nadanie przesyłki InPost/);
   assert.equal(payload.invoice.client_tax_code, '9876543210');
   assert.equal(payload.invoice.client_company_name, 'Nadawca sp. z o.o.');
@@ -299,7 +349,7 @@ test('publiczny rejestr nigdy nie ujawnia ceny ani stawek przewoźnika', () => {
 });
 
 test('podsumowanie miesięczne grupuje pełny koszt klienta, nie tylko prowizję', () => {
-  const common = { sender, receiver, pricing: { totalGross: 14.16, customerTotalGross: 18.16, complete: true }, billing: { mode: 'monthly', status: 'pending', month: '2026-07', clientKey: sender.taxCode, commissionGross: 4 } };
+  const common = { sender, receiver, pricing: { totalGross: 14.16, commissionGross: 4.84, customerTotalGross: 19, complete: true }, billing: { mode: 'monthly', status: 'pending', month: '2026-07', clientKey: sender.taxCode, commissionGross: 4.84 } };
   const summary = summarizeInpostServiceBilling([
     { id: '1', status: 'label_ready', ...common },
     { id: '2', status: 'label_ready', ...common },
@@ -307,12 +357,12 @@ test('podsumowanie miesięczne grupuje pełny koszt klienta, nie tylko prowizję
   ]);
   assert.equal(summary.pendingMonthly, 2);
   assert.equal(summary.carrierPendingGross, 28.32);
-  assert.equal(summary.commissionPendingGross, 8);
+  assert.equal(summary.commissionPendingGross, 9.68);
   assert.equal(summary.groups.length, 1);
   assert.equal(summary.groups[0].count, 2);
   assert.equal(summary.groups[0].clientKey, '9876543210');
   assert.equal(summary.groups[0].carrierGross, 28.32);
-  assert.equal(summary.groups[0].customerTotalGross, 36.32);
+  assert.equal(summary.groups[0].customerTotalGross, 38);
 });
 
 test('cennik umowny ze zrzutu jest nadrzędny wobec innej kwoty zwróconej przez ShipX', () => {
@@ -325,7 +375,8 @@ test('cennik umowny ze zrzutu jest nadrzędny wobec innej kwoty zwróconej przez
   const settings = inpostServiceDefaultSettings();
   const locker = inpostServiceContractPricing(draft(), settings, [{ calculated_charge_amount: '99.99' }]);
   assert.equal(locker.totalGross, 14.16);
-  assert.equal(locker.customerTotalGross, 18.16);
+  assert.equal(locker.customerTotalGross, 19);
+  assert.equal(locker.commissionGross, 4.84);
   assert.equal(locker.source, 'contract_price_list');
   assert.equal(locker.apiComparison.totalGross, 99.99);
   assert.equal(locker.subscription.gross, 369);
@@ -379,8 +430,10 @@ test('panel udostępnia ręczne nadania oraz wspólną kartę rozliczeń inFakt'
   assert.match(shipping, /Potwierdzenie zbiorcze A4/);
   assert.match(shipping, /inpostServiceZastosujZgodnoscTypu/);
   assert.match(shipping, /Automat nadawczy \*/);
-  assert.match(shipping, /Dane są poprawne/);
-  assert.match(shipping, /konta postpaid/);
+  assert.match(shipping, /Cena dopasowana do pełnej kwoty/);
+  assert.match(shipping, /4–5 zł/);
+  assert.match(shipping, /function panelUstawienWysylkiInpost/);
+  assert.match(shipping, /function inpostServicePrzejdzDoEtapu/);
   assert.match(shipping, /inpost-service-postcode/);
   assert.match(shipping, /Kod rozpoznany/);
   assert.match(shipping, /Koszt nadania/);
@@ -522,6 +575,8 @@ test('endpoint wyceny naprawdę wysyła szkic do ShipX, a książka adresowa zap
   const quote = await route(quoteRequest, new URL(quoteRequest.url), 'inpost-service-quote');
   assert.equal(quote.status, 200);
   assert.equal(quote.body.pricing.totalGross, 14.16);
+  assert.equal(quote.body.pricing.customerTotalGross, 19);
+  assert.equal(quote.body.pricing.commissionGross, 4.84);
   assert.equal(quote.body.pricing.apiComparison.totalGross, 16.5);
   assert.equal(calls[0].path, '/v1/organizations/ORG-1/shipments/calculate');
   assert.equal(calls[0].options.bodyObj.shipments[0].custom_attributes.target_point, 'BOJ01N');
@@ -614,6 +669,9 @@ test('endpoint tworzenia przesyłki kurierskiej przekazuje wybrany odbiór przez
   const result = await route(request, new URL(request.url), 'inpost-service-create');
   assert.equal(result.status, 201);
   assert.equal(result.body.item.status, 'label_ready');
+  assert.equal(result.body.item.pricing.customerTotalGross, 22);
+  assert.equal(result.body.item.pricing.commissionGross, 4.42);
+  assert.equal(result.body.item.billing.commissionGross, 4.42);
   const createCall = calls.find((entry) => /\/shipments$/.test(entry.path));
   assert.ok(createCall);
   assert.equal(createCall.options.bodyObj.service, 'inpost_courier_standard');

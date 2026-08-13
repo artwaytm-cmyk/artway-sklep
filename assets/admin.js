@@ -743,10 +743,13 @@ function nawigacjaWysylek(aktywna="zlecenia"){
   const aktywne=pobierzZamowienia().filter(z=>!["dostarczona","anulowana","zwrot"].includes(etapWysylki(z))).length,problemy=pobierzZamowienia().filter(z=>etapWysylki(z)==="problem").length;
   return adminSubnavHTML([
     {id:"zlecenia",href:"#/admin/wysylki",label:"📋 Obsługa zleceń",badge:aktywne||""},
-    {id:"inpost",href:"#/admin/wysylki/inpost",label:"📮 Wysyłka z InPost"},
+    {id:"inpost",href:"#/admin/wysylki/inpost",label:"📮 Nadaj przesyłkę"},
+    {id:"inpost-rejestr",href:"#/admin/wysylki/inpost-rejestr",label:"📚 Rejestr nadań"},
+    {id:"inpost-ustawienia",href:"#/admin/wysylki/inpost-ustawienia",label:"⚙️ Ustawienia InPost"},
+    {id:"odbior-kuriera",href:"#/admin/wysylki/odbior-kuriera",label:"🚚 Odbiór kuriera"},
     {id:"tracking",href:"#/admin/wysylki/tracking",label:"📡 Monitoring i tracking",badge:problemy||""},
     {id:"automatyzacje",href:"#/admin/wysylki/automatyzacje",label:"⚡ Automatyzacje"},
-    {id:"ustawienia",href:"#/admin/wysylki/ustawienia",label:"⚙️ Bramka i ustawienia"}
+    {id:"ustawienia",href:"#/admin/wysylki/ustawienia",label:"🔌 Bramka API"}
   ],aktywna);
 }
 function wysylkiKontekstPodstronyHTML(aktywna="zlecenia"){
@@ -754,6 +757,9 @@ function wysylkiKontekstPodstronyHTML(aktywna="zlecenia"){
   const cfg={
     zlecenia:{icon:"📋",eyebrow:"Realizacja zamówień",title:"Obsługa zleceń InPost",description:"Dane odbiorcy, sposób nadania, etykieta i przekazanie przesyłki w jednym procesie."},
     inpost:{icon:"📮",eyebrow:"Nadania klientów",title:"Wysyłka z InPost",description:"Nadanie, etykieta, tracking i faktura."},
+    "inpost-rejestr":{icon:"📚",eyebrow:"Historia nadań",title:"Rejestr nadań InPost",description:"Tracking, etykiety, potwierdzenia, statusy i rozliczenia utworzonych przesyłek."},
+    "inpost-ustawienia":{icon:"⚙️",eyebrow:"Konfiguracja nadań",title:"Ustawienia InPost",description:"Domyślny sposób nadania, automat, prowizje, cennik i adres nadawcy."},
+    "odbior-kuriera":{icon:"🚚",eyebrow:"Odbiór paczek",title:"Zamów kuriera InPost",description:"Osobna kolejka paczek gotowych do odbioru przez kuriera InPost."},
     tracking:{icon:"📡",eyebrow:"Monitoring przesyłek",title:"Tracking i wyjątki",description:"Numery nadania, zdarzenia InPost, SLA oraz przesyłki wymagające reakcji operatora."},
     automatyzacje:{icon:"⚡",eyebrow:"Reguły operacyjne",title:"Automatyzacje wysyłek",description:"Automatyczne statusy, tracking, e-maile i alarmy czasu nadania."},
     ustawienia:{icon:"⚙️",eyebrow:"Integracja przewoźnika",title:"Bramka InPost i nadawca",description:"Stan API, usługi, dane nadawcy oraz bezpieczna konfiguracja integracji serwerowej."}
@@ -906,9 +912,9 @@ function panelAutomatyzacjiWysylek(){
   </div>`;
 }
 function widokAdminWysylki(sekcja="zlecenia"){
-  const aktywna=["zlecenia","inpost","tracking","automatyzacje","ustawienia"].includes(String(sekcja||""))?String(sekcja):"zlecenia";tabWysylek=aktywna;
-  const widok=aktywna==="inpost"?panelWysylkiUslugowejInpost():aktywna==="tracking"?panelTrackinguWysylek():aktywna==="automatyzacje"?panelAutomatyzacjiWysylek():aktywna==="ustawienia"?panelUstawienBramki():panelZlecenWysylkowych();
-  return adminSzkielet("/admin/wysylki",`<div class="module-page-stack shipping-module-page">${nawigacjaWysylek(aktywna)}${wysylkiKontekstPodstronyHTML(aktywna)}<div class="shipping-workspace section-${esc(aktywna)}">${widok}</div></div>`);
+  const aktywna=["zlecenia","inpost","inpost-rejestr","inpost-ustawienia","odbior-kuriera","tracking","automatyzacje","ustawienia"].includes(String(sekcja||""))?String(sekcja):"zlecenia";tabWysylek=aktywna;
+  const widok=aktywna==="inpost"?panelWysylkiUslugowejInpost():aktywna==="inpost-rejestr"?panelRejestruWysylekInpost():aktywna==="inpost-ustawienia"?panelUstawienWysylkiInpost():aktywna==="odbior-kuriera"?panelOdbioruKurieraInpost():aktywna==="tracking"?panelTrackinguWysylek():aktywna==="automatyzacje"?panelAutomatyzacjiWysylek():aktywna==="ustawienia"?panelUstawienBramki():panelZlecenWysylkowych();
+  return adminSzkielet("/admin/wysylki",`<div class="module-page-stack shipping-module-page shipping-section-${esc(aktywna)}">${nawigacjaWysylek(aktywna)}${wysylkiKontekstPodstronyHTML(aktywna)}<div class="shipping-workspace section-${esc(aktywna)}">${widok}</div></div>`);
 }
 
 let inpostServiceStan={loaded:false,loading:false,saving:false,error:"",items:[],addressBook:[],settings:{commissionGross:4,sender:{}},billing:{groups:[]},serviceAvailability:null,requestId:"",pricing:null};
@@ -947,7 +953,7 @@ async function inpostServiceLaduj(force=false,cicho=true){
     inpostServiceStan={...inpostServiceStan,loaded:true,loading:false,items:Array.isArray(d.items)?d.items:[],addressBook:Array.isArray(d.addressBook)?d.addressBook:[],settings:d.settings||{commissionGross:4,sender:{}},billing:d.billing||{groups:[]},serviceAvailability:d.serviceAvailability||null,error:""};
     if(!inpostServiceStan.requestId)inpostServiceNowyRequestId();
   }catch(e){inpostServiceStan={...inpostServiceStan,loaded:true,loading:false,error:e.message||String(e)};if(!cicho)toast("InPost: "+inpostServiceStan.error);}
-  if(trasa()==="/admin/wysylki/inpost")renderuj();
+  if(trasa().startsWith("/admin/wysylki/inpost")||trasa()==="/admin/wysylki/odbior-kuriera")renderuj();
 }
 const inpostServiceMetodyNadania={
   locker:[
@@ -1596,7 +1602,12 @@ function inpostServiceMozeWycenic(payload){
   return true;
 }
 function inpostServiceWycenaKwota(pricing={}){
+  if(pricing.totalGross==null||String(pricing.totalGross).trim()==="")return null;
   return Number.isFinite(Number(pricing.totalGross))?Number(pricing.totalGross):null;
+}
+function inpostServicePelnaCenaKlienta(totalGross){
+  const carrier=Math.round((Number(totalGross)||0)*100)/100,customer=Math.ceil((carrier+4)-1e-9),commission=Math.round((customer-carrier)*100)/100;
+  return {customerTotalGross:customer,commissionGross:commission,minimumCommissionGross:4,maximumCommissionGross:5};
 }
 function inpostServiceAktualizujWyceneUI(form,pricing=inpostServiceStan.pricing){
   const box=form?.querySelector("[data-inpost-pricing]");if(!box)return;
@@ -1608,15 +1619,15 @@ function inpostServiceAktualizujWyceneUI(form,pricing=inpostServiceStan.pricing)
     box.innerHTML='<div class="inpost-price-empty"><b>Sprawdzam koszt w ShipX…</b><small>Wycena nie tworzy przesyłki.</small></div>';
     return;
   }
-  const total=inpostServiceWycenaKwota(pricing),fee=Math.max(0,Number(form?.commissionGross?.value||pricing.commissionGross||0)||0);
+  const total=inpostServiceWycenaKwota(pricing),rounded=total==null?null:inpostServicePelnaCenaKlienta(total),fee=Number.isFinite(Number(pricing.commissionGross))?Number(pricing.commissionGross):(rounded?.commissionGross||0);
   if(total==null){
     box.innerHTML=`<div class="inpost-price-empty warning"><b>Brak pasującej stawki w cenniku umownym</b><small>${esc(pricing.message||"Uzupełnij właściwą stawkę w cenniku albo podaj pełny koszt ręcznie. ShipX pozostaje wyłącznie kontrolą porównawczą.")}</small></div>`;
     return;
   }
-  const customer=Math.round((total+fee)*100)/100,b=pricing.breakdown||{},source=pricing.source==="manual"?"pełny koszt wpisany ręcznie":"Twój cennik umowny";
+  const customer=Number.isFinite(Number(pricing.customerTotalGross))?Number(pricing.customerTotalGross):rounded.customerTotalGross,b=pricing.breakdown||{},source=pricing.source==="manual"?"pełny koszt wpisany ręcznie":"Twój cennik umowny";
   const api=pricing.apiComparison||{},difference=Number.isFinite(Number(api.differenceGross))?Number(api.differenceGross):null;
   box.innerHTML=`<div class="inpost-price-main"><span><small>Koszt nadania</small><strong>${zl(total)}</strong></span><span><small>Prowizja Artway-TM</small><strong>${zl(fee)}</strong></span><span class="total"><small>Kwota na FV klienta</small><strong>${zl(customer)}</strong></span></div>
-    ${pricing.complete&&!pricing.apiWarning?'<div class="inpost-price-meta"><span class="lvl lvl-ok">Dane są poprawne</span><small>ShipX przyjął dane przesyłki. Rozliczenie korzysta ze stawki umownej konta postpaid.</small></div>':""}
+    ${pricing.complete&&!pricing.apiWarning?'<div class="inpost-price-meta"><span class="lvl lvl-ok">Cena dopasowana do pełnej kwoty</span><small>Prowizja pierwszego przedziału jest automatycznie dobierana w zakresie 4–5 zł.</small></div>':""}
     <div class="inpost-price-meta"><span class="lvl ${pricing.complete?"lvl-ok":"lvl-ostrzezenie"}">${esc(source)}</span><small>${esc(pricing.rateLabel||"stawka indywidualna")}</small>${Number(b.extrasGross)>0?`<small>Dopłaty: ${zl(b.extrasGross)}</small>`:""}<small>Opłata paliwowa: w cenie</small></div>
     ${pricing.complete?"":`<div class="inpost-price-warning"><b>Niepełna wycena opcji dodatkowych:</b> ${esc((pricing.unpricedOptions||[]).join(", ")||"brak stawki")}. Uzupełnij dopłaty w cenniku albo wpisz pełny koszt ręcznie — do tego czasu FV jest zablokowana.</div>`}
     ${pricing.apiWarning?`<div class="inpost-price-warning"><b>Cennik umowny działa, ale ShipX odrzucił kontrolę:</b> ${esc(pricing.apiWarning)}. Popraw wskazane dane przed utworzeniem przesyłki.</div>`:""}
@@ -1645,12 +1656,12 @@ function inpostServiceLokalnaWycena(form){
   if(form?.nonStandard?.checked)selected.push(["Element niestandardowy","nonStandardGross"]);
   form?.querySelectorAll('[name="additionalServices"]:checked').forEach(input=>{const labels={sms:["Powiadomienie SMS","smsGross"],email:["Powiadomienie e-mail","emailGross"],saturday:["Doręczenie w sobotę","saturdayGross"],dor1720:["Doręczenie 17:00–20:00","dor1720Gross"],rod:["Zwrot dokumentów","rodGross"]};if(labels[input.value])selected.push(labels[input.value]);});
   const unpricedOptions=selected.filter(([,key])=>extras[key]==null||extras[key]==="").map(([label])=>label),extrasGross=selected.reduce((sum,[,key])=>sum+(extras[key]==null||extras[key]===""?0:Number(extras[key])||0),0);
-  const totalGross=rate?Math.round((Number(rate.gross||0)+extrasGross)*100)/100:null,fee=Math.max(0,Number(String(form?.commissionGross?.value||0).replace(",","."))||0);
-  return {totalGross,currency:"PLN",source:rate?"contract_price_list":"unavailable",available:totalGross!=null,complete:totalGross!=null&&unpricedOptions.length===0,rateKey,rateLabel:rate?.label||"",contractNet:rate?.net??null,commissionGross:fee,customerTotalGross:totalGross==null?null:Math.round((totalGross+fee)*100)/100,breakdown:{baseGross:rate?.gross??null,extrasGross:Math.round(extrasGross*100)/100,fuelIncluded:true},unpricedOptions,apiComparison:inpostServiceStan.pricing?.apiComparison||{totalGross:null},checkedAt:new Date().toISOString()};
+  const totalGross=rate?Math.round((Number(rate.gross||0)+extrasGross)*100)/100:null,rounded=totalGross==null?null:inpostServicePelnaCenaKlienta(totalGross);
+  return {totalGross,currency:"PLN",source:rate?"contract_price_list":"unavailable",available:totalGross!=null,complete:totalGross!=null&&unpricedOptions.length===0,rateKey,rateLabel:rate?.label||"",contractNet:rate?.net??null,commissionGross:rounded?.commissionGross||0,customerTotalGross:rounded?.customerTotalGross??null,minimumCommissionGross:4,maximumCommissionGross:5,breakdown:{baseGross:rate?.gross??null,extrasGross:Math.round(extrasGross*100)/100,fuelIncluded:true},unpricedOptions,apiComparison:inpostServiceStan.pricing?.apiComparison||{totalGross:null},checkedAt:new Date().toISOString()};
 }
 function inpostServicePrzelicz(form){
-  const manual=Math.max(0,Number(String(form?.carrierCostOverride?.value||"").replace(",","."))||0),fee=Math.max(0,Number(String(form?.commissionGross?.value||0).replace(",","."))||0);
-  if(manual>0)inpostServiceStan.pricing={totalGross:manual,commissionGross:fee,customerTotalGross:Math.round((manual+fee)*100)/100,currency:"PLN",source:"manual",estimated:false,available:true,complete:true,breakdown:{},unpricedOptions:[],apiComparison:{totalGross:null}};
+  const manual=Math.max(0,Number(String(form?.carrierCostOverride?.value||"").replace(",","."))||0),rounded=manual>0?inpostServicePelnaCenaKlienta(manual):null;
+  if(manual>0)inpostServiceStan.pricing={totalGross:manual,commissionGross:rounded.commissionGross,customerTotalGross:rounded.customerTotalGross,minimumCommissionGross:4,maximumCommissionGross:5,currency:"PLN",source:"manual",estimated:false,available:true,complete:true,breakdown:{},unpricedOptions:[],apiComparison:{totalGross:null}};
   else inpostServiceStan.pricing=inpostServiceLokalnaWycena(form);
   inpostServiceAktualizujWyceneUI(form);
 }
@@ -1747,23 +1758,28 @@ function inpostServiceCennikZForm(form){
   return {...current,locker:readGroup("locker",current.locker),courierStandard:(current.courierStandard||[]).map((rate,index)=>({...rate,net:read(`price_courier_${index}_net`,rate.net),gross:read(`price_courier_${index}_gross`,rate.gross)})),courierManager:readGroup("courierManager",current.courierManager),handoff:readGroup("handoff",current.handoff),quickReturns:readGroup("quickReturns",current.quickReturns),extras};
 }
 async function inpostServiceZapiszUstawienia(event){
-  event.preventDefault();const form=event.currentTarget,button=form.querySelector('[type="submit"]'),body={commissionGross:form.commissionGross.value,sender:inpostServiceStronaOsoby(form,"sender"),priceList:inpostServiceCennikZForm(form)};
+  event.preventDefault();const form=event.currentTarget,button=form.querySelector('[type="submit"]'),body={commissionGross:form.commissionGross?.value||4,defaultDeliveryType:form.defaultDeliveryType?.value||"locker",defaultSendingMethod:form.defaultSendingMethod?.value||"parcel_locker",defaultDropoffPoint:form.defaultDropoffPoint?.value||"",labelDefaultFormat:form.labelDefaultFormat?.value||"A6",labelOpenMode:form.labelOpenMode?.value||"preview",labelAutoPrint:form.labelAutoPrint?.checked===true,sender:inpostServiceStronaOsoby(form,"sender"),priceList:inpostServiceCennikZForm(form)};
   if(button){button.disabled=true;button.textContent="Zapisuję cennik…";}
   try{const d=await chmura("inpost-service-settings",{method:"POST",body,timeout:30000});inpostServiceStan.settings=d.settings||inpostServiceStan.settings;inpostServiceStan.pricing=null;toast("Cennik umowny, nadawca i prowizja zapisane ✅");renderuj();}catch(e){toast("Nie zapisano ustawień: "+(e.message||e));}
   finally{if(button){button.disabled=false;button.textContent="Zapisz cennik i ustawienia";}}
 }
+function inpostServicePrzejdzDoEtapu(id){
+  const target=document.getElementById(String(id||""));if(!target)return;
+  target.scrollIntoView({behavior:"smooth",block:"start"});
+  try{target.focus({preventScroll:true});}catch(e){}
+}
 function inpostServiceFormHTML(){
-  const sender=inpostServiceNadawca(),fee=Number(inpostServiceStan.settings?.commissionGross??4),month=new Date().toISOString().slice(0,7),available=inpostServiceStan.serviceAvailability;
+  const sender=inpostServiceNadawca(),settings=inpostServiceStan.settings||{},month=new Date().toISOString().slice(0,7),available=inpostServiceStan.serviceAvailability,defaultDelivery=settings.defaultDeliveryType==="courier"?"courier":"locker",defaultMethod=["parcel_locker","dispatch_order","pop"].includes(settings.defaultSendingMethod)?settings.defaultSendingMethod:"parcel_locker";
   return `<section class="panel inpost-service-create">
     <div class="order-section-head"><div><span class="order-pro-label">Nadanie klienta</span><h2>Utwórz przesyłkę InPost</h2></div><div class="diag-actions"><span class="lvl ${available?.locker?"lvl-ok":"lvl-ostrzezenie"}">Paczkomat ${available?.locker?"aktywny":"sprawdź"}</span><span class="lvl ${available?.courier?"lvl-ok":"lvl-ostrzezenie"}">Kurier ${available?.courier?"aktywny":"sprawdź"}</span></div></div>
     <form id="inpostServiceForm" onsubmit="inpostServiceUtworz(event)" oninput="inpostServiceZaplanujWycene(this)" onchange="inpostServiceZaplanujWycene(this)">
       <input type="hidden" name="requestId" value="${esc(inpostServiceStan.requestId||inpostServiceNowyRequestId())}">
-      <nav class="inpost-process-steps" aria-label="Etapy nadania"><a href="#inpost-delivery"><b>1</b><span>Doręczenie</span></a><a href="#inpost-party-receiver"><b>2</b><span>Odbiorca</span></a><a href="#inpost-shipment-options"><b>3</b><span>Paczka i nadanie</span></a><a href="#inpost-settlement"><b>4</b><span>Koszt i faktura</span></a></nav>
+      <nav class="inpost-process-steps" aria-label="Etapy nadania"><button type="button" onclick="inpostServicePrzejdzDoEtapu('inpost-delivery')"><b>1</b><span>Doręczenie</span></button><button type="button" onclick="inpostServicePrzejdzDoEtapu('inpost-party-receiver')"><b>2</b><span>Odbiorca</span></button><button type="button" onclick="inpostServicePrzejdzDoEtapu('inpost-shipment-options')"><b>3</b><span>Paczka i nadanie</span></button><button type="button" onclick="inpostServicePrzejdzDoEtapu('inpost-settlement')"><b>4</b><span>Koszt i faktura</span></button></nav>
       <div class="inpost-shipment-builder">
         <fieldset id="inpost-delivery"><legend>Sposób doręczenia</legend>
           <div class="inpost-delivery-choice">
-            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="locker" checked onchange="inpostServiceUstawTyp(this.form,this)"><span><b>Paczkomat® 24/7</b><small>Doręczenie do automatu lub PaczkoPunktu</small></span></label>
-            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="courier" onchange="inpostServiceUstawTyp(this.form,this)"><span><b>InPost Kurier</b><small>Doręczenie bezpośrednio pod adres</small></span></label>
+            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="locker" ${defaultDelivery==="locker"?"checked":""} onchange="inpostServiceUstawTyp(this.form,this)"><span><b>Paczkomat® 24/7</b><small>Doręczenie do automatu lub PaczkoPunktu</small></span></label>
+            <label class="inpost-choice-card"><input type="radio" name="deliveryType" value="courier" ${defaultDelivery==="courier"?"checked":""} onchange="inpostServiceUstawTyp(this.form,this)"><span><b>InPost Kurier</b><small>Doręczenie bezpośrednio pod adres</small></span></label>
           </div>
           <div class="inpost-reference-row"><label>Numer referencyjny<input name="reference" required value="USL-${Date.now().toString(36).toUpperCase()}" placeholder="Nazwij swoją przesyłkę"></label><span><b>📒 ${inpostServiceStan.addressBook?.length||0}</b><small>adresów w książce</small></span></div>
         </fieldset>
@@ -1810,19 +1826,19 @@ function inpostServiceFormHTML(){
 
         <fieldset><legend>Sposób nadania</legend>
           <div class="backend-note inpost-method-compatibility" data-inpost-method-compatibility hidden><b>Domyślny Paczkomat nie jest dostępny dla Kuriera Standard.</b> InPost dopuszcza tutaj PaczkoPunkt/POP albo odbiór przez kuriera. Wybierz świadomie jedną z tych metod — formularz nie przełączy jej automatycznie.</div>
-          <div class="inpost-method-choice">${inpostServiceMetodyNadania.locker.map(([value,label])=>`<label class="inpost-method-card" data-inpost-method-card><input type="radio" name="sendingMethod" value="${value}" ${value==="parcel_locker"?"checked":""} onchange="inpostServiceUstawTyp(this.form)"><span><b>${esc(label)}</b><small>${value==="parcel_locker"?"Wybierz automat nadawczy":value==="dispatch_order"?"Odbiór z adresu nadawcy":"Nadaj w obsługiwanym punkcie"}</small></span></label>`).join("")}</div>
-          <div class="inpost-dropoff-panel" data-inpost-dropoff-panel hidden><label><span data-inpost-dropoff-label>Automat nadawczy *</span><div class="inpost-inline"><input id="inpostServiceDropoffPoint" name="dropoffPoint" placeholder="Wybierz automat nadawczy"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape('dropoff')">Mapa</button></div><small data-inpost-dropoff-hint></small></label><div class="inpost-point-search"><input id="inpostServiceDropoffSearch" placeholder="Miasto, kod, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow('dropoff')">Szukaj</button></div><div id="inpostServiceDropoffResults"></div></div>
+          <div class="inpost-method-choice">${inpostServiceMetodyNadania.locker.map(([value,label])=>`<label class="inpost-method-card" data-inpost-method-card><input type="radio" name="sendingMethod" value="${value}" ${value===defaultMethod?"checked":""} onchange="inpostServiceUstawTyp(this.form)"><span><b>${esc(label)}</b><small>${value==="parcel_locker"?"Wybierz automat nadawczy":value==="dispatch_order"?"Odbiór z adresu nadawcy":"Nadaj w obsługiwanym punkcie"}</small></span></label>`).join("")}</div>
+          <div class="inpost-dropoff-panel" data-inpost-dropoff-panel hidden><label><span data-inpost-dropoff-label>Automat nadawczy *</span><div class="inpost-inline"><input id="inpostServiceDropoffPoint" name="dropoffPoint" value="${esc(settings.defaultDropoffPoint||"")}" placeholder="Wybierz automat nadawczy"><button class="btn ghost" type="button" onclick="inpostServiceOtworzMape('dropoff')">Mapa</button></div><small data-inpost-dropoff-hint></small></label><div class="inpost-point-search"><input id="inpostServiceDropoffSearch" placeholder="Miasto, kod, ulica lub kod punktu"><button class="btn ghost" type="button" onclick="inpostServiceSzukajPunktow('dropoff')">Szukaj</button></div><div id="inpostServiceDropoffResults"></div></div>
         </fieldset>
 
         <div class="inpost-options-layout">
         <fieldset class="inpost-billing-card" id="inpost-settlement"><legend>💰 Koszt i faktura Artway‑TM</legend>
-          <div class="inpost-pricing-layout"><div data-inpost-pricing></div><div class="inpost-pricing-controls"><label>Pełny koszt ręczny — tylko awaryjnie<input name="carrierCostOverride" type="number" min="0" step=".01" placeholder="zastępuje cennik umowny"></label><button class="btn ghost" type="button" onclick="inpostServiceWycena(this.form,true)">↻ Przelicz według umowy</button><button class="btn ghost" type="button" onclick="document.querySelector('.inpost-service-settings')?.setAttribute('open','');document.querySelector('.inpost-service-settings')?.scrollIntoView({behavior:'smooth'})">Otwórz cennik</button></div></div>
+          <div class="inpost-pricing-layout"><div data-inpost-pricing></div><div class="inpost-pricing-controls"><label>Pełny koszt ręczny — tylko awaryjnie<input name="carrierCostOverride" type="number" min="0" step=".01" placeholder="zastępuje cennik umowny"></label><button class="btn ghost" type="button" onclick="inpostServiceWycena(this.form,true)">↻ Przelicz według umowy</button><a class="btn ghost" href="#/admin/wysylki/inpost-ustawienia">Otwórz cennik</a></div></div>
           <div class="inpost-settlement-grid">
             <label class="inpost-settlement-option"><input type="radio" name="billingMode" value="none" checked><span><b>Bez faktury</b><small>Tylko nadanie i rejestr kosztu</small></span></label>
             <label class="inpost-settlement-option"><input type="radio" name="billingMode" value="single"><span><b>FV od razu</b><small>Artway‑TM wystawia koszt nadania + prowizję</small></span></label>
             <label class="inpost-settlement-option"><input type="radio" name="billingMode" value="monthly"><span><b>FV miesięczna</b><small>Dopisz całe nadanie do rozliczenia klienta</small></span></label>
           </div>
-          <div class="inpost-form-grid"><label>Miesiąc rozliczenia<input name="billingMonth" type="month" value="${esc(month)}"></label><label>Prowizja Artway‑TM brutto<input name="commissionGross" type="number" min="0" step=".01" value="${esc(fee)}"></label></div>
+          <div class="inpost-form-grid"><label>Miesiąc rozliczenia<input name="billingMonth" type="month" value="${esc(month)}"></label><label>Pierwszy przedział prowizji<input value="4–5 zł" readonly><input name="commissionGross" type="hidden" value="4"><small>Cena końcowa jest zawsze zaokrąglana w górę do pełnej złotówki.</small></label></div>
           <div class="backend-note"><b>FV: Artway‑TM → nadawca.</b> Odbiorca pozostaje wyłącznie stroną doręczenia.</div>
         </fieldset>
       </div>
@@ -1860,12 +1876,38 @@ function inpostServiceMiesieczneHTML(){
   const groups=inpostServiceStan.billing?.groups||[];if(!groups.length)return "";
   return `<section class="panel inpost-monthly-billing"><div class="order-section-head"><div><span class="order-pro-label">Faktury Artway‑TM</span><h2>Rozliczenia miesięczne</h2></div><a class="btn ghost" href="#/admin/infakt/wysylki">Otwórz w inFakt</a></div><div class="inpost-monthly-grid">${groups.map(group=>`<article><div><b>${esc(group.companyName||group.clientKey)}</b><small>${esc(group.month)} • ${group.count} nadań${group.taxCode?` • NIP ${esc(group.taxCode)}`:""}</small><small>Koszt nadań ${zl(group.carrierGross||0)} + prowizja ${zl(group.commissionGross||0)}</small>${group.incompletePrices?`<span class="lvl lvl-ostrzezenie">${group.incompletePrices} niepełnych wycen</span>`:""}</div><strong>${zl(group.customerTotalGross||0)}</strong><button class="btn" ${group.incompletePrices?"disabled title='Najpierw uzupełnij koszty'":""} onclick="inpostServiceFakturaMiesieczna(${jsArg(group.month)},${jsArg(group.clientKey)})">Utwórz FV Artway‑TM</button></article>`).join("")}</div></section>`;
 }
-function panelWysylkiUslugowejInpost(){
+function inpostServicePanelLadowania(){
   if(!inpostServiceStan.loaded&&!inpostServiceStan.loading)setTimeout(()=>inpostServiceLaduj(false,true),0);
-  if(inpostServiceStan.loading&&!inpostServiceStan.loaded)return '<div class="panel"><div class="admin-loading-state">⏳ Pobieram książkę adresową, konfigurację i rejestr nadań…</div></div>';
-  setTimeout(()=>{const form=document.getElementById("inpostServiceForm");inpostServiceUstawTyp(form);inpostServiceAktualizujWyceneUI(form);inpostServiceAdresPodpowiedzi(form,"sender");inpostServiceAdresPodpowiedzi(form,"receiver");},0);
+  if(inpostServiceStan.loading&&!inpostServiceStan.loaded)return '<div class="panel"><div class="admin-loading-state">⏳ Pobieram konfigurację i rejestr InPost…</div></div>';
+  return "";
+}
+function inpostServiceStatystykiHTML(){
   const billing=inpostServiceStan.billing||{};
-  return `<div class="inpost-service-workspace"><section class="inpost-service-stats"><article><span>📦</span><b>${inpostServiceStan.items.length}</b><small>nadań</small></article><article><span>📤</span><b>${inpostServiceAdresy().filter(c=>(c.roles||[]).includes("sender")).length}</b><small>nadawców</small></article><article><span>📥</span><b>${inpostServiceAdresy().filter(c=>(c.roles||[]).includes("receiver")).length}</b><small>odbiorców</small></article><article><span>🧾</span><b>${zl(billing.customerPendingGross||0)}</b><small>do FV miesięcznych</small></article></section>${inpostServiceStan.error?`<div class="backend-note error"><b>Błąd:</b> ${esc(inpostServiceStan.error)}</div>`:""}${inpostServiceFormHTML()}${inpostServiceMiesieczneHTML()}${inpostServiceHistoriaHTML()}<details class="panel inpost-service-settings"><summary>⚙️ Stawki, domyślny nadawca i prowizja</summary><form id="inpostServiceSettingsForm" onsubmit="inpostServiceZapiszUstawienia(event)">${inpostServiceCennikHTML()}${inpostServiceOsobaFields("sender","Stałe dane nadawcy",inpostServiceNadawca())}<div class="inpost-settings-footer"><label>Domyślna prowizja Artway‑TM brutto<input name="commissionGross" type="number" min="0" step=".01" value="${esc(inpostServiceStan.settings?.commissionGross??4)}"></label><button class="btn" type="submit">Zapisz ustawienia</button><a class="btn ghost" href="#/admin/infakt/wysylki">Rozliczenia inFakt</a></div></form></details></div>`;
+  return `<section class="inpost-service-stats"><article><span>📦</span><b>${inpostServiceStan.items.length}</b><small>nadań</small></article><article><span>📤</span><b>${inpostServiceAdresy().filter(c=>(c.roles||[]).includes("sender")).length}</b><small>nadawców</small></article><article><span>📥</span><b>${inpostServiceAdresy().filter(c=>(c.roles||[]).includes("receiver")).length}</b><small>odbiorców</small></article><article><span>🧾</span><b>${zl(billing.customerPendingGross||0)}</b><small>do FV miesięcznych</small></article></section>`;
+}
+function inpostServiceBladHTML(){return inpostServiceStan.error?`<div class="backend-note error"><b>Błąd:</b> ${esc(inpostServiceStan.error)}</div>`:"";}
+function panelRejestruWysylekInpost(){
+  const loading=inpostServicePanelLadowania();if(loading)return loading;
+  return `<div class="inpost-service-workspace">${inpostServiceStatystykiHTML()}${inpostServiceBladHTML()}${inpostServiceMiesieczneHTML()}${inpostServiceHistoriaHTML()}</div>`;
+}
+function inpostServiceUstawieniaGlowneHTML(){
+  const settings=inpostServiceStan.settings||{},delivery=settings.defaultDeliveryType==="courier"?"courier":"locker",method=["parcel_locker","dispatch_order","pop"].includes(settings.defaultSendingMethod)?settings.defaultSendingMethod:"parcel_locker";
+  return `<section class="panel inpost-service-defaults"><div class="order-section-head"><div><span class="order-pro-label">Domyślne wartości</span><h2>Nadanie i etykiety</h2><p class="order-detail-lead">Te ustawienia są używane przy każdym nowym formularzu. Nadal można je zmienić dla konkretnej paczki.</p></div></div><div class="inpost-form-grid"><label>Domyślne doręczenie<select name="defaultDeliveryType"><option value="locker" ${delivery==="locker"?"selected":""}>Paczkomat / PaczkoPunkt</option><option value="courier" ${delivery==="courier"?"selected":""}>Kurier InPost</option></select></label><label>Domyślny sposób nadania<select name="defaultSendingMethod"><option value="parcel_locker" ${method==="parcel_locker"?"selected":""}>Nadanie w Paczkomacie</option><option value="dispatch_order" ${method==="dispatch_order"?"selected":""}>Odbiór przez kuriera</option><option value="pop" ${method==="pop"?"selected":""}>Nadanie w PaczkoPunkcie</option></select></label><label>Domyślny automat nadawczy<input name="defaultDropoffPoint" value="${esc(settings.defaultDropoffPoint||"")}" placeholder="np. BOJ01N"></label><label>Domyślny format etykiety<select name="labelDefaultFormat"><option value="A6" ${settings.labelDefaultFormat!=="A4"?"selected":""}>A6 — drukarka etykiet</option><option value="A4" ${settings.labelDefaultFormat==="A4"?"selected":""}>A4 — Brother</option></select></label><label>Otwieranie etykiety<select name="labelOpenMode"><option value="preview" ${settings.labelOpenMode!=="browser"?"selected":""}>Podgląd przed drukiem</option><option value="browser" ${settings.labelOpenMode==="browser"?"selected":""}>Nowa karta PDF</option></select></label><label class="check"><input name="labelAutoPrint" type="checkbox" ${settings.labelAutoPrint===true?"checked":""}> Otwieraj okno drukowania automatycznie</label></div></section>`;
+}
+function panelUstawienWysylkiInpost(){
+  const loading=inpostServicePanelLadowania();if(loading)return loading;
+  return `<div class="inpost-service-workspace">${inpostServiceBladHTML()}<form id="inpostServiceSettingsForm" class="inpost-service-settings-page" onsubmit="inpostServiceZapiszUstawienia(event)">${inpostServiceUstawieniaGlowneHTML()}<section class="panel">${inpostServiceCennikHTML()}</section><section class="panel">${inpostServiceOsobaFields("sender","Stałe dane nadawcy",inpostServiceNadawca())}</section><div class="panel inpost-settings-footer"><label>Pierwszy przedział prowizji<input value="4–5 zł" readonly><input name="commissionGross" type="hidden" value="4"><small>Cena końcowa jest zawsze zaokrąglana w górę do pełnej złotówki.</small></label><button class="btn" type="submit">💾 Zapisz ustawienia InPost</button></div></form></div>`;
+}
+function panelOdbioruKurieraInpost(){
+  const loading=inpostServicePanelLadowania();if(loading)return loading;
+  const active=(inpostServiceStan.items||[]).filter(item=>item.labelReady&&item.status!=="cancelled"),waiting=active.filter(item=>!item.pickup?.id),booked=active.filter(item=>item.pickup?.id);
+  const rows=items=>items.map(item=>`<tr><td data-label="Nadanie"><b>${esc(item.reference||item.id)}</b><br><small>${esc(item.trackingNumber||"")}</small></td><td data-label="Nadawca"><b>${esc(inpostServiceNazwaKontaktu(item.sender))}</b><br><small>${esc(inpostServiceAdresKsiazki(item.sender))}</small></td><td data-label="Paczka">${item.deliveryType==="courier"?"Kurier":"Paczkomat"} • ${esc(item.parcel?.template||"")} • ${esc(item.parcel?.weight||1)} kg</td><td data-label="Odbiór">${item.pickup?.id?`<span class="lvl lvl-ok">zlecony</span><br><small>${esc(item.pickup.status||item.pickup.id)}</small>`:`<button class="btn" type="button" onclick="inpostServiceOdbior(${jsArg(item.id)})">🚚 Zamów kuriera</button>`}</td></tr>`).join("");
+  return `<div class="inpost-service-workspace">${inpostServiceBladHTML()}<section class="panel"><div class="order-section-head"><div><span class="order-pro-label">Gotowe etykiety</span><h2>Paczki do zgłoszenia kurierowi</h2><p class="order-detail-lead">Kliknięcie „Zamów kuriera” wysyła osobne zlecenie odbioru do InPost dopiero dla wybranej paczki.</p></div><button class="btn ghost" type="button" onclick="inpostServiceLaduj(true,false)">↻ Odśwież</button></div><div class="warehouse-worktable-wrap"><table class="log-table admin-responsive-table"><thead><tr><th>Nadanie</th><th>Nadawca</th><th>Paczka</th><th>Odbiór</th></tr></thead><tbody>${rows(waiting)||'<tr><td colspan="4">Brak paczek oczekujących na zlecenie odbioru.</td></tr>'}</tbody></table></div></section>${booked.length?`<section class="panel"><h2>Odbiory już zlecone</h2><div class="warehouse-worktable-wrap"><table class="log-table admin-responsive-table"><thead><tr><th>Nadanie</th><th>Nadawca</th><th>Paczka</th><th>Odbiór</th></tr></thead><tbody>${rows(booked)}</tbody></table></div></section>`:""}</div>`;
+}
+function panelWysylkiUslugowejInpost(){
+  const loading=inpostServicePanelLadowania();if(loading)return loading;
+  setTimeout(()=>{const form=document.getElementById("inpostServiceForm");inpostServiceUstawTyp(form);inpostServiceAktualizujWyceneUI(form);inpostServiceAdresPodpowiedzi(form,"sender");inpostServiceAdresPodpowiedzi(form,"receiver");},0);
+  return `<div class="inpost-service-workspace">${inpostServiceStatystykiHTML()}${inpostServiceBladHTML()}${inpostServiceFormHTML()}${inpostServiceMiesieczneHTML()}</div>`;
 }
 
 (function uruchomResponsywnyPanelAdmina(){

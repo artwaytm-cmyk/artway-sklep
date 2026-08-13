@@ -713,6 +713,9 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
   await expect(page.getByRole('heading', { name: 'Wysyłka z InPost', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Utwórz przesyłkę InPost', exact: true })).toBeVisible();
   await expect(page.locator('#inpostServiceForm')).toBeVisible();
+  await page.getByRole('button', { name: /Koszt i faktura/ }).click();
+  await expect(page).toHaveURL(/#\/admin\/wysylki\/inpost$/);
+  await expect(page.locator('#inpost-settlement')).toBeVisible();
   await expect(page.locator('#inpostServiceForm').getByRole('button', { name: /Wybierz z książki/ })).toHaveCount(2);
   await expect(page.getByRole('button', { name: 'Przelicz według umowy' })).toBeVisible();
   await expect(page.getByText('FV: Artway‑TM → nadawca.')).toBeVisible();
@@ -804,6 +807,10 @@ test('Centrum wysyłki udostępnia książkę adresową i wycenę InPost przed n
   const workspace = page.locator('.admin-workspace-content[data-admin-layout="unified-v2"]');
   const dimensions = await workspace.evaluate((element) => ({ width: element.clientWidth, content: element.scrollWidth }));
   expect(dimensions.content).toBeLessThanOrEqual(dimensions.width + 1);
+  await page.goto('/#/admin/wysylki/inpost-ustawienia');
+  await expect(page.getByRole('heading', { name: 'Ustawienia InPost', exact: true })).toBeVisible();
+  await expect(page.locator('#inpostServiceSettingsForm')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Zapisz ustawienia InPost/ })).toBeVisible();
   assertRuntime();
 });
 

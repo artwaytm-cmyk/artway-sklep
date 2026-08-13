@@ -34,7 +34,7 @@ async function inpostServiceLaduj(force=false,cicho=true){
     inpostServiceStan={...inpostServiceStan,loaded:true,loading:false,items:Array.isArray(d.items)?d.items:[],addressBook:Array.isArray(d.addressBook)?d.addressBook:[],settings:d.settings||{commissionGross:4,sender:{}},billing:d.billing||{groups:[]},serviceAvailability:d.serviceAvailability||null,error:""};
     if(!inpostServiceStan.requestId)inpostServiceNowyRequestId();
   }catch(e){inpostServiceStan={...inpostServiceStan,loaded:true,loading:false,error:e.message||String(e)};if(!cicho)toast("InPost: "+inpostServiceStan.error);}
-  if(trasa()==="/admin/wysylki/inpost")renderuj();
+  if(trasa().startsWith("/admin/wysylki/inpost")||trasa()==="/admin/wysylki/odbior-kuriera")renderuj();
 }
 const inpostServiceMetodyNadania={
   locker:[
